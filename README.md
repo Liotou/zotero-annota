@@ -1,105 +1,105 @@
 # Annota (Zotero 7 / 8 / 9)
 
-**Annota automatise un prompt sur chaque surlignage : le texte que vous
-surlignez dans le lecteur PDF est envoyé à un LLM, et la réponse devient le
-commentaire de l'annotation** — à la volée, dès la création du surlignage.
+**Annota automates a prompt on every highlight: the text you highlight in the
+PDF reader is sent to an LLM, and the response becomes the annotation's
+comment** — on the fly, as soon as the highlight is created.
 
-Le prompt est entièrement à vous. Résumé, explication, traduction, extraction
-de points clés, note académique formatée… vous décidez de ce que produit le
-modèle. Des **modèles prédéfinis** sont fournis pour démarrer, et fonctionnent
-avec Mistral (par défaut) ou tout endpoint compatible OpenAI.
+The prompt is entirely yours. Summaries, plain-language explanations,
+translations, key-point extraction, formatted academic notes… you decide what
+the model produces. **Built-in presets** are provided to get started, and it
+works with Mistral (default) or any OpenAI-compatible endpoint.
 
-### Exemple : le modèle « Note académique » (fourni par défaut)
+### Example: the "Academic note" preset (shipped as the default)
 
 ```
-<b>Titre.</b>
-Paraphrase concise (2 à 5 phrases, ~80 mots max).
-<i>(Auteur, année, p.XX ; Auteur2, année)</i>
+<b>Title.</b>
+Concise paraphrase (2 to 5 sentences, ~80 words max).
+<i>(Author, year, p.XX ; Author2, year)</i>
 ```
 
-La 3ᵉ ligne (références) n'apparaît que si le passage cite explicitement des
-sources ; un numéro de page présent dans le passage (« Moulin, 1999, p.93 ») est
-repris tel quel. Ce n'est qu'un modèle : remplacez-le par le vôtre à tout moment.
+The third line (references) appears only if the passage explicitly cites
+sources; a page number present in the passage ("Moulin, 1999, p.93") is kept
+as-is. This is just one preset — replace it with your own at any time.
 
 ## Installation
 
-1. Construire le paquet :
+1. Build the package:
    ```bash
    ./build.sh
    ```
-   (ou zippez `manifest.json`, `bootstrap.js`, `prefs.js`, `preferences.xhtml`,
-   `preferences.js` à la racine d'un `.zip`, puis renommez-le en `.xpi`).
-2. Zotero → **Outils → Modules complémentaires** → engrenage ⚙️ →
-   **Install Add-on From File…** → choisir `annota.xpi`.
-3. Redémarrer Zotero si demandé.
+   (or zip `manifest.json`, `bootstrap.js`, `prefs.js`, `preferences.xhtml`,
+   `preferences.js` at the root of a `.zip`, then rename it to `.xpi`).
+2. In Zotero → **Tools → Add-ons** → gear ⚙️ →
+   **Install Add-on From File…** → select `annota.xpi`.
+3. Restart Zotero if prompted.
 
-Vous pouvez aussi télécharger le `.xpi` directement depuis la page
-[Releases](../../releases).
+You can also download the `.xpi` directly from the
+[Releases](../../releases) page.
 
 ## Configuration
 
-**Modules complémentaires → Annota**, ou **Préférences → Annota** :
+**Add-ons → Annota**, or **Preferences → Annota**:
 
-### Général
-- **Activer la génération automatique** — coupe/active tout le plugin.
-- **Traiter aussi les soulignements** — par défaut, seuls les surlignages
-  (`highlight`) déclenchent la génération ; cette case ajoute `underline`.
-- **Écraser un commentaire déjà présent** — désactivé par défaut.
-- **⏳ pendant la génération** — indicateur affiché le temps de l'appel réseau.
+### General
+- **Enable automatic generation** — master on/off switch.
+- **Also process underlines** — by default only highlights (`highlight`) trigger
+  generation; this adds `underline`.
+- **Overwrite an existing comment** — off by default (already-commented
+  annotations are never touched).
+- **⏳ while generating** — shows an indicator during the network call.
 
-### Connexion à l'API
-- **Clé API** — Mistral par défaut (obtenez-la sur https://console.mistral.ai).
-- **Modèle** — `mistral-large-latest` par défaut.
-- **Endpoint** — URL de l'API (chat/completions, compatible OpenAI). Modifiable
-  pour un proxy ou un autre fournisseur compatible.
-- **Température** — 0 à 2 ; plus bas = plus déterministe (défaut 0.2).
+### API connection
+- **API key** — Mistral by default (get one at https://console.mistral.ai).
+- **Model** — `mistral-large-latest` by default.
+- **Endpoint** — API URL (chat/completions, OpenAI-compatible). Change it for a
+  proxy or another compatible provider.
+- **Temperature** — 0 to 2; lower = more deterministic (default 0.2).
 
-### Génération du texte
-- **Langue de sortie** — disponible dans le prompt via `{{language}}`.
-- **Longueur max.** — disponible via `{{maxWords}}`.
+### Text generation
+- **Output language** — available in the prompt via `{{language}}`.
+- **Max length** — available via `{{maxWords}}`.
 
 ### Prompt
-Le champ de prompt est le cœur d'Annota. Un menu **« Insérer un modèle »**
-propose des points de départ (note académique, résumé, explication simple,
-points clés, traduction) ; sélectionner un modèle remplit le champ, que vous
-pouvez ensuite modifier librement. **« Restaurer le modèle par défaut »** revient
-au modèle académique.
+The prompt field is the heart of Annota. An **"Insert a preset"** menu offers
+starting points (academic note, summary, plain-language explanation, key points,
+translation); selecting a preset fills the field, which you can then edit
+freely. **"Restore default preset"** brings back the academic preset.
 
-**Variables** remplacées au moment de l'appel :
+**Variables** substituted at call time:
 
-| Variable | Contenu |
+| Variable | Content |
 |---|---|
-| `{{text}}` | le texte surligné |
-| `{{title}}` | titre du document source |
-| `{{authors}}` | auteurs du document source |
-| `{{year}}` | année du document source |
-| `{{maxWords}}` | réglage « longueur max » |
-| `{{language}}` | réglage « langue de sortie » |
+| `{{text}}` | the highlighted text |
+| `{{title}}` | title of the source document |
+| `{{authors}}` | authors of the source document |
+| `{{year}}` | year of the source document |
+| `{{maxWords}}` | the "max length" setting |
+| `{{language}}` | the "output language" setting |
 
-Deux modes selon le prompt :
-- **Standard** (pas de `{{text}}`) — votre prompt sert d'instructions, et le texte
-  surligné est ajouté automatiquement comme message utilisateur.
-- **Avancé** (le prompt contient `{{text}}`) — le prompt est envoyé tel quel, vous
-  contrôlez intégralement la structure de la requête.
+Two modes depending on the prompt:
+- **Standard** (no `{{text}}`) — your prompt acts as instructions, and the
+  highlighted text is appended automatically as the user message.
+- **Advanced** (the prompt contains `{{text}}`) — the prompt is sent as-is; you
+  fully control the structure of the request.
 
-## Fonctionnement
+## How it works
 
-- Écoute l'événement `add` du notifier Zotero sur les items de type annotation.
-- Ne traite que `annotationType` = `highlight` (+ `underline` si activé), avec
-  un texte non vide.
-- Envoie le texte au prompt configuré, puis écrit la réponse dans
-  `annotationComment`. Le lecteur se met à jour seul.
-- Écrire le commentaire déclenche un événement `modify` (pas `add`), donc pas de
-  boucle. Une annotation déjà commentée (y compris synchronisée depuis un autre
-  appareil) n'est pas régénérée.
+- Listens to the `add` event of Zotero's notifier on annotation items.
+- Processes only `annotationType` = `highlight` (+ `underline` if enabled), with
+  non-empty text.
+- Sends the text to the configured prompt, then writes the response into
+  `annotationComment`. The reader updates on its own.
+- Writing the comment triggers a `modify` event (not `add`), so there is no
+  loop. An already-commented annotation (including one synced from another
+  device) is not regenerated.
 
-## Sécurité
+## Security
 
-La clé API est stockée **en clair** dans les préférences du profil Zotero
-(`extensions.zotero.annota.apiKey`). Ne partagez pas votre profil.
+The API key is stored **in plain text** in the Zotero profile's preferences
+(`extensions.zotero.annota.apiKey`). Do not share your profile.
 
-## Développement
+## Development
 
-- Modèles de prompts et prompt par défaut : `bootstrap.js` → `Annota.PRESETS`.
-- Déclenchement / filtrage des annotations : `bootstrap.js` → `handleItem()`.
-- Construction de la requête (variables, modes) : `bootstrap.js` → `buildMessages()`.
+- Prompt presets and default prompt: `bootstrap.js` → `Annota.PRESETS`.
+- Annotation triggering / filtering: `bootstrap.js` → `handleItem()`.
+- Request building (variables, modes): `bootstrap.js` → `buildMessages()`.
