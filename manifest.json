@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
   "name": "Annota",
-  "version": "1.2.0",
-  "description": "Remplit automatiquement le commentaire des surlignages du lecteur PDF avec une note formatée (titre en gras, paraphrase, références) générée par une API LLM (Mistral par défaut, ou tout endpoint compatible OpenAI).",
+  "version": "1.2.1",
+  "description": "Runs a configurable AI prompt on every highlight you create in the PDF reader, and writes the reply into the annotation's comment. Works with Mistral or any OpenAI-compatible endpoint.",
   "author": "elliotquiriconi",
   "applications": {
     "zotero": {
