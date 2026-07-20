@@ -36,6 +36,12 @@ as-is. This is just one preset — replace it with your own at any time.
 You can also download the `.xpi` directly from the
 [Releases](../../releases) page.
 
+### Automatic updates
+
+Annota checks GitHub for new versions and updates itself — no manual
+reinstall. Zotero polls periodically; you can also force a check via
+**Tools → Add-ons → gear ⚙️ → Check for Updates**.
+
 ## Configuration
 
 **Add-ons → Annota**, or **Preferences → Annota**:
@@ -59,6 +65,15 @@ You can also download the `.xpi` directly from the
 - **Output language** — available in the prompt via `{{language}}`.
 - **Max length** — available via `{{maxWords}}`.
 
+### Document context
+- **Send document context to the AI** — when enabled (default), the title,
+  authors, year, publication, page and **abstract** of the source reference are
+  sent along with the highlighted text. This helps the model situate the
+  passage and resolve acronyms or ambiguous references. Empty fields are
+  omitted.
+- **Max abstract length** — abstracts are truncated to limit token usage
+  (default 1200 characters; set 0 for no truncation).
+
 ### Prompt
 The prompt field is the heart of Annota. An **"Insert a preset"** menu offers
 starting points (academic note, summary, plain-language explanation, key points,
@@ -73,12 +88,16 @@ freely. **"Restore default preset"** brings back the academic preset.
 | `{{title}}` | title of the source document |
 | `{{authors}}` | authors of the source document |
 | `{{year}}` | year of the source document |
+| `{{abstract}}` | abstract of the source document (truncated per settings) |
+| `{{publication}}` | journal / book / proceedings |
+| `{{page}}` | page of the highlighted passage |
 | `{{maxWords}}` | the "max length" setting |
 | `{{language}}` | the "output language" setting |
 
 Two modes depending on the prompt:
 - **Standard** (no `{{text}}`) — your prompt acts as instructions, and the
-  highlighted text is appended automatically as the user message.
+  highlighted text is appended automatically as the user message, preceded by
+  the document context block if that option is enabled.
 - **Advanced** (the prompt contains `{{text}}`) — the prompt is sent as-is; you
   fully control the structure of the request.
 
@@ -102,4 +121,17 @@ The API key is stored **in plain text** in the Zotero profile's preferences
 
 - Prompt presets and default prompt: `bootstrap.js` → `Annota.PRESETS`.
 - Annotation triggering / filtering: `bootstrap.js` → `handleItem()`.
+- Source metadata lookup: `bootstrap.js` → `getContext()`.
 - Request building (variables, modes): `bootstrap.js` → `buildMessages()`.
+
+### Releasing
+
+Bump `"version"` in `manifest.json`, then run:
+
+```bash
+./release.sh
+```
+
+It builds the `.xpi`, computes its SHA-256, regenerates `updates.json`, pushes,
+and creates the GitHub release. The hash in `updates.json` **must** match the
+released `.xpi` or Zotero will refuse the update — hence the script.

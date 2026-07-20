@@ -7,6 +7,9 @@ pref("extensions.zotero.annota.overwrite", false);
 pref("extensions.zotero.annota.showPlaceholder", true);
 pref("extensions.zotero.annota.alsoUnderline", false);
 pref("extensions.zotero.annota.maxWords", 80);
+// Transmettre le contexte du document (titre, auteurs, année, revue, résumé, page).
+pref("extensions.zotero.annota.sendContext", true);
+pref("extensions.zotero.annota.maxAbstractChars", 1200);
 pref("extensions.zotero.annota.language", "français");
 pref("extensions.zotero.annota.temperature", "0.2");
 // Vide = utilise le prompt par défaut intégré (Annota.DEFAULT_PROMPT).

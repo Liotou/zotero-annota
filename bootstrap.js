@@ -44,12 +44,15 @@ Annota = {
 	// Modèles de prompts prêts à l'emploi, proposés dans les préférences.
 	// L'utilisateur peut en choisir un, le modifier, ou écrire le sien.
 	// Variables substituées à l'exécution :
-	//   {{text}}     texte surligné (voir buildMessages pour le mode avancé)
-	//   {{title}}    titre du document source
-	//   {{authors}}  auteurs du document source (noms, séparés par des virgules)
-	//   {{year}}     année du document source
-	//   {{maxWords}} réglage « longueur max »
-	//   {{language}} réglage « langue de sortie »
+	//   {{text}}        texte surligné (voir buildMessages pour le mode avancé)
+	//   {{title}}       titre du document source
+	//   {{authors}}     auteurs du document source (noms, séparés par des virgules)
+	//   {{year}}        année du document source
+	//   {{abstract}}    résumé du document source (tronqué selon les préférences)
+	//   {{publication}} revue / ouvrage / actes
+	//   {{page}}        page du passage surligné
+	//   {{maxWords}}    réglage « longueur max »
+	//   {{language}}    réglage « langue de sortie »
 	PRESETS: [
 		{
 			id: "academic",
@@ -234,16 +237,40 @@ Annota = {
 		}
 	},
 
-	// Métadonnées du document source (pour les variables {{title}}, {{authors}}, {{year}}).
+	// Tronque une chaîne à `max` caractères (0/absent = pas de limite).
+	truncate(s, max) {
+		s = String(s || "").trim();
+		if (!max || s.length <= max) return s;
+		return s.slice(0, max).trim() + "…";
+	},
+
+	// Métadonnées du document source, pour les variables {{title}}, {{authors}},
+	// {{year}}, {{abstract}}, {{publication}}, {{page}}.
 	getContext(item) {
-		let ctx = { title: "", authors: "", year: "" };
+		let ctx = {
+			title: "", authors: "", year: "",
+			abstract: "", publication: "", page: ""
+		};
 		try {
+			// Page de l'annotation (telle qu'affichée dans le PDF).
+			ctx.page = item.annotationPageLabel || "";
+
 			let parent = item.parentItem;               // pièce jointe (PDF)
 			let top = (parent && parent.parentItem) ? parent.parentItem : parent;
 			if (top && typeof top.getField === "function") {
 				ctx.title = top.getField("title") || "";
+				ctx.publication = top.getField("publicationTitle")
+					|| top.getField("bookTitle")
+					|| top.getField("proceedingsTitle")
+					|| "";
+
+				let maxAbs = parseInt(getPref("maxAbstractChars", 1200), 10);
+				if (isNaN(maxAbs)) maxAbs = 1200;
+				ctx.abstract = this.truncate(top.getField("abstractNote") || "", maxAbs);
+
 				let ym = String(top.getField("date") || "").match(/\d{4}/);
 				if (ym) ctx.year = ym[0];
+
 				let creators = (typeof top.getCreators === "function") ? top.getCreators() : [];
 				ctx.authors = creators
 					.map(c => c.lastName || c.name || "")
@@ -255,6 +282,18 @@ Annota = {
 			log("getContext: " + e);
 		}
 		return ctx;
+	},
+
+	// Bloc de contexte lisible, transmis à l'IA en mode standard.
+	formatContextBlock(vars) {
+		let lines = [];
+		if (vars.title) lines.push("Titre : " + vars.title);
+		if (vars.authors) lines.push("Auteurs : " + vars.authors);
+		if (vars.year) lines.push("Année : " + vars.year);
+		if (vars.publication) lines.push("Publication : " + vars.publication);
+		if (vars.page) lines.push("Page du passage : " + vars.page);
+		if (vars.abstract) lines.push("Résumé du document : " + vars.abstract);
+		return lines.length ? "Contexte du document :\n" + lines.join("\n") : "";
 	},
 
 	// Remplace {{variable}} par sa valeur (chaîne vide si inconnue).
@@ -272,6 +311,9 @@ Annota = {
 			title: (ctx && ctx.title) || "",
 			authors: (ctx && ctx.authors) || "",
 			year: (ctx && ctx.year) || "",
+			abstract: (ctx && ctx.abstract) || "",
+			publication: (ctx && ctx.publication) || "",
+			page: (ctx && ctx.page) || "",
 			maxWords: parseInt(getPref("maxWords", 80), 10) || 80,
 			language: String(getPref("language", "français")).trim() || "français"
 		};
@@ -282,10 +324,18 @@ Annota = {
 			return [{ role: "user", content: this.substitute(tpl, vars) }];
 		}
 
-		// Mode standard : instructions en message système, passage en message utilisateur.
+		// Mode standard : instructions en message système, passage (précédé du
+		// contexte du document si activé) en message utilisateur.
+		let parts = [];
+		if (getPref("sendContext", true)) {
+			let block = this.formatContextBlock(vars);
+			if (block) parts.push(block);
+		}
+		parts.push("Passage surligné :\n\"\"\"\n" + text + "\n\"\"\"");
+
 		return [
 			{ role: "system", content: this.substitute(tpl, vars) },
-			{ role: "user", content: "Passage surligné :\n\"\"\"\n" + text + "\n\"\"\"" }
+			{ role: "user", content: parts.join("\n\n") }
 		];
 	},
 

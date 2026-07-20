@@ -85,6 +85,34 @@
   </groupbox>
 
   <groupbox>
+    <label><html:h2>Contexte du document</html:h2></label>
+    <hbox align="center">
+      <checkbox label="Transmettre le contexte du document à l'IA (titre, auteurs, année, revue, résumé, page)"
+                preference="extensions.zotero.annota.sendContext"
+                native="true"/>
+    </hbox>
+    <grid>
+      <columns>
+        <column/>
+        <column flex="1"/>
+      </columns>
+      <rows>
+        <row align="center">
+          <label value="Longueur max. du résumé transmis (caractères) :" control="annota-maxabstract"/>
+          <html:input id="annota-maxabstract" type="number" min="0" max="10000" step="100"
+                      style="width: 7em;"
+                      preference="extensions.zotero.annota.maxAbstractChars"/>
+        </row>
+      </rows>
+    </grid>
+    <description style="max-width: 46em; opacity: 0.8;">
+      Aide le modèle à situer le passage (utile pour lever les ambiguïtés et les
+      acronymes). Les champs vides sont omis. Le résumé est tronqué pour limiter
+      la consommation de jetons — mettez 0 pour ne pas le tronquer.
+    </description>
+  </groupbox>
+
+  <groupbox>
     <label><html:h2>Prompt</html:h2></label>
     <description style="max-width: 46em; opacity: 0.8;">
       C'est le cœur d'Annota : le texte surligné est soumis à ce prompt, et la
@@ -112,10 +140,13 @@
       Variables remplacées au moment de l'appel :
       <html:code>{{text}}</html:code> (texte surligné),
       <html:code>{{title}}</html:code>, <html:code>{{authors}}</html:code>,
-      <html:code>{{year}}</html:code> (document source),
-      <html:code>{{maxWords}}</html:code>, <html:code>{{language}}</html:code>.
+      <html:code>{{year}}</html:code>, <html:code>{{abstract}}</html:code>,
+      <html:code>{{publication}}</html:code>, <html:code>{{page}}</html:code>
+      (document source), <html:code>{{maxWords}}</html:code>,
+      <html:code>{{language}}</html:code>.
       Si le prompt contient <html:code>{{text}}</html:code>, il est envoyé tel
-      quel (contrôle total) ; sinon, le texte surligné est ajouté automatiquement.
+      quel (contrôle total) ; sinon, le texte surligné est ajouté automatiquement,
+      précédé du contexte du document si l'option ci-dessus est activée.
     </description>
   </groupbox>
 

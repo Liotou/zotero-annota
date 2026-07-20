@@ -1,13 +1,13 @@
 {
   "manifest_version": 2,
   "name": "Annota",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Remplit automatiquement le commentaire des surlignages du lecteur PDF avec une note formatée (titre en gras, paraphrase, références) générée par une API LLM (Mistral par défaut, ou tout endpoint compatible OpenAI).",
   "author": "elliotquiriconi",
   "applications": {
     "zotero": {
       "id": "annota@equiriconi",
-      "update_url": "https://example.com/annota/updates.json",
+      "update_url": "https://raw.githubusercontent.com/Liotou/zotero-annota/main/updates.json",
       "strict_min_version": "7.0",
       "strict_max_version": "9.*"
     }

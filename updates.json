@@ -1,0 +1,19 @@
+{
+  "addons": {
+    "annota@equiriconi": {
+      "updates": [
+        {
+          "version": "1.1.0",
+          "update_link": "https://github.com/Liotou/zotero-annota/releases/download/v1.1.0/annota.xpi",
+          "update_hash": "sha256:c6ecb9840e8cc7226a82719ec97446afc60e0f3bba6ccdb8ab6896f6090179b1",
+          "applications": {
+            "zotero": {
+              "strict_min_version": "7.0",
+              "strict_max_version": "9.*"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
