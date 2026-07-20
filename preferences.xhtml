@@ -85,20 +85,38 @@
   </groupbox>
 
   <groupbox>
-    <label><html:h2>Prompt système</html:h2></label>
+    <label><html:h2>Prompt</html:h2></label>
     <description style="max-width: 46em; opacity: 0.8;">
-      Contrôle intégral du format de sortie. Jetons disponibles :
-      <html:code>{{maxWords}}</html:code> et <html:code>{{language}}</html:code>
-      (remplacés par les réglages ci-dessus au moment de l'appel). Laisser vide
-      pour utiliser le prompt par défaut de l'extension.
+      C'est le cœur d'Annota : le texte surligné est soumis à ce prompt, et la
+      réponse du modèle devient le commentaire de l'annotation. Écrivez ce que
+      vous voulez — le format académique n'est qu'un modèle parmi d'autres.
     </description>
-    <html:textarea id="annota-prompt" rows="18"
+
+    <hbox align="center" style="margin-top: 6px;">
+      <label value="Insérer un modèle :"/>
+      <html:select id="annota-preset" style="min-width: 22em;">
+        <html:option value="">— choisir un modèle prédéfini —</html:option>
+      </html:select>
+    </hbox>
+
+    <html:textarea id="annota-prompt" rows="16"
                     style="width: 100%; font-family: monospace; font-size: 12px; margin-top: 6px;"/>
+
     <hbox style="margin-top: 6px;">
-      <button id="annota-prompt-reset" label="Réinitialiser au prompt par défaut"/>
+      <button id="annota-prompt-reset" label="Restaurer le modèle par défaut"/>
       <spacer flex="1"/>
       <label id="annota-prompt-status" value="" style="opacity: 0.7;"/>
     </hbox>
+
+    <description style="max-width: 46em; opacity: 0.8; margin-top: 6px;">
+      Variables remplacées au moment de l'appel :
+      <html:code>{{text}}</html:code> (texte surligné),
+      <html:code>{{title}}</html:code>, <html:code>{{authors}}</html:code>,
+      <html:code>{{year}}</html:code> (document source),
+      <html:code>{{maxWords}}</html:code>, <html:code>{{language}}</html:code>.
+      Si le prompt contient <html:code>{{text}}</html:code>, il est envoyé tel
+      quel (contrôle total) ; sinon, le texte surligné est ajouté automatiquement.
+    </description>
   </groupbox>
 
   <groupbox>

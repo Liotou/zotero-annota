@@ -1,9 +1,21 @@
 /* eslint-disable no-undef */
-// Script du panneau de préférences : gère le textarea du prompt système
-// (pas de binding "preference" natif pour <textarea>) et le bouton reset.
+// Script du panneau de préférences : gère le textarea du prompt
+// (pas de binding "preference" natif pour <textarea>), le sélecteur de
+// modèles prédéfinis, et le bouton « restaurer le défaut ».
 
 (function () {
 	const PREF_PROMPT = "annota.systemPrompt";
+	const XHTML_NS = "http://www.w3.org/1999/xhtml";
+
+	function presets() {
+		try {
+			if (Zotero.Annota && Array.isArray(Zotero.Annota.PRESETS)) {
+				return Zotero.Annota.PRESETS;
+			}
+		}
+		catch (e) { /* ignore */ }
+		return [];
+	}
 
 	function defaultPrompt() {
 		try {
@@ -19,6 +31,7 @@
 		let textarea = document.getElementById("annota-prompt");
 		let resetBtn = document.getElementById("annota-prompt-reset");
 		let status = document.getElementById("annota-prompt-status");
+		let presetSel = document.getElementById("annota-preset");
 		if (!textarea || !resetBtn) {
 			// Le DOM du panneau n'est pas encore prêt : réessayer au prochain tick.
 			requestAnimationFrame(setup);
@@ -52,17 +65,33 @@
 			save();
 		});
 
-		resetBtn.addEventListener("command", () => {
+		function restoreDefault() {
 			Zotero.Prefs.clear(PREF_PROMPT);
 			textarea.value = defaultPrompt();
-			flashStatus("Réinitialisé ✓");
-		});
-		// <button> XUL utilise "command"; en HTML pur ce serait "click".
-		resetBtn.addEventListener("click", () => {
-			Zotero.Prefs.clear(PREF_PROMPT);
-			textarea.value = defaultPrompt();
-			flashStatus("Réinitialisé ✓");
-		});
+			flashStatus("Restauré ✓");
+		}
+		// <button> XUL émet "command"; en HTML pur ce serait "click".
+		resetBtn.addEventListener("command", restoreDefault);
+		resetBtn.addEventListener("click", restoreDefault);
+
+		// Sélecteur de modèles prédéfinis : remplit le textarea avec le modèle choisi.
+		if (presetSel) {
+			let list = presets();
+			for (let p of list) {
+				let opt = document.createElementNS(XHTML_NS, "option");
+				opt.setAttribute("value", p.id);
+				opt.textContent = p.label;
+				presetSel.appendChild(opt);
+			}
+			presetSel.addEventListener("change", () => {
+				let chosen = list.find(p => p.id === presetSel.value);
+				if (chosen) {
+					textarea.value = chosen.prompt;
+					save();
+				}
+				presetSel.value = ""; // revenir au libellé « choisir un modèle »
+			});
+		}
 	}
 
 	setup();

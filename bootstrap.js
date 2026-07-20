@@ -1,6 +1,7 @@
 /* eslint-disable no-undef */
-// Annota — extension Zotero 7
-// Remplit le commentaire d'un surlignage à sa création, via l'API Mistral Large.
+// Annota — extension Zotero 7/8/9
+// À la création d'un surlignage, exécute un prompt configurable sur le texte
+// surligné et place la sortie du modèle dans le commentaire de l'annotation.
 
 var Annota;
 
@@ -40,35 +41,88 @@ Annota = {
 	notifierID: null,
 	inProgress: new Set(),
 
-	// Prompt par défaut. Éditable dans les préférences.
-	// Jetons substitués à l'exécution : {{maxWords}}, {{language}}.
-	DEFAULT_PROMPT: [
-		"Tu es un assistant qui transforme un passage surligné d'un article académique",
-		"en une note structurée, prête à coller dans un commentaire d'annotation Zotero.",
-		"",
-		"Réponds EXACTEMENT dans ce format, et rien d'autre :",
-		"",
-		"<b>Titre.</b>",
-		"Paraphrase concise.",
-		"<i>(Auteur, année, p.XX ; Auteur2, année)</i>",
-		"",
-		"Règles impératives :",
-		"- Le titre fait 3 à 8 mots, synthétise l'idée centrale du passage, et se termine",
-		"  par un point PLACÉ À L'INTÉRIEUR des balises <b>…</b>.",
-		"- La paraphrase reformule le passage avec tes propres mots : 2 à 5 phrases,",
-		"  {{maxWords}} mots maximum, fidèle au sens, sans ajout d'information.",
-		"- La ligne de références n'apparaît QUE si le passage cite explicitement une ou",
-		"  plusieurs sources (nom d'auteur + année présents dans le texte surligné).",
-		"  Format : <i>(Auteur, année ; Auteur2, année)</i>, séparateur « ; ».",
-		"  Intègre le numéro de page S'IL apparaît dans le passage, placé juste après",
-		"  l'année sous la forme « , p.XX » — par ex. (Moulin, 1999, p.93 ; Jacques, 2009).",
-		"  Conserve la notation des pages telle qu'écrite (p., pp., plage « p.12-15 »).",
-		"  N'ajoute jamais de numéro de page qui n'est pas dans le passage.",
-		"- N'invente jamais de référence, et ne cite pas l'article source lui-même.",
-		"- Réponds en {{language}}.",
-		"- N'utilise QUE les balises <b> et <i>. Aucune balise Markdown, aucun bloc de code,",
-		"  aucun texte d'introduction ou d'explication.",
-	].join("\n"),
+	// Modèles de prompts prêts à l'emploi, proposés dans les préférences.
+	// L'utilisateur peut en choisir un, le modifier, ou écrire le sien.
+	// Variables substituées à l'exécution :
+	//   {{text}}     texte surligné (voir buildMessages pour le mode avancé)
+	//   {{title}}    titre du document source
+	//   {{authors}}  auteurs du document source (noms, séparés par des virgules)
+	//   {{year}}     année du document source
+	//   {{maxWords}} réglage « longueur max »
+	//   {{language}} réglage « langue de sortie »
+	PRESETS: [
+		{
+			id: "academic",
+			label: "Note académique (titre + paraphrase + références)",
+			prompt: [
+				"Tu transformes un passage surligné d'un article académique en une note",
+				"structurée, prête à coller dans un commentaire d'annotation Zotero.",
+				"",
+				"Réponds EXACTEMENT dans ce format, et rien d'autre :",
+				"",
+				"<b>Titre.</b>",
+				"Paraphrase concise.",
+				"<i>(Auteur, année, p.XX ; Auteur2, année)</i>",
+				"",
+				"Règles impératives :",
+				"- Le titre fait 3 à 8 mots, synthétise l'idée centrale du passage, et se termine",
+				"  par un point PLACÉ À L'INTÉRIEUR des balises <b>…</b>.",
+				"- La paraphrase reformule le passage avec tes propres mots : 2 à 5 phrases,",
+				"  {{maxWords}} mots maximum, fidèle au sens, sans ajout d'information.",
+				"- La ligne de références n'apparaît QUE si le passage cite explicitement une ou",
+				"  plusieurs sources (nom d'auteur + année présents dans le texte surligné).",
+				"  Format : <i>(Auteur, année ; Auteur2, année)</i>, séparateur « ; ».",
+				"  Intègre le numéro de page S'IL apparaît dans le passage, placé juste après",
+				"  l'année sous la forme « , p.XX » — par ex. (Moulin, 1999, p.93 ; Jacques, 2009).",
+				"  Conserve la notation des pages telle qu'écrite (p., pp., plage « p.12-15 »).",
+				"  N'ajoute jamais de numéro de page qui n'est pas dans le passage.",
+				"- N'invente jamais de référence, et ne cite pas l'article source lui-même.",
+				"- Réponds en {{language}}.",
+				"- N'utilise QUE les balises <b> et <i>. Aucune balise Markdown, aucun bloc de code,",
+				"  aucun texte d'introduction ou d'explication.",
+			].join("\n")
+		},
+		{
+			id: "summary",
+			label: "Résumé bref",
+			prompt: [
+				"Résume fidèlement le passage surligné en {{language}}.",
+				"{{maxWords}} mots maximum. Rends uniquement le résumé, sans introduction",
+				"ni commentaire méta (pas de « Ce passage… »).",
+			].join("\n")
+		},
+		{
+			id: "plain",
+			label: "Explication en langage simple",
+			prompt: [
+				"Explique le passage surligné en {{language}}, en langage simple et accessible,",
+				"comme à une personne non spécialiste. {{maxWords}} mots maximum.",
+				"Va droit à l'essentiel, sans phrase d'introduction.",
+			].join("\n")
+		},
+		{
+			id: "keypoints",
+			label: "Points clés (liste à puces)",
+			prompt: [
+				"Extrais les points clés du passage surligné sous forme de liste à puces",
+				"en {{language}}. Une puce par idée (« - » en début de ligne), formulation",
+				"concise. Aucune phrase d'introduction ni de conclusion.",
+			].join("\n")
+		},
+		{
+			id: "translate",
+			label: "Traduction",
+			prompt: [
+				"Traduis fidèlement le passage surligné en {{language}}.",
+				"Rends uniquement la traduction, sans note ni commentaire.",
+			].join("\n")
+		}
+	],
+
+	// Prompt utilisé si aucun n'est configuré : le premier preset (académique).
+	get DEFAULT_PROMPT() {
+		return this.PRESETS[0].prompt;
+	},
 
 	init({ id, version, rootURI }) {
 		this.id = id;
@@ -150,7 +204,8 @@ Annota = {
 				usedPlaceholder = true;
 			}
 
-			let comment = await this.generateComment(text, apiKey);
+			let ctx = this.getContext(item);
+			let comment = await this.generateComment(text, ctx, apiKey);
 
 			// Recharger l'item au cas où il aurait changé pendant l'appel réseau.
 			let fresh = await Zotero.Items.getAsync(id);
@@ -179,16 +234,62 @@ Annota = {
 		}
 	},
 
-	buildSystemPrompt() {
-		let tpl = String(getPref("systemPrompt", "")).trim() || this.DEFAULT_PROMPT;
-		let maxWords = parseInt(getPref("maxWords", 80), 10) || 80;
-		let language = String(getPref("language", "français")).trim() || "français";
-		return tpl
-			.replace(/\{\{\s*maxWords\s*\}\}/g, String(maxWords))
-			.replace(/\{\{\s*language\s*\}\}/g, language);
+	// Métadonnées du document source (pour les variables {{title}}, {{authors}}, {{year}}).
+	getContext(item) {
+		let ctx = { title: "", authors: "", year: "" };
+		try {
+			let parent = item.parentItem;               // pièce jointe (PDF)
+			let top = (parent && parent.parentItem) ? parent.parentItem : parent;
+			if (top && typeof top.getField === "function") {
+				ctx.title = top.getField("title") || "";
+				let ym = String(top.getField("date") || "").match(/\d{4}/);
+				if (ym) ctx.year = ym[0];
+				let creators = (typeof top.getCreators === "function") ? top.getCreators() : [];
+				ctx.authors = creators
+					.map(c => c.lastName || c.name || "")
+					.filter(Boolean)
+					.join(", ");
+			}
+		}
+		catch (e) {
+			log("getContext: " + e);
+		}
+		return ctx;
 	},
 
-	async generateComment(text, apiKey) {
+	// Remplace {{variable}} par sa valeur (chaîne vide si inconnue).
+	substitute(tpl, vars) {
+		return String(tpl).replace(/\{\{\s*(\w+)\s*\}\}/g, (m, key) =>
+			(Object.prototype.hasOwnProperty.call(vars, key) && vars[key] != null)
+				? String(vars[key]) : "");
+	},
+
+	// Construit les messages envoyés à l'API à partir du prompt configuré.
+	buildMessages(text, ctx) {
+		let tpl = String(getPref("systemPrompt", "")).trim() || this.DEFAULT_PROMPT;
+		let vars = {
+			text: text,
+			title: (ctx && ctx.title) || "",
+			authors: (ctx && ctx.authors) || "",
+			year: (ctx && ctx.year) || "",
+			maxWords: parseInt(getPref("maxWords", 80), 10) || 80,
+			language: String(getPref("language", "français")).trim() || "français"
+		};
+
+		if (/\{\{\s*text\s*\}\}/.test(tpl)) {
+			// Mode avancé : le prompt contient {{text}} → un seul message utilisateur.
+			// L'utilisateur contrôle intégralement la structure du prompt.
+			return [{ role: "user", content: this.substitute(tpl, vars) }];
+		}
+
+		// Mode standard : instructions en message système, passage en message utilisateur.
+		return [
+			{ role: "system", content: this.substitute(tpl, vars) },
+			{ role: "user", content: "Passage surligné :\n\"\"\"\n" + text + "\n\"\"\"" }
+		];
+	},
+
+	async generateComment(text, ctx, apiKey) {
 		let endpoint = String(getPref("endpoint", "https://api.mistral.ai/v1/chat/completions")).trim();
 		let model = String(getPref("model", "mistral-large-latest")).trim() || "mistral-large-latest";
 		let temp = parseFloat(getPref("temperature", 0.2));
@@ -198,10 +299,7 @@ Annota = {
 		let payload = {
 			model,
 			temperature: temp,
-			messages: [
-				{ role: "system", content: this.buildSystemPrompt() },
-				{ role: "user", content: "Passage surligné :\n\"\"\"\n" + text + "\n\"\"\"" }
-			]
+			messages: this.buildMessages(text, ctx)
 		};
 
 		let resp;
