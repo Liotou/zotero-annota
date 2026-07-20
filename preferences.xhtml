@@ -1,0 +1,113 @@
+<vbox xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+      xmlns:html="http://www.w3.org/1999/xhtml">
+
+  <groupbox>
+    <label><html:h2>Annota</html:h2></label>
+
+    <hbox align="center">
+      <checkbox label="Activer la génération automatique à la création d'un surlignage"
+                preference="extensions.zotero.annota.enabled"
+                native="true"/>
+    </hbox>
+    <hbox align="center">
+      <checkbox label="Traiter aussi les soulignements (underline), pas seulement les surlignages"
+                preference="extensions.zotero.annota.alsoUnderline"
+                native="true"/>
+    </hbox>
+    <hbox align="center">
+      <checkbox label="Écraser un commentaire déjà présent"
+                preference="extensions.zotero.annota.overwrite"
+                native="true"/>
+    </hbox>
+    <hbox align="center">
+      <checkbox label="Afficher « ⏳ Génération… » pendant l'appel à l'API"
+                preference="extensions.zotero.annota.showPlaceholder"
+                native="true"/>
+    </hbox>
+  </groupbox>
+
+  <groupbox>
+    <label><html:h2>Connexion à l'API</html:h2></label>
+    <grid>
+      <columns>
+        <column/>
+        <column flex="1"/>
+      </columns>
+      <rows>
+        <row align="center">
+          <label value="Clé API Mistral :" control="annota-apikey"/>
+          <html:input id="annota-apikey" type="password" style="width: 30em;"
+                      preference="extensions.zotero.annota.apiKey"/>
+        </row>
+        <row align="center">
+          <label value="Modèle :" control="annota-model"/>
+          <html:input id="annota-model" type="text" style="width: 30em;"
+                      preference="extensions.zotero.annota.model"/>
+        </row>
+        <row align="center">
+          <label value="Endpoint (compatible Chat Completions) :" control="annota-endpoint"/>
+          <html:input id="annota-endpoint" type="text" style="width: 30em;"
+                      preference="extensions.zotero.annota.endpoint"/>
+        </row>
+        <row align="center">
+          <label value="Température (0 à 2) :" control="annota-temp"/>
+          <html:input id="annota-temp" type="number" min="0" max="2" step="0.1" style="width: 6em;"
+                      preference="extensions.zotero.annota.temperature"/>
+        </row>
+      </rows>
+    </grid>
+    <description style="max-width: 40em; opacity: 0.8;">
+      Compatible avec tout endpoint « chat/completions » de style OpenAI (utile si
+      vous passez par un proxy ou un autre fournisseur compatible).
+    </description>
+  </groupbox>
+
+  <groupbox>
+    <label><html:h2>Génération du texte</html:h2></label>
+    <grid>
+      <columns>
+        <column/>
+        <column flex="1"/>
+      </columns>
+      <rows>
+        <row align="center">
+          <label value="Langue de sortie :" control="annota-lang"/>
+          <html:input id="annota-lang" type="text" style="width: 15em;"
+                      preference="extensions.zotero.annota.language"/>
+        </row>
+        <row align="center">
+          <label value="Longueur max. de la paraphrase (mots) :" control="annota-maxwords"/>
+          <html:input id="annota-maxwords" type="number" min="20" max="200" style="width: 6em;"
+                      preference="extensions.zotero.annota.maxWords"/>
+        </row>
+      </rows>
+    </grid>
+  </groupbox>
+
+  <groupbox>
+    <label><html:h2>Prompt système</html:h2></label>
+    <description style="max-width: 46em; opacity: 0.8;">
+      Contrôle intégral du format de sortie. Jetons disponibles :
+      <html:code>{{maxWords}}</html:code> et <html:code>{{language}}</html:code>
+      (remplacés par les réglages ci-dessus au moment de l'appel). Laisser vide
+      pour utiliser le prompt par défaut de l'extension.
+    </description>
+    <html:textarea id="annota-prompt" rows="18"
+                    style="width: 100%; font-family: monospace; font-size: 12px; margin-top: 6px;"/>
+    <hbox style="margin-top: 6px;">
+      <button id="annota-prompt-reset" label="Réinitialiser au prompt par défaut"/>
+      <spacer flex="1"/>
+      <label id="annota-prompt-status" value="" style="opacity: 0.7;"/>
+    </hbox>
+  </groupbox>
+
+  <groupbox>
+    <label><html:h2>À propos</html:h2></label>
+    <description style="max-width: 46em; opacity: 0.8;">
+      La clé API est stockée en clair dans les préférences du profil Zotero.
+      Obtenez une clé sur console.mistral.ai. Modèle par défaut :
+      « mistral-large-latest ».
+    </description>
+  </groupbox>
+
+</vbox>

@@ -1,0 +1,5 @@
+# Artéfacts de build (régénérés par ./build.sh)
+*.xpi
+
+# macOS
+.DS_Store
