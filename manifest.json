@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Annota",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Remplit automatiquement le commentaire des surlignages du lecteur PDF avec une note formatée (titre en gras, paraphrase, références) générée par une API LLM (Mistral par défaut, ou tout endpoint compatible OpenAI).",
   "author": "elliotquiriconi",
   "applications": {

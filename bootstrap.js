@@ -7,6 +7,9 @@ var Annota;
 
 const PREF_BRANCH = "annota.";
 
+// Commentaire temporaire affiché pendant l'appel réseau (écrit puis remplacé).
+const PLACEHOLDER = "⏳ Generating…";
+
 function getPref(key, fallback) {
 	let val = Zotero.Prefs.get(PREF_BRANCH + key);
 	return (val === undefined || val === null) ? fallback : val;
@@ -56,68 +59,68 @@ Annota = {
 	PRESETS: [
 		{
 			id: "academic",
-			label: "Note académique (titre + paraphrase + références)",
+			label: "Academic note (title + paraphrase + references)",
 			prompt: [
-				"Tu transformes un passage surligné d'un article académique en une note",
-				"structurée, prête à coller dans un commentaire d'annotation Zotero.",
+				"You turn a highlighted passage from an academic article into a structured",
+				"note, ready to paste into a Zotero annotation comment.",
 				"",
-				"Réponds EXACTEMENT dans ce format, et rien d'autre :",
+				"Reply EXACTLY in this format, and nothing else:",
 				"",
-				"<b>Titre.</b>",
-				"Paraphrase concise.",
-				"<i>(Auteur, année, p.XX ; Auteur2, année)</i>",
+				"<b>Title.</b>",
+				"Concise paraphrase.",
+				"<i>(Author, year, p.XX ; Author2, year)</i>",
 				"",
-				"Règles impératives :",
-				"- Le titre fait 3 à 8 mots, synthétise l'idée centrale du passage, et se termine",
-				"  par un point PLACÉ À L'INTÉRIEUR des balises <b>…</b>.",
-				"- La paraphrase reformule le passage avec tes propres mots : 2 à 5 phrases,",
-				"  {{maxWords}} mots maximum, fidèle au sens, sans ajout d'information.",
-				"- La ligne de références n'apparaît QUE si le passage cite explicitement une ou",
-				"  plusieurs sources (nom d'auteur + année présents dans le texte surligné).",
-				"  Format : <i>(Auteur, année ; Auteur2, année)</i>, séparateur « ; ».",
-				"  Intègre le numéro de page S'IL apparaît dans le passage, placé juste après",
-				"  l'année sous la forme « , p.XX » — par ex. (Moulin, 1999, p.93 ; Jacques, 2009).",
-				"  Conserve la notation des pages telle qu'écrite (p., pp., plage « p.12-15 »).",
-				"  N'ajoute jamais de numéro de page qui n'est pas dans le passage.",
-				"- N'invente jamais de référence, et ne cite pas l'article source lui-même.",
-				"- Réponds en {{language}}.",
-				"- N'utilise QUE les balises <b> et <i>. Aucune balise Markdown, aucun bloc de code,",
-				"  aucun texte d'introduction ou d'explication.",
+				"Strict rules:",
+				"- The title is 3 to 8 words, captures the passage's core idea, and ends with",
+				"  a period placed INSIDE the <b>…</b> tags.",
+				"- The paraphrase restates the passage in your own words: 2 to 5 sentences,",
+				"  {{maxWords}} words maximum, faithful to the meaning, adding nothing.",
+				"- The reference line appears ONLY if the passage explicitly cites one or more",
+				"  sources (author name + year present in the highlighted text).",
+				"  Format: <i>(Author, year ; Author2, year)</i>, separator \" ; \".",
+				"  Include the page number IF it appears in the passage, right after the year",
+				"  as \", p.XX\" — e.g. (Moulin, 1999, p.93 ; Jacques, 2009).",
+				"  Keep page notation as written (p., pp., ranges such as \"p.12-15\").",
+				"  Never add a page number that is not in the passage.",
+				"- Never invent a reference, and never cite the source article itself.",
+				"- Reply in {{language}}.",
+				"- Use ONLY the <b> and <i> tags. No Markdown, no code blocks, no introduction",
+				"  or explanation.",
 			].join("\n")
 		},
 		{
 			id: "summary",
-			label: "Résumé bref",
+			label: "Brief summary",
 			prompt: [
-				"Résume fidèlement le passage surligné en {{language}}.",
-				"{{maxWords}} mots maximum. Rends uniquement le résumé, sans introduction",
-				"ni commentaire méta (pas de « Ce passage… »).",
+				"Summarize the highlighted passage faithfully in {{language}}.",
+				"{{maxWords}} words maximum. Return only the summary, with no introduction",
+				"and no meta commentary.",
 			].join("\n")
 		},
 		{
 			id: "plain",
-			label: "Explication en langage simple",
+			label: "Plain-language explanation",
 			prompt: [
-				"Explique le passage surligné en {{language}}, en langage simple et accessible,",
-				"comme à une personne non spécialiste. {{maxWords}} mots maximum.",
-				"Va droit à l'essentiel, sans phrase d'introduction.",
+				"Explain the highlighted passage in {{language}}, in plain and accessible",
+				"language, as if to a non-specialist. {{maxWords}} words maximum.",
+				"Get straight to the point, with no introductory sentence.",
 			].join("\n")
 		},
 		{
 			id: "keypoints",
-			label: "Points clés (liste à puces)",
+			label: "Key points (bulleted list)",
 			prompt: [
-				"Extrais les points clés du passage surligné sous forme de liste à puces",
-				"en {{language}}. Une puce par idée (« - » en début de ligne), formulation",
-				"concise. Aucune phrase d'introduction ni de conclusion.",
+				"Extract the key points of the highlighted passage as a bulleted list in",
+				"{{language}}. One bullet per idea (\"- \" at the start of the line), concise",
+				"wording. No introduction and no conclusion.",
 			].join("\n")
 		},
 		{
 			id: "translate",
-			label: "Traduction",
+			label: "Translation",
 			prompt: [
-				"Traduis fidèlement le passage surligné en {{language}}.",
-				"Rends uniquement la traduction, sans note ni commentaire.",
+				"Translate the highlighted passage faithfully into {{language}}.",
+				"Return only the translation, with no notes and no commentary.",
 			].join("\n")
 		}
 	],
@@ -139,7 +142,7 @@ Annota = {
 			["item"],
 			"annota"
 		);
-		log("Notifier enregistré (id=" + this.notifierID + ")");
+		log("Notifier registered (id=" + this.notifierID + ")");
 	},
 
 	unregisterNotifier() {
@@ -194,7 +197,7 @@ Annota = {
 
 		let apiKey = String(getPref("apiKey", "")).trim();
 		if (!apiKey) {
-			toast("Annota", "Clé API manquante (Préférences → Annota).", "error");
+			toast("Annota", "API key missing (Preferences → Annota).", "error");
 			return;
 		}
 
@@ -202,7 +205,7 @@ Annota = {
 		let usedPlaceholder = false;
 		try {
 			if (getPref("showPlaceholder", true)) {
-				item.annotationComment = "⏳ Génération…";
+				item.annotationComment = PLACEHOLDER;
 				await item.saveTx();
 				usedPlaceholder = true;
 			}
@@ -215,16 +218,16 @@ Annota = {
 			if (!fresh) return;
 			fresh.annotationComment = comment;
 			await fresh.saveTx();
-			log("Commentaire généré pour l'annotation " + id);
+			log("Comment generated for annotation " + id);
 		}
 		catch (e) {
-			log("Erreur génération: " + e);
-			toast("Annota", "Échec de la génération : " + (e.message || e), "error");
+			log("Generation error: " + e);
+			toast("Annota", "Generation failed: " + (e.message || e), "error");
 			// Nettoyer le placeholder en cas d'échec.
 			if (usedPlaceholder) {
 				try {
 					let fresh = await Zotero.Items.getAsync(id);
-					if (fresh && (fresh.annotationComment || "").trim() === "⏳ Génération…") {
+					if (fresh && (fresh.annotationComment || "").trim() === PLACEHOLDER) {
 						fresh.annotationComment = "";
 						await fresh.saveTx();
 					}
@@ -287,13 +290,13 @@ Annota = {
 	// Bloc de contexte lisible, transmis à l'IA en mode standard.
 	formatContextBlock(vars) {
 		let lines = [];
-		if (vars.title) lines.push("Titre : " + vars.title);
-		if (vars.authors) lines.push("Auteurs : " + vars.authors);
-		if (vars.year) lines.push("Année : " + vars.year);
-		if (vars.publication) lines.push("Publication : " + vars.publication);
-		if (vars.page) lines.push("Page du passage : " + vars.page);
-		if (vars.abstract) lines.push("Résumé du document : " + vars.abstract);
-		return lines.length ? "Contexte du document :\n" + lines.join("\n") : "";
+		if (vars.title) lines.push("Title: " + vars.title);
+		if (vars.authors) lines.push("Authors: " + vars.authors);
+		if (vars.year) lines.push("Year: " + vars.year);
+		if (vars.publication) lines.push("Publication: " + vars.publication);
+		if (vars.page) lines.push("Passage page: " + vars.page);
+		if (vars.abstract) lines.push("Document abstract: " + vars.abstract);
+		return lines.length ? "Document context:\n" + lines.join("\n") : "";
 	},
 
 	// Remplace {{variable}} par sa valeur (chaîne vide si inconnue).
@@ -331,7 +334,7 @@ Annota = {
 			let block = this.formatContextBlock(vars);
 			if (block) parts.push(block);
 		}
-		parts.push("Passage surligné :\n\"\"\"\n" + text + "\n\"\"\"");
+		parts.push("Highlighted passage:\n\"\"\"\n" + text + "\n\"\"\"");
 
 		return [
 			{ role: "system", content: this.substitute(tpl, vars) },
@@ -374,7 +377,7 @@ Annota = {
 		let data = resp.response;
 		let content = data && data.choices && data.choices[0]
 			&& data.choices[0].message && data.choices[0].message.content;
-		if (!content) throw new Error("Réponse vide de l'API");
+		if (!content) throw new Error("Empty API response");
 
 		return this.sanitize(content);
 	},
@@ -406,7 +409,7 @@ async function startup({ id, version, rootURI }) {
 		label: "Annota"
 	});
 
-	log("Démarré (v" + version + ")");
+	log("Started (v" + version + ")");
 }
 
 function shutdown() {

@@ -52,7 +52,7 @@
 		let saveTimer = null;
 		function save() {
 			Zotero.Prefs.set(PREF_PROMPT, textarea.value);
-			flashStatus("Enregistré ✓");
+			flashStatus("Saved ✓");
 		}
 		function scheduleSave() {
 			if (saveTimer) clearTimeout(saveTimer);
@@ -68,7 +68,7 @@
 		function restoreDefault() {
 			Zotero.Prefs.clear(PREF_PROMPT);
 			textarea.value = defaultPrompt();
-			flashStatus("Restauré ✓");
+			flashStatus("Restored ✓");
 		}
 		// <button> XUL émet "command"; en HTML pur ce serait "click".
 		resetBtn.addEventListener("command", restoreDefault);
@@ -89,7 +89,7 @@
 					textarea.value = chosen.prompt;
 					save();
 				}
-				presetSel.value = ""; // revenir au libellé « choisir un modèle »
+				presetSel.value = ""; // back to the "pick a preset" label
 			});
 		}
 	}
