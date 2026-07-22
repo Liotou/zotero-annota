@@ -1,13 +1,12 @@
 /* eslint-disable no-undef */
 // Script du panneau de préférences.
 //
-// Le textarea est partagé : il édite soit le prompt par défaut
-// (pref annota.systemPrompt), soit le prompt d'une couleur précise
-// (entrée du JSON annota.colorPrompts). Le sélecteur « Editing prompt for »
-// bascule entre les deux ; on sauvegarde toujours AVANT de basculer.
+// Il n'y a pas de prompt par défaut : chaque couleur de surlignage a le sien,
+// stocké dans le JSON annota.colorPrompts. Une couleur sans prompt n'est pas
+// traitée par le plugin. Le textarea édite la couleur sélectionnée ; on
+// sauvegarde toujours AVANT de changer de couleur.
 
 (function () {
-	const PREF_PROMPT = "annota.systemPrompt";
 	const PREF_COLORS = "annota.colorPrompts";
 	const XHTML_NS = "http://www.w3.org/1999/xhtml";
 
@@ -19,11 +18,6 @@
 	function colors() {
 		let a = api();
 		return (a && Array.isArray(a.COLORS)) ? a.COLORS : [];
-	}
-
-	function defaultPrompt() {
-		let a = api();
-		return (a && a.DEFAULT_PROMPT) ? a.DEFAULT_PROMPT : "";
 	}
 
 	function readColorMap() {
@@ -39,8 +33,8 @@
 	}
 
 	function writeColorMap(map) {
-		// Ne pas conserver les entrées vides : une couleur sans prompt doit
-		// retomber sur le prompt par défaut.
+		// Ne pas conserver les entrées vides : une couleur sans prompt est une
+		// couleur désactivée, pas une couleur avec un prompt vide.
 		let clean = {};
 		for (let k of Object.keys(map)) {
 			if (map[k] && String(map[k]).trim()) clean[k] = map[k];
@@ -50,18 +44,24 @@
 
 	function setup() {
 		let textarea = document.getElementById("annota-prompt");
-		let resetBtn = document.getElementById("annota-prompt-reset");
 		let clearBtn = document.getElementById("annota-prompt-clear");
 		let status = document.getElementById("annota-prompt-status");
 		let swatchBox = document.getElementById("annota-swatches");
 		let targetName = document.getElementById("annota-target-name");
-		if (!textarea || !resetBtn || !swatchBox) {
+		let idleWarning = document.getElementById("annota-idle-warning");
+		if (!textarea || !swatchBox) {
 			requestAnimationFrame(setup);
 			return;
 		}
 
-		// Couleur en cours d'édition ("" = prompt par défaut).
-		let current = "";
+		let palette = colors();
+		if (!palette.length) {
+			requestAnimationFrame(setup);
+			return;
+		}
+
+		// Couleur en cours d'édition (toujours une couleur : il n'y a plus de défaut).
+		let current = palette[0].hex;
 
 		let flashTimer = null;
 		function flashStatus(msg) {
@@ -72,14 +72,9 @@
 		}
 
 		function save() {
-			if (current) {
-				let map = readColorMap();
-				map[current] = textarea.value;
-				writeColorMap(map);
-			}
-			else {
-				Zotero.Prefs.set(PREF_PROMPT, textarea.value);
-			}
+			let map = readColorMap();
+			map[current] = textarea.value;
+			writeColorMap(map);
 			flashStatus("Saved ✓");
 			refreshSwatches();
 		}
@@ -94,101 +89,70 @@
 			save();
 		}
 
-		// Charge dans le textarea le prompt de la cible demandée.
-		function load(target) {
-			current = target;
-			if (target) {
-				textarea.value = readColorMap()[target] || "";
-				textarea.setAttribute("placeholder",
-					"Empty — this color uses the default prompt.");
-			}
-			else {
-				let saved = Zotero.Prefs.get(PREF_PROMPT);
-				textarea.value = (saved && String(saved).trim()) ? saved : defaultPrompt();
-				textarea.removeAttribute("placeholder");
-			}
-			if (clearBtn) clearBtn.hidden = !target;
-			resetBtn.hidden = !!target;
+		function load(hex) {
+			current = hex;
+			textarea.value = readColorMap()[hex] || "";
 			if (targetName) {
-				let c = colors().find(x => x.hex === target);
-				targetName.setAttribute("value",
-					target ? (c ? c.name : target) : "Default (all colors)");
+				let c = palette.find(x => x.hex === hex);
+				targetName.setAttribute("value", c ? c.name : hex);
 			}
 			refreshSwatches();
 		}
 
-		// Reflète l'état : cible sélectionnée + couleurs ayant leur propre prompt.
+		// Reflète l'état : couleur sélectionnée, couleurs actives, avertissement
+		// si le plugin ne peut rien générer faute de prompt configuré.
 		function refreshSwatches() {
 			let map = readColorMap();
 			for (let el of swatchBox.children) {
-				let hex = el.getAttribute("data-color") || "";
+				let hex = el.getAttribute("data-color");
+				let name = el.getAttribute("data-name") || hex;
 				el.setAttribute("data-selected", hex === current ? "true" : "false");
-				el.setAttribute("data-has-prompt", (hex && map[hex]) ? "true" : "false");
-				if (hex) {
-					let name = el.getAttribute("data-name") || hex;
-					el.setAttribute("title",
-						map[hex] ? name + " — custom prompt" : name + " — uses default prompt");
-				}
+				el.setAttribute("data-has-prompt", map[hex] ? "true" : "false");
+				el.setAttribute("title",
+					map[hex] ? name + " — has a prompt" : name + " — inactive, no prompt");
+			}
+			if (idleWarning) {
+				idleWarning.hidden = Object.keys(map).length > 0;
 			}
 		}
 
-		// --- Pastilles de couleur (défaut + palette Zotero) ---
-		function addSwatch({ hex, name, label }) {
+		// --- Pastilles de couleur ---
+		for (let c of palette) {
 			let b = document.createElementNS(XHTML_NS, "button");
 			b.setAttribute("type", "button");
-			b.setAttribute("class", "annota-swatch" + (hex ? "" : " annota-default"));
-			b.setAttribute("data-color", hex || "");
-			if (hex) {
-				b.setAttribute("data-name", name);
-				b.style.backgroundColor = hex;
-			}
-			else {
-				b.textContent = label;
-				b.setAttribute("title", "Prompt used by every color without its own");
-			}
+			b.setAttribute("class", "annota-swatch");
+			b.setAttribute("data-color", c.hex);
+			b.setAttribute("data-name", c.name);
+			b.style.backgroundColor = c.hex;
 			b.addEventListener("click", () => {
-				if (current === (hex || "")) return;
+				if (current === c.hex) return;
 				saveNow();          // ne pas perdre l'édition en cours
-				load(hex || "");
+				load(c.hex);
 			});
 			swatchBox.appendChild(b);
-			return b;
-		}
-
-		addSwatch({ hex: "", label: "Default" });
-		for (let c of colors()) {
-			addSwatch({ hex: c.hex, name: c.name });
 		}
 
 		// --- Textarea ---
+		textarea.setAttribute("placeholder",
+			"Empty — Annota ignores highlights of this color.");
 		textarea.addEventListener("input", scheduleSave);
 		textarea.addEventListener("blur", saveNow);
 
-		// --- Boutons ---
-		function restoreDefault() {
-			Zotero.Prefs.clear(PREF_PROMPT);
-			load("");
-			flashStatus("Restored ✓");
-		}
-		resetBtn.addEventListener("command", restoreDefault);
-		resetBtn.addEventListener("click", restoreDefault);
-
+		// --- Bouton d'effacement ---
 		if (clearBtn) {
-			function clearColor() {
-				if (!current) return;
+			let clearColor = () => {
 				let map = readColorMap();
 				delete map[current];
 				writeColorMap(map);
 				textarea.value = "";
 				refreshSwatches();
 				flashStatus("Cleared ✓");
-			}
+			};
 			clearBtn.addEventListener("command", clearColor);
 			clearBtn.addEventListener("click", clearColor);
 		}
 
-		load("");
-		refreshSwatches();
+		load(current);
 	}
 
 	setup();

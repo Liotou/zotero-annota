@@ -2,12 +2,12 @@
 ANNOTA — EXAMPLE PROMPTS
 ================================================================================
 
-Copy any of these into the prompt box in Annota's preferences
-(Add-ons -> Annota), or use them as a starting point for your own.
+Annota ships with NO prompt at all: it stays inert until you configure one.
+Prompts are set per highlight color — click a color swatch above the prompt box
+in Annota's preferences (Add-ons -> Annota), then paste one of the prompts below.
 
-You can also assign a different prompt to each highlight color: click a color
-swatch above the prompt box, then paste a prompt for that color. Colors without
-their own prompt fall back to the default one.
+A color you leave empty is never processed. That is how you keep Annota off the
+colors you use for ordinary highlighting.
 
 
 --------------------------------------------------------------------------------
@@ -35,7 +35,7 @@ Two modes:
 
 
 --------------------------------------------------------------------------------
-1. ACADEMIC NOTE  (this is Annota's built-in default)
+1. ACADEMIC NOTE
 --------------------------------------------------------------------------------
 
 You turn a highlighted passage from an academic article into a structured

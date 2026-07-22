@@ -121,31 +121,31 @@
   <groupbox>
     <label><html:h2>Prompt</html:h2></label>
     <description style="max-width: 46em; opacity: 0.8;">
-      Your highlighted text is sent to this prompt, and the reply becomes the
-      annotation comment. Write anything you want — the default academic format
-      is only a starting point. See PROMPT-EXAMPLES.txt in the GitHub repository
-      for more ideas.
+      Each highlight color has its own prompt. The highlighted text is sent to
+      it, and the reply becomes the annotation comment. Copyable examples are in
+      PROMPT-EXAMPLES.txt in the GitHub repository.
     </description>
 
     <hbox align="center" style="margin-top: 8px;">
       <label value="Editing prompt for:"/>
-      <label id="annota-target-name" value="Default (all colors)"
-             style="font-weight: bold;"/>
+      <label id="annota-target-name" value="" style="font-weight: bold;"/>
     </hbox>
     <html:div id="annota-swatches"/>
     <description id="annota-target-hint" style="max-width: 46em; opacity: 0.8;">
-      Click a highlight color to give it its own prompt — e.g. yellow
-      summarizes, red critiques, blue translates. A green dot marks colors that
-      have one; the others fall back to the default prompt.
+      A color with no prompt is left alone — Annota never touches those
+      highlights. A green dot marks the colors that are active.
+    </description>
+    <description id="annota-idle-warning"
+                 style="max-width: 46em; font-weight: bold;" hidden="true">
+      No color has a prompt yet, so Annota won't generate anything. Pick a color
+      above and write a prompt to switch it on.
     </description>
 
     <html:textarea id="annota-prompt" rows="16"
                     style="width: 100%; font-family: monospace; font-size: 12px; margin-top: 6px;"/>
 
     <hbox style="margin-top: 6px;">
-      <button id="annota-prompt-reset" label="Restore default prompt"/>
-      <button id="annota-prompt-clear" label="Clear this color's prompt" hidden="true"
-              style="margin-left: 6px;"/>
+      <button id="annota-prompt-clear" label="Clear this color's prompt"/>
       <spacer flex="1"/>
       <label id="annota-prompt-status" value="" style="opacity: 0.7;"/>
     </hbox>

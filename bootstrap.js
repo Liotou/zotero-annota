@@ -44,7 +44,10 @@ Annota = {
 	notifierID: null,
 	inProgress: new Set(),
 
-	// Prompt utilisé tant que l'utilisateur n'en a pas configuré un.
+	// Il n'existe volontairement AUCUN prompt par défaut : chaque couleur de
+	// surlignage a le sien, et une couleur sans prompt n'est pas traitée du tout.
+	// C'est ce qui permet de n'activer la génération que sur certaines couleurs.
+	//
 	// Variables substituées à l'exécution :
 	//   {{text}}        texte surligné (voir buildMessages pour le mode avancé)
 	//   {{title}}       titre du document source
@@ -55,34 +58,7 @@ Annota = {
 	//   {{page}}        page du passage surligné
 	//   {{maxWords}}    réglage « longueur max »
 	//   {{language}}    réglage « langue de sortie »
-	// D'autres exemples de prompts sont fournis dans PROMPT-EXAMPLES.txt.
-	DEFAULT_PROMPT: [
-		"You turn a highlighted passage from an academic article into a structured",
-		"note, ready to paste into a Zotero annotation comment.",
-		"",
-		"Reply EXACTLY in this format, and nothing else:",
-		"",
-		"<b>Title.</b>",
-		"Concise paraphrase.",
-		"<i>(Author, year, p.XX ; Author2, year)</i>",
-		"",
-		"Strict rules:",
-		"- The title is 3 to 8 words, captures the passage's core idea, and ends with",
-		"  a period placed INSIDE the <b>…</b> tags.",
-		"- The paraphrase restates the passage in your own words: 2 to 5 sentences,",
-		"  {{maxWords}} words maximum, faithful to the meaning, adding nothing.",
-		"- The reference line appears ONLY if the passage explicitly cites one or more",
-		"  sources (author name + year present in the highlighted text).",
-		"  Format: <i>(Author, year ; Author2, year)</i>, separator \" ; \".",
-		"  Include the page number IF it appears in the passage, right after the year",
-		"  as \", p.XX\" — e.g. (Moulin, 1999, p.93 ; Jacques, 2009).",
-		"  Keep page notation as written (p., pp., ranges such as \"p.12-15\").",
-		"  Never add a page number that is not in the passage.",
-		"- Never invent a reference, and never cite the source article itself.",
-		"- Reply in {{language}}.",
-		"- Use ONLY the <b> and <i> tags. No Markdown, no code blocks, no introduction",
-		"  or explanation.",
-	].join("\n"),
+	// Des exemples de prompts sont fournis dans PROMPT-EXAMPLES.txt.
 
 	// Palette de secours, si Zotero.Annotations.COLORS était indisponible.
 	// Doit rester alignée sur chrome/content/zotero/xpcom/annotations.js.
@@ -132,13 +108,12 @@ Annota = {
 		}
 	},
 
-	// Prompt applicable à une annotation, selon sa couleur.
-	getPromptTemplate(color) {
-		if (color) {
-			let override = this.getColorPrompts()[String(color).toLowerCase()];
-			if (override && String(override).trim()) return String(override);
-		}
-		return String(getPref("systemPrompt", "")).trim() || this.DEFAULT_PROMPT;
+	// Prompt configuré pour cette couleur, ou "" si la couleur n'en a pas.
+	// Une chaîne vide signifie « ne rien générer pour ce surlignage ».
+	getPromptForColor(color) {
+		if (!color) return "";
+		let tpl = this.getColorPrompts()[String(color).toLowerCase()];
+		return (tpl && String(tpl).trim()) ? String(tpl) : "";
 	},
 
 	init({ id, version, rootURI }) {
@@ -200,6 +175,10 @@ Annota = {
 
 		let text = (item.annotationText || "").trim();
 		if (!text) return;
+
+		// Aucun prompt pour cette couleur = la fonctionnalité est désactivée
+		// pour ce surlignage. On sort en silence, sans rien écrire.
+		if (!this.getPromptForColor(item.annotationColor)) return;
 
 		// Ne pas écraser un commentaire existant (sauf préférence contraire).
 		let existing = (item.annotationComment || "").trim();
@@ -320,7 +299,7 @@ Annota = {
 	// Construit les messages envoyés à l'API à partir du prompt configuré.
 	// `color` sélectionne un éventuel prompt spécifique à la couleur.
 	buildMessages(text, ctx, color) {
-		let tpl = this.getPromptTemplate(color);
+		let tpl = this.getPromptForColor(color);
 		let vars = {
 			text: text,
 			title: (ctx && ctx.title) || "",
@@ -463,12 +442,29 @@ Annota = {
 		if (!selected || !selected.length) return;
 
 		let all = await this.collectAnnotations(selected);
-		let targets = all.filter(a => this.isEligible(a, overwrite));
+		let eligible = all.filter(a => this.isEligible(a, overwrite));
+
+		// Les couleurs sans prompt sont ignorées : on les compte à part pour
+		// pouvoir l'expliquer, sinon l'absence de résultat serait incompréhensible.
+		let targets = [];
+		let noPrompt = 0;
+		for (let a of eligible) {
+			if (this.getPromptForColor(a.annotationColor)) targets.push(a);
+			else noPrompt++;
+		}
 
 		if (!targets.length) {
-			let why = all.length
-				? "Nothing to do — all annotations already have comments."
-				: "No highlight annotations found in the selection.";
+			let why;
+			if (noPrompt) {
+				why = noPrompt + " highlight" + (noPrompt > 1 ? "s" : "")
+					+ " skipped — their color has no prompt yet (Preferences → Annota).";
+			}
+			else if (all.length) {
+				why = "Nothing to do — all annotations already have comments.";
+			}
+			else {
+				why = "No highlight annotations found in the selection.";
+			}
 			toast("Annota", why);
 			return;
 		}
@@ -505,11 +501,13 @@ Annota = {
 		}
 
 		bar.setProgress(100);
-		bar.setText(failed
-			? ok + " generated, " + failed + " failed (see debug output)"
-			: ok + " comment" + (ok > 1 ? "s" : "") + " generated");
+		let summary = ok + " comment" + (ok > 1 ? "s" : "") + " generated";
+		if (failed) summary += ", " + failed + " failed (see debug output)";
+		if (noPrompt) summary += ", " + noPrompt + " skipped (color has no prompt)";
+		bar.setText(summary);
 		pw.startCloseTimer(failed ? 8000 : 4000);
-		log("runBatch terminé : " + ok + " ok, " + failed + " échecs");
+		log("runBatch terminé : " + ok + " ok, " + failed + " échecs, "
+			+ noPrompt + " sans prompt");
 	},
 
 	// ---- Menu contextuel (une entrée par fenêtre principale) ----

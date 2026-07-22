@@ -20,16 +20,6 @@
   -moz-appearance: none;
 }
 
-/* Puce « Default » : du texte plutôt qu'une couleur. */
-.annota-swatch.annota-default {
-  width: auto;
-  height: 28px;
-  padding: 0 10px;
-  font: inherit;
-  background: transparent;
-  color: inherit;
-}
-
 .annota-swatch:hover {
   border-color: rgba(0, 0, 0, 0.6);
 }
@@ -51,10 +41,6 @@
   border-radius: 50%;
   background: #2b8a3e;
   border: 1.5px solid Field;
-}
-
-.annota-swatch.annota-default[data-has-prompt="true"]::after {
-  display: none;
 }
 
 @media (prefers-color-scheme: dark) {

@@ -4,13 +4,16 @@
 PDF reader is sent to an LLM, and the response becomes the annotation's
 comment** — on the fly, as soon as the highlight is created.
 
-The prompt is entirely yours. Summaries, plain-language explanations,
-translations, key-point extraction, formatted academic notes… you decide what
-the model produces. Ready-made prompts are collected in
-[PROMPT-EXAMPLES.txt](PROMPT-EXAMPLES.txt) to get you started, and it works with
-Mistral (default) or any OpenAI-compatible endpoint.
+**You assign a prompt to each highlight color**, so a color can summarize,
+another critique, another translate — and a color with no prompt is simply left
+alone. Nothing is configured out of the box: Annota stays inert until you give
+at least one color a prompt.
 
-### Example: the default academic prompt
+Ready-made prompts are collected in
+[PROMPT-EXAMPLES.txt](PROMPT-EXAMPLES.txt), and Annota works with Mistral
+(default) or any OpenAI-compatible endpoint.
+
+### Example output (from the academic prompt in PROMPT-EXAMPLES.txt)
 
 ```
 <b>Title.</b>
@@ -20,7 +23,8 @@ Concise paraphrase (2 to 5 sentences, ~80 words max).
 
 The third line (references) appears only if the passage explicitly cites
 sources; a page number present in the passage ("Moulin, 1999, p.93") is kept
-as-is. This is only the default — replace it with your own at any time.
+as-is. That behaviour comes from the prompt, not from Annota — write your own
+and you get something else entirely.
 
 ## Installation
 
@@ -76,10 +80,17 @@ reinstall. Zotero polls periodically; you can also force a check via
   (default 1200 characters; set 0 for no truncation).
 
 ### Prompt
-The prompt field is the heart of Annota: write whatever you want there.
-**"Restore default prompt"** brings back the built-in academic prompt. Copyable
-examples — summary, translation, critical reading, key points, and more — live
-in [PROMPT-EXAMPLES.txt](PROMPT-EXAMPLES.txt).
+Above the prompt box is a row of **color swatches** — the same colors you use to
+highlight in the reader, read straight from Zotero's own palette. Click one to
+write that color's prompt.
+
+- **A color with no prompt is never processed.** That is how you keep Annota off
+  certain colors — leave them empty.
+- A **green dot** marks the colors that are active.
+- **Clear this color's prompt** switches a color back off.
+- Everything is empty on a fresh install, so nothing happens until you set up at
+  least one color. Copyable examples live in
+  [PROMPT-EXAMPLES.txt](PROMPT-EXAMPLES.txt).
 
 **Variables** substituted at call time:
 
@@ -94,17 +105,6 @@ in [PROMPT-EXAMPLES.txt](PROMPT-EXAMPLES.txt).
 | `{{page}}` | page of the highlighted passage |
 | `{{maxWords}}` | the "max length" setting |
 | `{{language}}` | the "output language" setting |
-
-#### A different prompt per highlight color
-
-Above the prompt box is a row of **color swatches** — the same colors you use to
-highlight in the reader, read straight from Zotero's own palette. Click one to
-edit that color's prompt: yellow summarizes, red critiques, blue translates, and
-so on.
-
-- **Default** holds the prompt used by every color that has no prompt of its own.
-- A **green dot** marks colors that have their own prompt.
-- **Clear this color's prompt** sends a color back to the default.
 
 Two modes depending on the prompt:
 - **Standard** (no `{{text}}`) — your prompt acts as instructions, and the
@@ -124,13 +124,14 @@ selection of annotations** in your library and use the **Annota** submenu:
 
 Works on multiple selected items at once, with a progress indicator. This is an
 explicit action, so it runs even when automatic generation is turned off, and
-each annotation uses the prompt matching its own color.
+each annotation uses the prompt of its own color. Highlights whose color has no
+prompt are skipped and reported as such.
 
 ## How it works
 
 - Listens to the `add` event of Zotero's notifier on annotation items.
 - Processes only `annotationType` = `highlight` (+ `underline` if enabled), with
-  non-empty text.
+  non-empty text **and whose color has a prompt**; other highlights are ignored.
 - Sends the text to the configured prompt, then writes the response into
   `annotationComment`. The reader updates on its own.
 - Writing the comment triggers a `modify` event (not `add`), so there is no
@@ -144,7 +145,8 @@ The API key is stored **in plain text** in the Zotero profile's preferences
 
 ## Development
 
-- Default prompt: `bootstrap.js` → `Annota.DEFAULT_PROMPT`.
+- Per-color prompt resolution: `bootstrap.js` → `getPromptForColor()`
+  (returns `""` when the color has no prompt, which means "skip").
 - Annotation triggering / filtering: `bootstrap.js` → `handleItem()`.
 - Source metadata lookup: `bootstrap.js` → `getContext()`.
 - Request building (variables, modes): `bootstrap.js` → `buildMessages()`.
