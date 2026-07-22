@@ -130,8 +130,9 @@ Annota = {
 		return this.PRESETS[0].prompt;
 	},
 
-	// Palette de surlignage de Zotero. Permet d'associer un prompt à une couleur.
-	COLORS: [
+	// Palette de secours, si Zotero.Annotations.COLORS était indisponible.
+	// Doit rester alignée sur chrome/content/zotero/xpcom/annotations.js.
+	FALLBACK_COLORS: [
 		{ hex: "#ffd400", name: "Yellow" },
 		{ hex: "#ff6666", name: "Red" },
 		{ hex: "#5fb236", name: "Green" },
@@ -141,6 +142,27 @@ Annota = {
 		{ hex: "#f19837", name: "Orange" },
 		{ hex: "#aaaaaa", name: "Gray" }
 	],
+
+	// Palette de surlignage lue directement depuis Zotero : elle reste ainsi
+	// identique à celle du sélecteur de couleurs du lecteur, même si Zotero
+	// la fait évoluer. Format source : [clé l10n, hex].
+	get COLORS() {
+		try {
+			let raw = Zotero.Annotations && Zotero.Annotations.COLORS;
+			if (Array.isArray(raw) && raw.length) {
+				return raw.map(pair => ({
+					hex: String(pair[1]).toLowerCase(),
+					name: String(pair[0])
+						.replace(/^general-/, "")
+						.replace(/^./, m => m.toUpperCase())
+				}));
+			}
+		}
+		catch (e) {
+			log("COLORS: lecture de la palette Zotero impossible, repli : " + e);
+		}
+		return this.FALLBACK_COLORS;
+	},
 
 	// Prompts par couleur : { "#ff6666": "…", … }. Vide = utiliser le prompt par défaut.
 	getColorPrompts() {
@@ -637,6 +659,7 @@ async function startup({ id, version, rootURI }) {
 		pluginID: "annota@equiriconi",
 		src: rootURI + "preferences.xhtml",
 		scripts: [rootURI + "preferences.js"],
+		stylesheets: [rootURI + "preferences.css"],
 		label: "Annota"
 	});
 

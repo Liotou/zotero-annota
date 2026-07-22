@@ -14,6 +14,7 @@ zip -r -X "$OUT" \
     prefs.js \
     preferences.xhtml \
     preferences.js \
+    preferences.css \
     -x "*.DS_Store"
 
 echo "OK -> $(pwd)/$OUT"

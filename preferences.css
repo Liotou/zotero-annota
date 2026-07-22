@@ -1,0 +1,70 @@
+/* Pastilles de couleur du panneau de préférences Annota. */
+
+#annota-swatches {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 2px;
+}
+
+.annota-swatch {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  appearance: none;
+  -moz-appearance: none;
+}
+
+/* Puce « Default » : du texte plutôt qu'une couleur. */
+.annota-swatch.annota-default {
+  width: auto;
+  height: 28px;
+  padding: 0 10px;
+  font: inherit;
+  background: transparent;
+  color: inherit;
+}
+
+.annota-swatch:hover {
+  border-color: rgba(0, 0, 0, 0.6);
+}
+
+/* Cible en cours d'édition. */
+.annota-swatch[data-selected="true"] {
+  outline: 2px solid #4a9eff;
+  outline-offset: 2px;
+}
+
+/* Pastille verte marquant une couleur qui a son propre prompt. */
+.annota-swatch[data-has-prompt="true"]::after {
+  content: "";
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #2b8a3e;
+  border: 1.5px solid Field;
+}
+
+.annota-swatch.annota-default[data-has-prompt="true"]::after {
+  display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .annota-swatch {
+    border-color: rgba(255, 255, 255, 0.35);
+  }
+  .annota-swatch:hover {
+    border-color: rgba(255, 255, 255, 0.7);
+  }
+  .annota-swatch[data-has-prompt="true"]::after {
+    background: #51cf66;
+  }
+}

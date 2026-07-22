@@ -59,8 +59,9 @@
 		let clearBtn = document.getElementById("annota-prompt-clear");
 		let status = document.getElementById("annota-prompt-status");
 		let presetSel = document.getElementById("annota-preset");
-		let targetSel = document.getElementById("annota-target");
-		if (!textarea || !resetBtn || !targetSel) {
+		let swatchBox = document.getElementById("annota-swatches");
+		let targetName = document.getElementById("annota-target-name");
+		if (!textarea || !resetBtn || !swatchBox) {
 			requestAnimationFrame(setup);
 			return;
 		}
@@ -86,7 +87,7 @@
 				Zotero.Prefs.set(PREF_PROMPT, textarea.value);
 			}
 			flashStatus("Saved ✓");
-			refreshTargetLabels();
+			refreshSwatches();
 		}
 
 		let saveTimer = null;
@@ -114,31 +115,56 @@
 			}
 			if (clearBtn) clearBtn.hidden = !target;
 			resetBtn.hidden = !!target;
+			if (targetName) {
+				let c = colors().find(x => x.hex === target);
+				targetName.setAttribute("value",
+					target ? (c ? c.name : target) : "Default (all colors)");
+			}
+			refreshSwatches();
 		}
 
-		// Marque d'un point les couleurs qui ont leur propre prompt.
-		function refreshTargetLabels() {
+		// Reflète l'état : cible sélectionnée + couleurs ayant leur propre prompt.
+		function refreshSwatches() {
 			let map = readColorMap();
-			for (let opt of targetSel.options) {
-				if (!opt.value) continue;
-				let base = opt.getAttribute("data-label") || opt.textContent;
-				opt.setAttribute("data-label", base);
-				opt.textContent = map[opt.value] ? base + " ●" : base;
+			for (let el of swatchBox.children) {
+				let hex = el.getAttribute("data-color") || "";
+				el.setAttribute("data-selected", hex === current ? "true" : "false");
+				el.setAttribute("data-has-prompt", (hex && map[hex]) ? "true" : "false");
+				if (hex) {
+					let name = el.getAttribute("data-name") || hex;
+					el.setAttribute("title",
+						map[hex] ? name + " — custom prompt" : name + " — uses default prompt");
+				}
 			}
 		}
 
-		// --- Sélecteur de cible (défaut / couleurs) ---
-		for (let c of colors()) {
-			let opt = document.createElementNS(XHTML_NS, "option");
-			opt.setAttribute("value", c.hex);
-			opt.setAttribute("data-label", c.name);
-			opt.textContent = c.name;
-			targetSel.appendChild(opt);
+		// --- Pastilles de couleur (défaut + palette Zotero) ---
+		function addSwatch({ hex, name, label }) {
+			let b = document.createElementNS(XHTML_NS, "button");
+			b.setAttribute("type", "button");
+			b.setAttribute("class", "annota-swatch" + (hex ? "" : " annota-default"));
+			b.setAttribute("data-color", hex || "");
+			if (hex) {
+				b.setAttribute("data-name", name);
+				b.style.backgroundColor = hex;
+			}
+			else {
+				b.textContent = label;
+				b.setAttribute("title", "Prompt used by every color without its own");
+			}
+			b.addEventListener("click", () => {
+				if (current === (hex || "")) return;
+				saveNow();          // ne pas perdre l'édition en cours
+				load(hex || "");
+			});
+			swatchBox.appendChild(b);
+			return b;
 		}
-		targetSel.addEventListener("change", () => {
-			saveNow();              // ne pas perdre l'édition en cours
-			load(targetSel.value);
-		});
+
+		addSwatch({ hex: "", label: "Default" });
+		for (let c of colors()) {
+			addSwatch({ hex: c.hex, name: c.name });
+		}
 
 		// --- Textarea ---
 		textarea.addEventListener("input", scheduleSave);
@@ -148,7 +174,6 @@
 		function restoreDefault() {
 			Zotero.Prefs.clear(PREF_PROMPT);
 			load("");
-			targetSel.value = "";
 			flashStatus("Restored ✓");
 		}
 		resetBtn.addEventListener("command", restoreDefault);
@@ -161,7 +186,7 @@
 				delete map[current];
 				writeColorMap(map);
 				textarea.value = "";
-				refreshTargetLabels();
+				refreshSwatches();
 				flashStatus("Cleared ✓");
 			}
 			clearBtn.addEventListener("command", clearColor);
@@ -188,7 +213,7 @@
 		}
 
 		load("");
-		refreshTargetLabels();
+		refreshSwatches();
 	}
 
 	setup();

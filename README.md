@@ -96,10 +96,14 @@ freely. **"Restore default preset"** brings back the academic preset.
 
 #### A different prompt per highlight color
 
-Pick a color in **"Editing prompt for"** to give it its own prompt — yellow
-summarizes, red critiques, blue translates, and so on. Colors you leave empty
-fall back to the default prompt, and colors that have their own prompt are
-marked with a ● in the list.
+Above the prompt box is a row of **color swatches** — the same colors you use to
+highlight in the reader, read straight from Zotero's own palette. Click one to
+edit that color's prompt: yellow summarizes, red critiques, blue translates, and
+so on.
+
+- **Default** holds the prompt used by every color that has no prompt of its own.
+- A **green dot** marks colors that have their own prompt.
+- **Clear this color's prompt** sends a color back to the default.
 
 Two modes depending on the prompt:
 - **Standard** (no `{{text}}`) — your prompt acts as instructions, and the

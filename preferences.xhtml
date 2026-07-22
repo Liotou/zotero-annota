@@ -128,13 +128,14 @@
 
     <hbox align="center" style="margin-top: 8px;">
       <label value="Editing prompt for:"/>
-      <html:select id="annota-target" style="min-width: 22em;">
-        <html:option value="">Default (all colors)</html:option>
-      </html:select>
+      <label id="annota-target-name" value="Default (all colors)"
+             style="font-weight: bold;"/>
     </hbox>
+    <html:div id="annota-swatches"/>
     <description id="annota-target-hint" style="max-width: 46em; opacity: 0.8;">
-      Give a highlight color its own prompt — e.g. yellow summarizes, red
-      critiques, blue translates. Colors left empty fall back to the default.
+      Click a highlight color to give it its own prompt — e.g. yellow
+      summarizes, red critiques, blue translates. A green dot marks colors that
+      have one; the others fall back to the default prompt.
     </description>
 
     <hbox align="center" style="margin-top: 6px;">
