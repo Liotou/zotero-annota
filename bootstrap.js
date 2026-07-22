@@ -44,8 +44,7 @@ Annota = {
 	notifierID: null,
 	inProgress: new Set(),
 
-	// Modèles de prompts prêts à l'emploi, proposés dans les préférences.
-	// L'utilisateur peut en choisir un, le modifier, ou écrire le sien.
+	// Prompt utilisé tant que l'utilisateur n'en a pas configuré un.
 	// Variables substituées à l'exécution :
 	//   {{text}}        texte surligné (voir buildMessages pour le mode avancé)
 	//   {{title}}       titre du document source
@@ -56,79 +55,34 @@ Annota = {
 	//   {{page}}        page du passage surligné
 	//   {{maxWords}}    réglage « longueur max »
 	//   {{language}}    réglage « langue de sortie »
-	PRESETS: [
-		{
-			id: "academic",
-			label: "Academic note (title + paraphrase + references)",
-			prompt: [
-				"You turn a highlighted passage from an academic article into a structured",
-				"note, ready to paste into a Zotero annotation comment.",
-				"",
-				"Reply EXACTLY in this format, and nothing else:",
-				"",
-				"<b>Title.</b>",
-				"Concise paraphrase.",
-				"<i>(Author, year, p.XX ; Author2, year)</i>",
-				"",
-				"Strict rules:",
-				"- The title is 3 to 8 words, captures the passage's core idea, and ends with",
-				"  a period placed INSIDE the <b>…</b> tags.",
-				"- The paraphrase restates the passage in your own words: 2 to 5 sentences,",
-				"  {{maxWords}} words maximum, faithful to the meaning, adding nothing.",
-				"- The reference line appears ONLY if the passage explicitly cites one or more",
-				"  sources (author name + year present in the highlighted text).",
-				"  Format: <i>(Author, year ; Author2, year)</i>, separator \" ; \".",
-				"  Include the page number IF it appears in the passage, right after the year",
-				"  as \", p.XX\" — e.g. (Moulin, 1999, p.93 ; Jacques, 2009).",
-				"  Keep page notation as written (p., pp., ranges such as \"p.12-15\").",
-				"  Never add a page number that is not in the passage.",
-				"- Never invent a reference, and never cite the source article itself.",
-				"- Reply in {{language}}.",
-				"- Use ONLY the <b> and <i> tags. No Markdown, no code blocks, no introduction",
-				"  or explanation.",
-			].join("\n")
-		},
-		{
-			id: "summary",
-			label: "Brief summary",
-			prompt: [
-				"Summarize the highlighted passage faithfully in {{language}}.",
-				"{{maxWords}} words maximum. Return only the summary, with no introduction",
-				"and no meta commentary.",
-			].join("\n")
-		},
-		{
-			id: "plain",
-			label: "Plain-language explanation",
-			prompt: [
-				"Explain the highlighted passage in {{language}}, in plain and accessible",
-				"language, as if to a non-specialist. {{maxWords}} words maximum.",
-				"Get straight to the point, with no introductory sentence.",
-			].join("\n")
-		},
-		{
-			id: "keypoints",
-			label: "Key points (bulleted list)",
-			prompt: [
-				"Extract the key points of the highlighted passage as a bulleted list in",
-				"{{language}}. One bullet per idea (\"- \" at the start of the line), concise",
-				"wording. No introduction and no conclusion.",
-			].join("\n")
-		},
-		{
-			id: "translate",
-			label: "Translation",
-			prompt: [
-				"Translate the highlighted passage faithfully into {{language}}.",
-				"Return only the translation, with no notes and no commentary.",
-			].join("\n")
-		}
-	],
-
-	// Prompt utilisé si aucun n'est configuré : le premier preset (académique).
-	get DEFAULT_PROMPT() {
-		return this.PRESETS[0].prompt;
-	},
+	// D'autres exemples de prompts sont fournis dans PROMPT-EXAMPLES.txt.
+	DEFAULT_PROMPT: [
+		"You turn a highlighted passage from an academic article into a structured",
+		"note, ready to paste into a Zotero annotation comment.",
+		"",
+		"Reply EXACTLY in this format, and nothing else:",
+		"",
+		"<b>Title.</b>",
+		"Concise paraphrase.",
+		"<i>(Author, year, p.XX ; Author2, year)</i>",
+		"",
+		"Strict rules:",
+		"- The title is 3 to 8 words, captures the passage's core idea, and ends with",
+		"  a period placed INSIDE the <b>…</b> tags.",
+		"- The paraphrase restates the passage in your own words: 2 to 5 sentences,",
+		"  {{maxWords}} words maximum, faithful to the meaning, adding nothing.",
+		"- The reference line appears ONLY if the passage explicitly cites one or more",
+		"  sources (author name + year present in the highlighted text).",
+		"  Format: <i>(Author, year ; Author2, year)</i>, separator \" ; \".",
+		"  Include the page number IF it appears in the passage, right after the year",
+		"  as \", p.XX\" — e.g. (Moulin, 1999, p.93 ; Jacques, 2009).",
+		"  Keep page notation as written (p., pp., ranges such as \"p.12-15\").",
+		"  Never add a page number that is not in the passage.",
+		"- Never invent a reference, and never cite the source article itself.",
+		"- Reply in {{language}}.",
+		"- Use ONLY the <b> and <i> tags. No Markdown, no code blocks, no introduction",
+		"  or explanation.",
+	].join("\n"),
 
 	// Palette de secours, si Zotero.Annotations.COLORS était indisponible.
 	// Doit rester alignée sur chrome/content/zotero/xpcom/annotations.js.

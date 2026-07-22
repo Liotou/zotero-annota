@@ -1,0 +1,157 @@
+================================================================================
+ANNOTA — EXAMPLE PROMPTS
+================================================================================
+
+Copy any of these into the prompt box in Annota's preferences
+(Add-ons -> Annota), or use them as a starting point for your own.
+
+You can also assign a different prompt to each highlight color: click a color
+swatch above the prompt box, then paste a prompt for that color. Colors without
+their own prompt fall back to the default one.
+
+
+--------------------------------------------------------------------------------
+AVAILABLE VARIABLES
+--------------------------------------------------------------------------------
+
+  {{text}}         the highlighted text
+  {{title}}        title of the source document
+  {{authors}}      authors of the source document
+  {{year}}         year of the source document
+  {{abstract}}     abstract of the source document (truncated per settings)
+  {{publication}}  journal / book / proceedings
+  {{page}}         page of the highlighted passage
+  {{maxWords}}     the "Word limit" setting
+  {{language}}     the "Reply language" setting
+
+Two modes:
+
+  * If your prompt does NOT contain {{text}}, it is used as instructions and
+    the highlighted passage is appended automatically (with the document
+    context, if that option is enabled). This is the usual case.
+
+  * If your prompt DOES contain {{text}}, it is sent exactly as written and
+    you control the whole request yourself.
+
+
+--------------------------------------------------------------------------------
+1. ACADEMIC NOTE  (this is Annota's built-in default)
+--------------------------------------------------------------------------------
+
+You turn a highlighted passage from an academic article into a structured
+note, ready to paste into a Zotero annotation comment.
+
+Reply EXACTLY in this format, and nothing else:
+
+<b>Title.</b>
+Concise paraphrase.
+<i>(Author, year, p.XX ; Author2, year)</i>
+
+Strict rules:
+- The title is 3 to 8 words, captures the passage's core idea, and ends with
+  a period placed INSIDE the <b>…</b> tags.
+- The paraphrase restates the passage in your own words: 2 to 5 sentences,
+  {{maxWords}} words maximum, faithful to the meaning, adding nothing.
+- The reference line appears ONLY if the passage explicitly cites one or more
+  sources (author name + year present in the highlighted text).
+  Format: <i>(Author, year ; Author2, year)</i>, separator " ; ".
+  Include the page number IF it appears in the passage, right after the year
+  as ", p.XX" — e.g. (Moulin, 1999, p.93 ; Jacques, 2009).
+  Keep page notation as written (p., pp., ranges such as "p.12-15").
+  Never add a page number that is not in the passage.
+- Never invent a reference, and never cite the source article itself.
+- Reply in {{language}}.
+- Use ONLY the <b> and <i> tags. No Markdown, no code blocks, no introduction
+  or explanation.
+
+
+--------------------------------------------------------------------------------
+2. BRIEF SUMMARY
+--------------------------------------------------------------------------------
+
+Summarize the highlighted passage faithfully in {{language}}.
+{{maxWords}} words maximum. Return only the summary, with no introduction
+and no meta commentary.
+
+
+--------------------------------------------------------------------------------
+3. PLAIN-LANGUAGE EXPLANATION
+--------------------------------------------------------------------------------
+
+Explain the highlighted passage in {{language}}, in plain and accessible
+language, as if to a non-specialist. {{maxWords}} words maximum.
+Get straight to the point, with no introductory sentence.
+
+
+--------------------------------------------------------------------------------
+4. KEY POINTS (BULLETED LIST)
+--------------------------------------------------------------------------------
+
+Extract the key points of the highlighted passage as a bulleted list in
+{{language}}. One bullet per idea ("- " at the start of the line), concise
+wording. No introduction and no conclusion.
+
+
+--------------------------------------------------------------------------------
+5. TRANSLATION
+--------------------------------------------------------------------------------
+
+Translate the highlighted passage faithfully into {{language}}.
+Return only the translation, with no notes and no commentary.
+
+
+--------------------------------------------------------------------------------
+6. CRITICAL READING  (good candidate for a red highlight)
+--------------------------------------------------------------------------------
+
+Assess the highlighted passage critically, in {{language}}, in at most
+{{maxWords}} words. Name the claim being made, then the main limitation:
+unsupported assertion, ambiguous term, missing evidence, or overreach.
+If the passage is sound, say so in one sentence rather than inventing a flaw.
+Return only the assessment, with no introduction.
+
+
+--------------------------------------------------------------------------------
+7. DEFINITION OF TERMS  (good candidate for a green highlight)
+--------------------------------------------------------------------------------
+
+Define the key technical terms appearing in the highlighted passage, in
+{{language}}. One line per term, formatted as "<b>Term</b> — definition".
+Define each term as it is used in this specific context, not in general.
+If the passage contains no technical term, reply with a single dash.
+
+
+--------------------------------------------------------------------------------
+8. QUESTIONS RAISED  (useful for building a reading agenda)
+--------------------------------------------------------------------------------
+
+Based on the highlighted passage, write 2 to 4 questions in {{language}} that
+a researcher should investigate next. One question per line, starting with
+"- ". Make them specific to this passage, not generic. No introduction.
+
+
+--------------------------------------------------------------------------------
+9. LINK TO THE SOURCE  (uses document metadata)
+--------------------------------------------------------------------------------
+
+Summarize the highlighted passage in {{language}}, {{maxWords}} words maximum,
+then add a final line citing the source exactly as:
+<i>({{authors}}, {{year}}, p.{{page}})</i>
+If the author or year is unknown, omit that part rather than guessing.
+
+
+--------------------------------------------------------------------------------
+10. FULL CONTROL  (advanced mode, uses {{text}})
+--------------------------------------------------------------------------------
+
+Article: {{title}} ({{authors}}, {{year}})
+Abstract: {{abstract}}
+
+Passage highlighted by the reader on page {{page}}:
+"""
+{{text}}
+"""
+
+Explain in {{language}}, in {{maxWords}} words maximum, how this passage
+relates to the article's overall argument as described in the abstract.
+Return only that explanation.

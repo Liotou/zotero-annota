@@ -6,10 +6,11 @@ comment** — on the fly, as soon as the highlight is created.
 
 The prompt is entirely yours. Summaries, plain-language explanations,
 translations, key-point extraction, formatted academic notes… you decide what
-the model produces. **Built-in presets** are provided to get started, and it
-works with Mistral (default) or any OpenAI-compatible endpoint.
+the model produces. Ready-made prompts are collected in
+[PROMPT-EXAMPLES.txt](PROMPT-EXAMPLES.txt) to get you started, and it works with
+Mistral (default) or any OpenAI-compatible endpoint.
 
-### Example: the "Academic note" preset (shipped as the default)
+### Example: the default academic prompt
 
 ```
 <b>Title.</b>
@@ -19,7 +20,7 @@ Concise paraphrase (2 to 5 sentences, ~80 words max).
 
 The third line (references) appears only if the passage explicitly cites
 sources; a page number present in the passage ("Moulin, 1999, p.93") is kept
-as-is. This is just one preset — replace it with your own at any time.
+as-is. This is only the default — replace it with your own at any time.
 
 ## Installation
 
@@ -75,10 +76,10 @@ reinstall. Zotero polls periodically; you can also force a check via
   (default 1200 characters; set 0 for no truncation).
 
 ### Prompt
-The prompt field is the heart of Annota. An **"Insert a preset"** menu offers
-starting points (academic note, summary, plain-language explanation, key points,
-translation); selecting a preset fills the field, which you can then edit
-freely. **"Restore default preset"** brings back the academic preset.
+The prompt field is the heart of Annota: write whatever you want there.
+**"Restore default prompt"** brings back the built-in academic prompt. Copyable
+examples — summary, translation, critical reading, key points, and more — live
+in [PROMPT-EXAMPLES.txt](PROMPT-EXAMPLES.txt).
 
 **Variables** substituted at call time:
 
@@ -143,7 +144,7 @@ The API key is stored **in plain text** in the Zotero profile's preferences
 
 ## Development
 
-- Prompt presets and default prompt: `bootstrap.js` → `Annota.PRESETS`.
+- Default prompt: `bootstrap.js` → `Annota.DEFAULT_PROMPT`.
 - Annotation triggering / filtering: `bootstrap.js` → `handleItem()`.
 - Source metadata lookup: `bootstrap.js` → `getContext()`.
 - Request building (variables, modes): `bootstrap.js` → `buildMessages()`.

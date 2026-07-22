@@ -122,8 +122,9 @@
     <label><html:h2>Prompt</html:h2></label>
     <description style="max-width: 46em; opacity: 0.8;">
       Your highlighted text is sent to this prompt, and the reply becomes the
-      annotation comment. Write anything you want — the academic format is just
-      one preset.
+      annotation comment. Write anything you want — the default academic format
+      is only a starting point. See PROMPT-EXAMPLES.txt in the GitHub repository
+      for more ideas.
     </description>
 
     <hbox align="center" style="margin-top: 8px;">
@@ -138,18 +139,11 @@
       have one; the others fall back to the default prompt.
     </description>
 
-    <hbox align="center" style="margin-top: 6px;">
-      <label value="Insert a preset:"/>
-      <html:select id="annota-preset" style="min-width: 22em;">
-        <html:option value="">— pick a preset —</html:option>
-      </html:select>
-    </hbox>
-
     <html:textarea id="annota-prompt" rows="16"
                     style="width: 100%; font-family: monospace; font-size: 12px; margin-top: 6px;"/>
 
     <hbox style="margin-top: 6px;">
-      <button id="annota-prompt-reset" label="Restore default preset"/>
+      <button id="annota-prompt-reset" label="Restore default prompt"/>
       <button id="annota-prompt-clear" label="Clear this color's prompt" hidden="true"
               style="margin-left: 6px;"/>
       <spacer flex="1"/>

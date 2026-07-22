@@ -16,11 +16,6 @@
 		catch (e) { return null; }
 	}
 
-	function presets() {
-		let a = api();
-		return (a && Array.isArray(a.PRESETS)) ? a.PRESETS : [];
-	}
-
 	function colors() {
 		let a = api();
 		return (a && Array.isArray(a.COLORS)) ? a.COLORS : [];
@@ -58,7 +53,6 @@
 		let resetBtn = document.getElementById("annota-prompt-reset");
 		let clearBtn = document.getElementById("annota-prompt-clear");
 		let status = document.getElementById("annota-prompt-status");
-		let presetSel = document.getElementById("annota-preset");
 		let swatchBox = document.getElementById("annota-swatches");
 		let targetName = document.getElementById("annota-target-name");
 		if (!textarea || !resetBtn || !swatchBox) {
@@ -191,25 +185,6 @@
 			}
 			clearBtn.addEventListener("command", clearColor);
 			clearBtn.addEventListener("click", clearColor);
-		}
-
-		// --- Presets ---
-		if (presetSel) {
-			let list = presets();
-			for (let p of list) {
-				let opt = document.createElementNS(XHTML_NS, "option");
-				opt.setAttribute("value", p.id);
-				opt.textContent = p.label;
-				presetSel.appendChild(opt);
-			}
-			presetSel.addEventListener("change", () => {
-				let chosen = list.find(p => p.id === presetSel.value);
-				if (chosen) {
-					textarea.value = chosen.prompt;
-					saveNow();
-				}
-				presetSel.value = ""; // back to the "pick a preset" label
-			});
 		}
 
 		load("");
