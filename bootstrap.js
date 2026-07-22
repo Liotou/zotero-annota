@@ -130,6 +130,41 @@ Annota = {
 		return this.PRESETS[0].prompt;
 	},
 
+	// Palette de surlignage de Zotero. Permet d'associer un prompt à une couleur.
+	COLORS: [
+		{ hex: "#ffd400", name: "Yellow" },
+		{ hex: "#ff6666", name: "Red" },
+		{ hex: "#5fb236", name: "Green" },
+		{ hex: "#2ea8e5", name: "Blue" },
+		{ hex: "#a28ae5", name: "Purple" },
+		{ hex: "#e56eee", name: "Magenta" },
+		{ hex: "#f19837", name: "Orange" },
+		{ hex: "#aaaaaa", name: "Gray" }
+	],
+
+	// Prompts par couleur : { "#ff6666": "…", … }. Vide = utiliser le prompt par défaut.
+	getColorPrompts() {
+		try {
+			let raw = String(getPref("colorPrompts", "") || "").trim();
+			if (!raw) return {};
+			let obj = JSON.parse(raw);
+			return (obj && typeof obj === "object") ? obj : {};
+		}
+		catch (e) {
+			log("colorPrompts illisible (JSON invalide), ignoré : " + e);
+			return {};
+		}
+	},
+
+	// Prompt applicable à une annotation, selon sa couleur.
+	getPromptTemplate(color) {
+		if (color) {
+			let override = this.getColorPrompts()[String(color).toLowerCase()];
+			if (override && String(override).trim()) return String(override);
+		}
+		return String(getPref("systemPrompt", "")).trim() || this.DEFAULT_PROMPT;
+	},
+
 	init({ id, version, rootURI }) {
 		this.id = id;
 		this.version = version;
@@ -211,7 +246,7 @@ Annota = {
 			}
 
 			let ctx = this.getContext(item);
-			let comment = await this.generateComment(text, ctx, apiKey);
+			let comment = await this.generateComment(text, ctx, item.annotationColor, apiKey);
 
 			// Recharger l'item au cas où il aurait changé pendant l'appel réseau.
 			let fresh = await Zotero.Items.getAsync(id);
@@ -307,8 +342,9 @@ Annota = {
 	},
 
 	// Construit les messages envoyés à l'API à partir du prompt configuré.
-	buildMessages(text, ctx) {
-		let tpl = String(getPref("systemPrompt", "")).trim() || this.DEFAULT_PROMPT;
+	// `color` sélectionne un éventuel prompt spécifique à la couleur.
+	buildMessages(text, ctx, color) {
+		let tpl = this.getPromptTemplate(color);
 		let vars = {
 			text: text,
 			title: (ctx && ctx.title) || "",
@@ -342,7 +378,7 @@ Annota = {
 		];
 	},
 
-	async generateComment(text, ctx, apiKey) {
+	async generateComment(text, ctx, color, apiKey) {
 		let endpoint = String(getPref("endpoint", "https://api.mistral.ai/v1/chat/completions")).trim();
 		let model = String(getPref("model", "mistral-large-latest")).trim() || "mistral-large-latest";
 		let temp = parseFloat(getPref("temperature", 0.2));
@@ -352,7 +388,7 @@ Annota = {
 		let payload = {
 			model,
 			temperature: temp,
-			messages: this.buildMessages(text, ctx)
+			messages: this.buildMessages(text, ctx, color)
 		};
 
 		let resp;
@@ -382,6 +418,201 @@ Annota = {
 		return this.sanitize(content);
 	},
 
+	// ---- Traitement a posteriori (menu contextuel) ----
+
+	// Rassemble les annotations éligibles à partir d'une sélection : items
+	// classiques, pièces jointes, ou annotations sélectionnées directement.
+	async collectAnnotations(items) {
+		let out = [];
+		let seen = new Set();
+
+		let push = (ann) => {
+			if (ann && !seen.has(ann.id)) { seen.add(ann.id); out.push(ann); }
+		};
+
+		for (let item of items) {
+			try {
+				if (item.isAnnotation && item.isAnnotation()) { push(item); continue; }
+
+				let attachments = [];
+				if (item.isAttachment && item.isAttachment()) {
+					attachments = [item];
+				}
+				else if (item.isRegularItem && item.isRegularItem()) {
+					let ids = item.getAttachments();
+					attachments = await Zotero.Items.getAsync(ids);
+				}
+
+				for (let att of attachments) {
+					if (!att || !att.isFileAttachment || !att.isFileAttachment()) continue;
+					for (let ann of att.getAnnotations()) push(ann);
+				}
+			}
+			catch (e) {
+				log("collectAnnotations: " + e);
+			}
+		}
+		return out;
+	},
+
+	// Annotation traitable ? (type ciblé, texte non vide, bibliothèque modifiable)
+	isEligible(ann, overwrite) {
+		if (!ann || !ann.isAnnotation || !ann.isAnnotation()) return false;
+		if (!this.targetTypes().includes(ann.annotationType)) return false;
+		if (ann.library && ann.library.editable === false) return false;
+		if (!(ann.annotationText || "").trim()) return false;
+		if ((ann.annotationComment || "").trim() && !overwrite) return false;
+		return true;
+	},
+
+	// Lance la génération sur la sélection courante de la fenêtre.
+	// Volontairement indépendant de la préférence « enabled » : l'action est explicite.
+	async runBatch(window, opts = {}) {
+		let overwrite = !!opts.overwrite;
+
+		let apiKey = String(getPref("apiKey", "")).trim();
+		if (!apiKey) {
+			toast("Annota", "API key missing (Preferences → Annota).", "error");
+			return;
+		}
+
+		let selected;
+		try {
+			selected = window.ZoteroPane.getSelectedItems();
+		}
+		catch (e) {
+			log("runBatch: sélection illisible : " + e);
+			return;
+		}
+		if (!selected || !selected.length) return;
+
+		let all = await this.collectAnnotations(selected);
+		let targets = all.filter(a => this.isEligible(a, overwrite));
+
+		if (!targets.length) {
+			let why = all.length
+				? "Nothing to do — all annotations already have comments."
+				: "No highlight annotations found in the selection.";
+			toast("Annota", why);
+			return;
+		}
+
+		let pw = new Zotero.ProgressWindow({ closeOnClick: false });
+		pw.changeHeadline("Annota");
+		let bar = new pw.ItemProgress(
+			"chrome://zotero/skin/tick.png",
+			"Generating 0/" + targets.length + "…"
+		);
+		pw.show();
+
+		let ok = 0, failed = 0;
+		for (let i = 0; i < targets.length; i++) {
+			let ann = targets[i];
+			try {
+				let ctx = this.getContext(ann);
+				let comment = await this.generateComment(
+					(ann.annotationText || "").trim(), ctx, ann.annotationColor, apiKey
+				);
+				let fresh = await Zotero.Items.getAsync(ann.id);
+				if (fresh) {
+					fresh.annotationComment = comment;
+					await fresh.saveTx();
+					ok++;
+				}
+			}
+			catch (e) {
+				failed++;
+				log("runBatch item " + ann.id + " : " + e);
+			}
+			bar.setProgress(Math.round(((i + 1) / targets.length) * 100));
+			bar.setText("Generating " + (i + 1) + "/" + targets.length + "…");
+		}
+
+		bar.setProgress(100);
+		bar.setText(failed
+			? ok + " generated, " + failed + " failed (see debug output)"
+			: ok + " comment" + (ok > 1 ? "s" : "") + " generated");
+		pw.startCloseTimer(failed ? 8000 : 4000);
+		log("runBatch terminé : " + ok + " ok, " + failed + " échecs");
+	},
+
+	// ---- Menu contextuel (une entrée par fenêtre principale) ----
+
+	_windows: new Map(),
+
+	selectionIsRelevant(window) {
+		try {
+			let items = window.ZoteroPane.getSelectedItems();
+			if (!items || !items.length) return false;
+			return items.some(i =>
+				(i.isAnnotation && i.isAnnotation())
+				|| (i.isAttachment && i.isAttachment())
+				|| (i.isRegularItem && i.isRegularItem()));
+		}
+		catch (e) {
+			return false;
+		}
+	},
+
+	addToWindow(window) {
+		try {
+			if (this._windows.has(window)) return;
+			let doc = window.document;
+			let itemmenu = doc.getElementById("zotero-itemmenu");
+			if (!itemmenu) return;
+
+			let menu = doc.createXULElement("menu");
+			menu.id = "annota-itemmenu";
+			menu.setAttribute("label", "Annota");
+
+			let popup = doc.createXULElement("menupopup");
+
+			let missing = doc.createXULElement("menuitem");
+			missing.setAttribute("label", "Generate missing comments");
+			missing.addEventListener("command", () => {
+				Annota.runBatch(window, { overwrite: false })
+					.catch(e => log("runBatch: " + e));
+			});
+			popup.appendChild(missing);
+
+			let all = doc.createXULElement("menuitem");
+			all.setAttribute("label", "Regenerate all comments");
+			all.addEventListener("command", () => {
+				Annota.runBatch(window, { overwrite: true })
+					.catch(e => log("runBatch: " + e));
+			});
+			popup.appendChild(all);
+
+			menu.appendChild(popup);
+			itemmenu.appendChild(menu);
+
+			// Masquer l'entrée quand la sélection ne peut porter aucune annotation.
+			let onShowing = () => { menu.hidden = !Annota.selectionIsRelevant(window); };
+			itemmenu.addEventListener("popupshowing", onShowing);
+
+			this._windows.set(window, { menu, itemmenu, onShowing });
+			log("Menu ajouté à la fenêtre");
+		}
+		catch (e) {
+			log("addToWindow: " + e);
+		}
+	},
+
+	removeFromWindow(window) {
+		let rec = this._windows.get(window);
+		if (!rec) return;
+		try { rec.itemmenu.removeEventListener("popupshowing", rec.onShowing); } catch (e) {}
+		try { rec.menu.remove(); } catch (e) {}
+		this._windows.delete(window);
+	},
+
+	removeFromAllWindows() {
+		for (let window of Array.from(this._windows.keys())) {
+			this.removeFromWindow(window);
+		}
+		this._windows.clear();
+	},
+
 	// Nettoie la sortie du modèle (retire d'éventuels blocs de code / espaces superflus).
 	sanitize(raw) {
 		let s = String(raw).trim();
@@ -409,12 +640,27 @@ async function startup({ id, version, rootURI }) {
 		label: "Annota"
 	});
 
+	// Fenêtres déjà ouvertes au moment de l'activation du plugin.
+	for (let window of Zotero.getMainWindows()) {
+		Annota.addToWindow(window);
+	}
+
 	log("Started (v" + version + ")");
+}
+
+function onMainWindowLoad({ window }) {
+	if (Annota) Annota.addToWindow(window);
+}
+
+function onMainWindowUnload({ window }) {
+	// Indispensable : conserver une référence à une fenêtre fermée fuirait.
+	if (Annota) Annota.removeFromWindow(window);
 }
 
 function shutdown() {
 	if (Annota) {
 		Annota.unregisterNotifier();
+		Annota.removeFromAllWindows();
 	}
 	try { delete Zotero.Annota; } catch (e) {}
 	Annota = undefined;

@@ -14,3 +14,5 @@ pref("extensions.zotero.annota.language", "français");
 pref("extensions.zotero.annota.temperature", "0.2");
 // Vide = utilise le prompt par défaut intégré (Annota.DEFAULT_PROMPT).
 pref("extensions.zotero.annota.systemPrompt", "");
+// JSON { "#ffd400": "prompt…", … } : prompt spécifique par couleur de surlignage.
+pref("extensions.zotero.annota.colorPrompts", "");

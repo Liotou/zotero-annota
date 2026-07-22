@@ -126,6 +126,17 @@
       one preset.
     </description>
 
+    <hbox align="center" style="margin-top: 8px;">
+      <label value="Editing prompt for:"/>
+      <html:select id="annota-target" style="min-width: 22em;">
+        <html:option value="">Default (all colors)</html:option>
+      </html:select>
+    </hbox>
+    <description id="annota-target-hint" style="max-width: 46em; opacity: 0.8;">
+      Give a highlight color its own prompt — e.g. yellow summarizes, red
+      critiques, blue translates. Colors left empty fall back to the default.
+    </description>
+
     <hbox align="center" style="margin-top: 6px;">
       <label value="Insert a preset:"/>
       <html:select id="annota-preset" style="min-width: 22em;">
@@ -138,6 +149,8 @@
 
     <hbox style="margin-top: 6px;">
       <button id="annota-prompt-reset" label="Restore default preset"/>
+      <button id="annota-prompt-clear" label="Clear this color's prompt" hidden="true"
+              style="margin-left: 6px;"/>
       <spacer flex="1"/>
       <label id="annota-prompt-status" value="" style="opacity: 0.7;"/>
     </hbox>

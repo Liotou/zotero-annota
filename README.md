@@ -94,12 +94,32 @@ freely. **"Restore default preset"** brings back the academic preset.
 | `{{maxWords}}` | the "max length" setting |
 | `{{language}}` | the "output language" setting |
 
+#### A different prompt per highlight color
+
+Pick a color in **"Editing prompt for"** to give it its own prompt — yellow
+summarizes, red critiques, blue translates, and so on. Colors you leave empty
+fall back to the default prompt, and colors that have their own prompt are
+marked with a ● in the list.
+
 Two modes depending on the prompt:
 - **Standard** (no `{{text}}`) — your prompt acts as instructions, and the
   highlighted text is appended automatically as the user message, preceded by
   the document context block if that option is enabled.
 - **Advanced** (the prompt contains `{{text}}`) — the prompt is sent as-is; you
   fully control the structure of the request.
+
+## Generating comments after the fact
+
+Highlights you made before installing Annota — or before changing your prompt —
+can be processed in bulk. **Right-click a reference, an attachment, or a
+selection of annotations** in your library and use the **Annota** submenu:
+
+- **Generate missing comments** — only annotations that have no comment yet.
+- **Regenerate all comments** — overwrites existing comments too.
+
+Works on multiple selected items at once, with a progress indicator. This is an
+explicit action, so it runs even when automatic generation is turned off, and
+each annotation uses the prompt matching its own color.
 
 ## How it works
 
