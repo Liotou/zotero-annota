@@ -1,15 +1,12 @@
 // Préférences par défaut (branche extensions.zotero.annota.*)
-// Fournisseur : false = Mistral/compatible OpenAI, true = Claude (Anthropic).
-pref("extensions.zotero.annota.useAnthropic", false);
+// Fournisseur : false = Mistral/compatible OpenAI, true = Claude Code CLI local.
+pref("extensions.zotero.annota.useClaudeCLI", false);
+pref("extensions.zotero.annota.cliPath", "claude");
+pref("extensions.zotero.annota.cliModel", "");
 // Fournisseur compatible OpenAI (Mistral par défaut).
 pref("extensions.zotero.annota.apiKey", "");
 pref("extensions.zotero.annota.model", "mistral-large-latest");
 pref("extensions.zotero.annota.endpoint", "https://api.mistral.ai/v1/chat/completions");
-// Claude (Anthropic).
-pref("extensions.zotero.annota.anthropicApiKey", "");
-pref("extensions.zotero.annota.anthropicModel", "claude-opus-4-8");
-pref("extensions.zotero.annota.anthropicVersion", "2023-06-01");
-pref("extensions.zotero.annota.maxTokens", 1024);
 pref("extensions.zotero.annota.enabled", true);
 pref("extensions.zotero.annota.overwrite", false);
 pref("extensions.zotero.annota.showPlaceholder", true);

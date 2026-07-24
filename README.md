@@ -60,15 +60,20 @@ reinstall. Zotero polls periodically; you can also force a check via
 - **⏳ while generating** — shows an indicator during the network call.
 
 ### AI provider
-Two providers are supported; the one you tick is the one that runs.
+Two providers; the CLI wins if ticked, otherwise Mistral is used.
 - **Mistral / OpenAI-compatible** (default) — API key (console.mistral.ai),
   model (`mistral-large-latest`), endpoint (any chat/completions URL), and
   temperature (0–2, lower = steadier).
-- **Claude (Anthropic)** — tick *Use Claude (Anthropic)*, then paste an Anthropic
-  key (console.anthropic.com), pick a model (default `claude-opus-4-8`), and set
-  max tokens. Temperature does not apply to Claude (the API rejects it), and the
-  Claude Messages API is called directly — much stronger results than Mistral on
-  academic notes, at a higher per-call cost.
+- **Claude Code CLI (local)** — tick *Use Claude Code CLI*. Annota then runs
+  `claude -p` as a local process, using whatever your `claude` command is logged
+  into (your Claude subscription) — **no API key, no per-token billing**.
+  - **`claude` path** — use the **absolute** path (Zotero doesn't inherit your
+    shell PATH), e.g. `/Users/you/.local/bin/claude`.
+  - **Model** — `sonnet`, `opus`, or a full id; blank = the CLI's default.
+  - It spawns a fresh process per call (a few seconds of cold start each), so
+    it fits the **on-request** mode better than bulk auto-generation, and needs
+    `claude` to be logged in (`claude` once in a terminal). Temperature is
+    Mistral-only.
 
 ### Text generation
 - **Output language** — available in the prompt via `{{language}}`.

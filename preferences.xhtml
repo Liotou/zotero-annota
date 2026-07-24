@@ -29,10 +29,43 @@
   <groupbox>
     <label><html:h2>AI provider</html:h2></label>
     <hbox align="center">
-      <checkbox label="Use Claude (Anthropic) instead of Mistral"
-                preference="extensions.zotero.annota.useAnthropic"
+      <checkbox label="Use Claude Code CLI (local — uses your Claude subscription, no API key)"
+                preference="extensions.zotero.annota.useClaudeCLI"
                 native="true"/>
     </hbox>
+    <description style="max-width: 46em; opacity: 0.8;">
+      Ticked: the local <html:b>Claude Code CLI</html:b> runs each request.
+      Unticked: the <html:b>Mistral</html:b> settings below are used.
+    </description>
+
+    <label style="margin-top: 10px;"><html:b>Claude Code CLI (local)</html:b></label>
+    <grid>
+      <columns>
+        <column/>
+        <column flex="1"/>
+      </columns>
+      <rows>
+        <row align="center">
+          <label value="claude path:" control="annota-cli-path"/>
+          <html:input id="annota-cli-path" type="text" style="width: 30em;"
+                      preference="extensions.zotero.annota.cliPath"/>
+        </row>
+        <row align="center">
+          <label value="Model (optional):" control="annota-cli-model"/>
+          <html:input id="annota-cli-model" type="text" style="width: 15em;"
+                      preference="extensions.zotero.annota.cliModel"/>
+        </row>
+      </rows>
+    </grid>
+    <description style="max-width: 46em; opacity: 0.8;">
+      Runs <html:code>claude -p</html:code> as a local process — no API key, it
+      uses whatever <html:code>claude</html:code> is logged into. Use the ABSOLUTE
+      path (Zotero doesn't see your shell PATH), e.g.
+      <html:code>/Users/you/.local/bin/claude</html:code>. Model can be
+      <html:code>sonnet</html:code>, <html:code>opus</html:code>, or a full id;
+      blank uses the CLI default. Slow (a few seconds' cold start per call), so
+      better suited to the "on request" mode than bulk auto-generation.
+    </description>
 
     <label style="margin-top: 6px;"><html:b>Mistral / OpenAI-compatible</html:b></label>
     <grid>
@@ -64,37 +97,9 @@
       </rows>
     </grid>
 
-    <label style="margin-top: 10px;"><html:b>Claude (Anthropic)</html:b></label>
-    <grid>
-      <columns>
-        <column/>
-        <column flex="1"/>
-      </columns>
-      <rows>
-        <row align="center">
-          <label value="Claude API key:" control="annota-claude-key"/>
-          <html:input id="annota-claude-key" type="password" style="width: 30em;"
-                      preference="extensions.zotero.annota.anthropicApiKey"/>
-        </row>
-        <row align="center">
-          <label value="Claude model:" control="annota-claude-model"/>
-          <html:input id="annota-claude-model" type="text" style="width: 30em;"
-                      preference="extensions.zotero.annota.anthropicModel"/>
-        </row>
-        <row align="center">
-          <label value="Max tokens:" control="annota-maxtokens"/>
-          <html:input id="annota-maxtokens" type="number" min="64" max="8192" step="64"
-                      style="width: 7em;"
-                      preference="extensions.zotero.annota.maxTokens"/>
-        </row>
-      </rows>
-    </grid>
     <description style="max-width: 46em; opacity: 0.8;">
       The Mistral path works with any OpenAI-compatible chat/completions endpoint
-      (get a key at console.mistral.ai). For Claude, tick the box above and paste
-      an Anthropic key from console.anthropic.com — default model
-      <html:code>claude-opus-4-8</html:code>. Temperature applies to the Mistral
-      path only (Claude rejects it). Only the ticked provider's key is used.
+      (get a key at console.mistral.ai).
     </description>
   </groupbox>
 

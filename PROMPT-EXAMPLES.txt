@@ -16,8 +16,9 @@ Each color also has a mode:
                          you want to write your paraphrase by hand first and have
                          the AI only format/title it (see {{comment}} and #11/#12).
 
-Provider: Mistral by default, or tick "Use Claude (Anthropic)" in preferences to
-use a Claude model (e.g. claude-opus-4-8) with its own API key.
+Provider: Mistral by default, or tick "Use Claude Code CLI" in preferences to run
+the local `claude -p` command instead (uses your Claude subscription, no API key;
+set the absolute path to `claude`).
 
 
 --------------------------------------------------------------------------------

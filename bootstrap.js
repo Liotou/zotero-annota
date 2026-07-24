@@ -134,13 +134,18 @@ Annota = {
 		return entry ? entry.prompt : "";
 	},
 
-	// Fournisseur actif et clé API correspondante.
+	// Fournisseur actif : CLI local si activé, sinon Mistral/compatible OpenAI.
 	provider() {
-		return getPref("useAnthropic", false) ? "anthropic" : "mistral";
+		return getPref("useClaudeCLI", false) ? "cli" : "mistral";
 	},
-	activeApiKey() {
-		let key = this.provider() === "anthropic" ? "anthropicApiKey" : "apiKey";
-		return String(getPref(key, "")).trim();
+	// Vérifie que le fournisseur choisi est prêt ; renvoie un message ou null.
+	providerReadyError() {
+		if (this.provider() === "cli") {
+			return String(getPref("cliPath", "claude")).trim()
+				? null : "Claude CLI path not set (Preferences → Annota).";
+		}
+		return String(getPref("apiKey", "")).trim()
+			? null : "API key missing (Preferences → Annota).";
 	},
 
 	init({ id, version, rootURI }) {
@@ -215,9 +220,9 @@ Annota = {
 		let overwrite = getPref("overwrite", false);
 		if (existing && !overwrite) return;
 
-		let apiKey = this.activeApiKey();
-		if (!apiKey) {
-			toast("Annota", "API key missing (Preferences → Annota).", "error");
+		let notReady = this.providerReadyError();
+		if (notReady) {
+			toast("Annota", notReady, "error");
 			return;
 		}
 
@@ -368,9 +373,69 @@ Annota = {
 
 	async generateComment({ text, ctx, color, comment }) {
 		let prompt = this.buildPrompt({ text, ctx, color, comment });
-		return this.provider() === "anthropic"
-			? this.callAnthropic(prompt)
+		return this.provider() === "cli"
+			? this.callCLI(prompt)
 			: this.callOpenAI(prompt);
+	},
+
+	// Claude Code CLI local (`claude -p`). Utilise l'abonnement connecté du CLI,
+	// pas l'API facturée au token. Aucune clé API : l'authentification est celle
+	// de `claude` sur la machine. Lent (démarrage à froid par appel).
+	async callCLI({ system, user }) {
+		let Subprocess;
+		try {
+			({ Subprocess } = ChromeUtils.importESModule(
+				"resource://gre/modules/Subprocess.sys.mjs"));
+		}
+		catch (e) {
+			throw new Error("Subprocess indisponible : " + (e.message || e));
+		}
+
+		let cmd = String(getPref("cliPath", "claude")).trim() || "claude";
+		let model = String(getPref("cliModel", "")).trim();
+		let args = ["-p", "--output-format", "text"];
+		if (model) args.push("--model", model);
+		if (system) args.push("--append-system-prompt", system);
+
+		// Répertoire de travail neutre : évite de charger un CLAUDE.md de projet.
+		let workdir;
+		try { workdir = Zotero.getTempDirectory().path; } catch (e) { workdir = undefined; }
+
+		let proc;
+		try {
+			proc = await Subprocess.call({
+				command: cmd,
+				arguments: args,
+				workdir,
+				stderr: "pipe"
+			});
+		}
+		catch (e) {
+			throw new Error("Impossible de lancer le CLI « " + cmd + " » : " + (e.message || e));
+		}
+
+		// Garde-fou : tuer le process s'il dépasse le délai (ex. non connecté).
+		let killTimer = setTimeout(() => { try { proc.kill(); } catch (e) {} }, 120000);
+		try {
+			await proc.stdin.write(user);
+			await proc.stdin.close();
+
+			let out = "", chunk;
+			while ((chunk = await proc.stdout.readString()) !== "") out += chunk;
+			let errText = "", ce;
+			while ((ce = await proc.stderr.readString()) !== "") errText += ce;
+
+			let { exitCode } = await proc.wait();
+			if (exitCode !== 0) {
+				throw new Error("CLI code " + exitCode + " : "
+					+ (errText.trim() || "(pas de sortie d'erreur)").slice(0, 300));
+			}
+			if (!out.trim()) throw new Error("Réponse vide du CLI");
+			return this.sanitize(out);
+		}
+		finally {
+			clearTimeout(killTimer);
+		}
 	},
 
 	// Fournisseur compatible OpenAI (Mistral par défaut).
@@ -396,37 +461,6 @@ Annota = {
 		let content = data && data.choices && data.choices[0]
 			&& data.choices[0].message && data.choices[0].message.content;
 		if (!content) throw new Error("Empty API response");
-		return this.sanitize(content);
-	},
-
-	// API Claude (Anthropic). Messages API : system au niveau racine,
-	// max_tokens obligatoire, PAS de temperature (rejetée en 400 par Opus 4.x).
-	async callAnthropic({ system, user }) {
-		let apiKey = String(getPref("anthropicApiKey", "")).trim();
-		if (!apiKey) throw new Error("Claude API key missing");
-		let model = String(getPref("anthropicModel", "claude-opus-4-8")).trim() || "claude-opus-4-8";
-		let maxTokens = parseInt(getPref("maxTokens", 1024), 10) || 1024;
-		let version = String(getPref("anthropicVersion", "2023-06-01")).trim() || "2023-06-01";
-
-		let body = { model, max_tokens: maxTokens, messages: [{ role: "user", content: user }] };
-		if (system) body.system = system;
-
-		let resp = await this.httpJSON("https://api.anthropic.com/v1/messages", {
-			"Content-Type": "application/json",
-			"x-api-key": apiKey,
-			"anthropic-version": version,
-			// Autorise l'appel depuis un contexte navigateur (Zotero).
-			"anthropic-dangerous-direct-browser-access": "true"
-		}, body);
-
-		let data = resp.response;
-		if (data && data.stop_reason === "refusal") {
-			throw new Error("Claude a refusé la requête (contenu signalé).");
-		}
-		let block = data && Array.isArray(data.content)
-			&& data.content.find(b => b && b.type === "text");
-		let content = block && block.text;
-		if (!content) throw new Error("Empty API response (Claude)");
 		return this.sanitize(content);
 	},
 
@@ -500,9 +534,9 @@ Annota = {
 	async runBatch(window, opts = {}) {
 		let overwrite = !!opts.overwrite;
 
-		let apiKey = this.activeApiKey();
-		if (!apiKey) {
-			toast("Annota", "API key missing (Preferences → Annota).", "error");
+		let notReady = this.providerReadyError();
+		if (notReady) {
+			toast("Annota", notReady, "error");
 			return;
 		}
 
