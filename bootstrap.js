@@ -108,12 +108,39 @@ Annota = {
 		}
 	},
 
+	// Réglage d'une couleur, normalisé : { prompt, trigger } ou null si vide.
+	// Rétrocompat : une valeur chaîne = { prompt, trigger: "auto" }.
+	// trigger "auto"   = génère à la création du surlignage (mode 1)
+	// trigger "manual" = uniquement via le menu contextuel (mode 2)
+	getColorEntry(color) {
+		if (!color) return null;
+		let raw = this.getColorPrompts()[String(color).toLowerCase()];
+		if (!raw) return null;
+		if (typeof raw === "string") {
+			return raw.trim() ? { prompt: raw, trigger: "auto" } : null;
+		}
+		if (typeof raw === "object" && raw.prompt && String(raw.prompt).trim()) {
+			return {
+				prompt: String(raw.prompt),
+				trigger: raw.trigger === "manual" ? "manual" : "auto"
+			};
+		}
+		return null;
+	},
+
 	// Prompt configuré pour cette couleur, ou "" si la couleur n'en a pas.
-	// Une chaîne vide signifie « ne rien générer pour ce surlignage ».
 	getPromptForColor(color) {
-		if (!color) return "";
-		let tpl = this.getColorPrompts()[String(color).toLowerCase()];
-		return (tpl && String(tpl).trim()) ? String(tpl) : "";
+		let entry = this.getColorEntry(color);
+		return entry ? entry.prompt : "";
+	},
+
+	// Fournisseur actif et clé API correspondante.
+	provider() {
+		return getPref("useAnthropic", false) ? "anthropic" : "mistral";
+	},
+	activeApiKey() {
+		let key = this.provider() === "anthropic" ? "anthropicApiKey" : "apiKey";
+		return String(getPref(key, "")).trim();
 	},
 
 	init({ id, version, rootURI }) {
@@ -176,16 +203,19 @@ Annota = {
 		let text = (item.annotationText || "").trim();
 		if (!text) return;
 
-		// Aucun prompt pour cette couleur = la fonctionnalité est désactivée
-		// pour ce surlignage. On sort en silence, sans rien écrire.
-		if (!this.getPromptForColor(item.annotationColor)) return;
+		// Mode 1 (automatique) : ne se déclenche que si la couleur a un prompt
+		// ET que ce prompt est réglé sur « auto ». Les couleurs « manuel » ne
+		// réagissent qu'au menu contextuel. Couleur sans prompt = ignorée.
+		let entry = this.getColorEntry(item.annotationColor);
+		if (!entry || entry.trigger !== "auto") return;
 
-		// Ne pas écraser un commentaire existant (sauf préférence contraire).
+		// Commentaire déjà saisi (paraphrase manuelle) : capturé avant tout,
+		// pour la variable {{comment}} et pour respecter « ne pas écraser ».
 		let existing = (item.annotationComment || "").trim();
 		let overwrite = getPref("overwrite", false);
 		if (existing && !overwrite) return;
 
-		let apiKey = String(getPref("apiKey", "")).trim();
+		let apiKey = this.activeApiKey();
 		if (!apiKey) {
 			toast("Annota", "API key missing (Preferences → Annota).", "error");
 			return;
@@ -201,7 +231,9 @@ Annota = {
 			}
 
 			let ctx = this.getContext(item);
-			let comment = await this.generateComment(text, ctx, item.annotationColor, apiKey);
+			let comment = await this.generateComment({
+				text, ctx, color: item.annotationColor, comment: existing
+			});
 
 			// Recharger l'item au cas où il aurait changé pendant l'appel réseau.
 			let fresh = await Zotero.Items.getAsync(id);
@@ -296,12 +328,16 @@ Annota = {
 				? String(vars[key]) : "");
 	},
 
-	// Construit les messages envoyés à l'API à partir du prompt configuré.
-	// `color` sélectionne un éventuel prompt spécifique à la couleur.
-	buildMessages(text, ctx, color) {
+	// Construit le prompt à envoyer : { system, user }.
+	// - Mode avancé (le prompt contient {{text}} ou {{comment}}) : tout est mis
+	//   dans le message utilisateur, l'utilisateur contrôle la structure.
+	// - Mode standard : le prompt sert d'instructions (system), le passage (et
+	//   le contexte du document si activé) est ajouté comme message utilisateur.
+	buildPrompt({ text, ctx, color, comment }) {
 		let tpl = this.getPromptForColor(color);
 		let vars = {
 			text: text,
+			comment: comment || "",
 			title: (ctx && ctx.title) || "",
 			authors: (ctx && ctx.authors) || "",
 			year: (ctx && ctx.year) || "",
@@ -312,47 +348,93 @@ Annota = {
 			language: String(getPref("language", "français")).trim() || "français"
 		};
 
-		if (/\{\{\s*text\s*\}\}/.test(tpl)) {
-			// Mode avancé : le prompt contient {{text}} → un seul message utilisateur.
-			// L'utilisateur contrôle intégralement la structure du prompt.
-			return [{ role: "user", content: this.substitute(tpl, vars) }];
+		let selfContained = /\{\{\s*(text|comment)\s*\}\}/.test(tpl);
+		if (selfContained) {
+			return { system: "", user: this.substitute(tpl, vars) };
 		}
 
-		// Mode standard : instructions en message système, passage (précédé du
-		// contexte du document si activé) en message utilisateur.
 		let parts = [];
 		if (getPref("sendContext", true)) {
 			let block = this.formatContextBlock(vars);
 			if (block) parts.push(block);
 		}
+		if (comment && String(comment).trim()) {
+			parts.push("Existing note:\n\"\"\"\n" + comment + "\n\"\"\"");
+		}
 		parts.push("Highlighted passage:\n\"\"\"\n" + text + "\n\"\"\"");
 
-		return [
-			{ role: "system", content: this.substitute(tpl, vars) },
-			{ role: "user", content: parts.join("\n\n") }
-		];
+		return { system: this.substitute(tpl, vars), user: parts.join("\n\n") };
 	},
 
-	async generateComment(text, ctx, color, apiKey) {
+	async generateComment({ text, ctx, color, comment }) {
+		let prompt = this.buildPrompt({ text, ctx, color, comment });
+		return this.provider() === "anthropic"
+			? this.callAnthropic(prompt)
+			: this.callOpenAI(prompt);
+	},
+
+	// Fournisseur compatible OpenAI (Mistral par défaut).
+	async callOpenAI({ system, user }) {
+		let apiKey = String(getPref("apiKey", "")).trim();
+		if (!apiKey) throw new Error("Mistral API key missing");
 		let endpoint = String(getPref("endpoint", "https://api.mistral.ai/v1/chat/completions")).trim();
 		let model = String(getPref("model", "mistral-large-latest")).trim() || "mistral-large-latest";
 		let temp = parseFloat(getPref("temperature", 0.2));
 		if (isNaN(temp)) temp = 0.2;
 		temp = Math.max(0, Math.min(2, temp));
 
-		let payload = {
-			model,
-			temperature: temp,
-			messages: this.buildMessages(text, ctx, color)
-		};
+		let messages = system
+			? [{ role: "system", content: system }, { role: "user", content: user }]
+			: [{ role: "user", content: user }];
 
-		let resp;
+		let resp = await this.httpJSON(endpoint, {
+			"Content-Type": "application/json",
+			"Authorization": "Bearer " + apiKey
+		}, { model, temperature: temp, messages });
+
+		let data = resp.response;
+		let content = data && data.choices && data.choices[0]
+			&& data.choices[0].message && data.choices[0].message.content;
+		if (!content) throw new Error("Empty API response");
+		return this.sanitize(content);
+	},
+
+	// API Claude (Anthropic). Messages API : system au niveau racine,
+	// max_tokens obligatoire, PAS de temperature (rejetée en 400 par Opus 4.x).
+	async callAnthropic({ system, user }) {
+		let apiKey = String(getPref("anthropicApiKey", "")).trim();
+		if (!apiKey) throw new Error("Claude API key missing");
+		let model = String(getPref("anthropicModel", "claude-opus-4-8")).trim() || "claude-opus-4-8";
+		let maxTokens = parseInt(getPref("maxTokens", 1024), 10) || 1024;
+		let version = String(getPref("anthropicVersion", "2023-06-01")).trim() || "2023-06-01";
+
+		let body = { model, max_tokens: maxTokens, messages: [{ role: "user", content: user }] };
+		if (system) body.system = system;
+
+		let resp = await this.httpJSON("https://api.anthropic.com/v1/messages", {
+			"Content-Type": "application/json",
+			"x-api-key": apiKey,
+			"anthropic-version": version,
+			// Autorise l'appel depuis un contexte navigateur (Zotero).
+			"anthropic-dangerous-direct-browser-access": "true"
+		}, body);
+
+		let data = resp.response;
+		if (data && data.stop_reason === "refusal") {
+			throw new Error("Claude a refusé la requête (contenu signalé).");
+		}
+		let block = data && Array.isArray(data.content)
+			&& data.content.find(b => b && b.type === "text");
+		let content = block && block.text;
+		if (!content) throw new Error("Empty API response (Claude)");
+		return this.sanitize(content);
+	},
+
+	// POST JSON commun, avec message d'erreur lisible.
+	async httpJSON(url, headers, payload) {
 		try {
-			resp = await Zotero.HTTP.request("POST", endpoint, {
-				headers: {
-					"Content-Type": "application/json",
-					"Authorization": "Bearer " + apiKey
-				},
+			return await Zotero.HTTP.request("POST", url, {
+				headers,
 				body: JSON.stringify(payload),
 				responseType: "json",
 				timeout: 45000
@@ -364,13 +446,6 @@ Annota = {
 			try { detail = e.xmlhttp ? e.xmlhttp.responseText : ""; } catch (e2) {}
 			throw new Error("API (HTTP " + status + ") " + detail.slice(0, 300));
 		}
-
-		let data = resp.response;
-		let content = data && data.choices && data.choices[0]
-			&& data.choices[0].message && data.choices[0].message.content;
-		if (!content) throw new Error("Empty API response");
-
-		return this.sanitize(content);
 	},
 
 	// ---- Traitement a posteriori (menu contextuel) ----
@@ -425,7 +500,7 @@ Annota = {
 	async runBatch(window, opts = {}) {
 		let overwrite = !!opts.overwrite;
 
-		let apiKey = String(getPref("apiKey", "")).trim();
+		let apiKey = this.activeApiKey();
 		if (!apiKey) {
 			toast("Annota", "API key missing (Preferences → Annota).", "error");
 			return;
@@ -482,9 +557,15 @@ Annota = {
 			let ann = targets[i];
 			try {
 				let ctx = this.getContext(ann);
-				let comment = await this.generateComment(
-					(ann.annotationText || "").trim(), ctx, ann.annotationColor, apiKey
-				);
+				// Le menu contextuel traite toutes les couleurs ayant un prompt,
+				// « auto » ou « manuel ». Le commentaire existant (paraphrase
+				// manuelle) est transmis via {{comment}}.
+				let comment = await this.generateComment({
+					text: (ann.annotationText || "").trim(),
+					ctx,
+					color: ann.annotationColor,
+					comment: (ann.annotationComment || "").trim()
+				});
 				let fresh = await Zotero.Items.getAsync(ann.id);
 				if (fresh) {
 					fresh.annotationComment = comment;

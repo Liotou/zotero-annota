@@ -59,12 +59,16 @@ reinstall. Zotero polls periodically; you can also force a check via
   annotations are never touched).
 - **⏳ while generating** — shows an indicator during the network call.
 
-### API connection
-- **API key** — Mistral by default (get one at https://console.mistral.ai).
-- **Model** — `mistral-large-latest` by default.
-- **Endpoint** — API URL (chat/completions, OpenAI-compatible). Change it for a
-  proxy or another compatible provider.
-- **Temperature** — 0 to 2; lower = more deterministic (default 0.2).
+### AI provider
+Two providers are supported; the one you tick is the one that runs.
+- **Mistral / OpenAI-compatible** (default) — API key (console.mistral.ai),
+  model (`mistral-large-latest`), endpoint (any chat/completions URL), and
+  temperature (0–2, lower = steadier).
+- **Claude (Anthropic)** — tick *Use Claude (Anthropic)*, then paste an Anthropic
+  key (console.anthropic.com), pick a model (default `claude-opus-4-8`), and set
+  max tokens. Temperature does not apply to Claude (the API rejects it), and the
+  Claude Messages API is called directly — much stronger results than Mistral on
+  academic notes, at a higher per-call cost.
 
 ### Text generation
 - **Output language** — available in the prompt via `{{language}}`.
@@ -92,11 +96,20 @@ write that color's prompt.
   least one color. Copyable examples live in
   [PROMPT-EXAMPLES.txt](PROMPT-EXAMPLES.txt).
 
+Each color also picks **when it runs**:
+- **Automatically** — as soon as you create the highlight (the classic flow: the
+  AI writes the note from the passage).
+- **Only on request** — nothing happens on highlight; you write your own
+  paraphrase by hand, then run the color later from the right-click menu so the
+  AI only **formats or titles what you wrote** (see `{{comment}}`). This keeps
+  the thinking yours.
+
 **Variables** substituted at call time:
 
 | Variable | Content |
 |---|---|
 | `{{text}}` | the highlighted text |
+| `{{comment}}` | the note already in the annotation (your hand-written paraphrase) |
 | `{{title}}` | title of the source document |
 | `{{authors}}` | authors of the source document |
 | `{{year}}` | year of the source document |
@@ -107,11 +120,11 @@ write that color's prompt.
 | `{{language}}` | the "output language" setting |
 
 Two modes depending on the prompt:
-- **Standard** (no `{{text}}`) — your prompt acts as instructions, and the
-  highlighted text is appended automatically as the user message, preceded by
-  the document context block if that option is enabled.
-- **Advanced** (the prompt contains `{{text}}`) — the prompt is sent as-is; you
-  fully control the structure of the request.
+- **Standard** (no `{{text}}` / `{{comment}}`) — your prompt acts as instructions,
+  and the highlighted text (plus your existing note and the document context, if
+  enabled) is appended automatically.
+- **Advanced** (the prompt contains `{{text}}` or `{{comment}}`) — the prompt is
+  sent as-is; you fully control the structure of the request.
 
 ## Generating comments after the fact
 

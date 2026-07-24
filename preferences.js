@@ -1,10 +1,13 @@
 /* eslint-disable no-undef */
 // Script du panneau de préférences.
 //
-// Il n'y a pas de prompt par défaut : chaque couleur de surlignage a le sien,
-// stocké dans le JSON annota.colorPrompts. Une couleur sans prompt n'est pas
-// traitée par le plugin. Le textarea édite la couleur sélectionnée ; on
-// sauvegarde toujours AVANT de changer de couleur.
+// Chaque couleur de surlignage a son propre réglage, stocké dans le JSON
+// annota.colorPrompts sous la forme { "#hex": { prompt, trigger } }.
+// (Rétrocompat : une ancienne valeur chaîne est lue comme trigger "auto".)
+// trigger "auto"   = génère à la création du surlignage.
+// trigger "manual" = uniquement via le menu contextuel.
+// Une couleur sans prompt n'est jamais traitée. On sauvegarde toujours AVANT
+// de changer de couleur.
 
 (function () {
 	const PREF_COLORS = "annota.colorPrompts";
@@ -20,6 +23,21 @@
 		return (a && Array.isArray(a.COLORS)) ? a.COLORS : [];
 	}
 
+	// Normalise une valeur brute (chaîne ancienne ou objet) en { prompt, trigger }.
+	function normalize(raw) {
+		if (!raw) return null;
+		if (typeof raw === "string") {
+			return raw.trim() ? { prompt: raw, trigger: "auto" } : null;
+		}
+		if (typeof raw === "object" && raw.prompt && String(raw.prompt).trim()) {
+			return {
+				prompt: String(raw.prompt),
+				trigger: raw.trigger === "manual" ? "manual" : "auto"
+			};
+		}
+		return null;
+	}
+
 	function readColorMap() {
 		try {
 			let raw = String(Zotero.Prefs.get(PREF_COLORS) || "").trim();
@@ -33,11 +51,11 @@
 	}
 
 	function writeColorMap(map) {
-		// Ne pas conserver les entrées vides : une couleur sans prompt est une
-		// couleur désactivée, pas une couleur avec un prompt vide.
+		// Ne conserver que les entrées ayant un prompt non vide.
 		let clean = {};
 		for (let k of Object.keys(map)) {
-			if (map[k] && String(map[k]).trim()) clean[k] = map[k];
+			let n = normalize(map[k]);
+			if (n) clean[k] = n;
 		}
 		Zotero.Prefs.set(PREF_COLORS, Object.keys(clean).length ? JSON.stringify(clean) : "");
 	}
@@ -49,7 +67,8 @@
 		let swatchBox = document.getElementById("annota-swatches");
 		let targetName = document.getElementById("annota-target-name");
 		let idleWarning = document.getElementById("annota-idle-warning");
-		if (!textarea || !swatchBox) {
+		let triggerGroup = document.getElementById("annota-trigger");
+		if (!textarea || !swatchBox || !triggerGroup) {
 			requestAnimationFrame(setup);
 			return;
 		}
@@ -60,7 +79,7 @@
 			return;
 		}
 
-		// Couleur en cours d'édition (toujours une couleur : il n'y a plus de défaut).
+		// Couleur en cours d'édition.
 		let current = palette[0].hex;
 
 		let flashTimer = null;
@@ -71,9 +90,20 @@
 			flashTimer = setTimeout(() => status.setAttribute("value", ""), 2000);
 		}
 
+		function currentTrigger() {
+			let v = triggerGroup.value || triggerGroup.getAttribute("value");
+			return v === "manual" ? "manual" : "auto";
+		}
+
 		function save() {
 			let map = readColorMap();
-			map[current] = textarea.value;
+			let prompt = textarea.value;
+			if (prompt && prompt.trim()) {
+				map[current] = { prompt, trigger: currentTrigger() };
+			}
+			else {
+				delete map[current];
+			}
 			writeColorMap(map);
 			flashStatus("Saved ✓");
 			refreshSwatches();
@@ -91,7 +121,9 @@
 
 		function load(hex) {
 			current = hex;
-			textarea.value = readColorMap()[hex] || "";
+			let entry = normalize(readColorMap()[hex]);
+			textarea.value = entry ? entry.prompt : "";
+			triggerGroup.value = entry ? entry.trigger : "auto";
 			if (targetName) {
 				let c = palette.find(x => x.hex === hex);
 				targetName.setAttribute("value", c ? c.name : hex);
@@ -99,21 +131,23 @@
 			refreshSwatches();
 		}
 
-		// Reflète l'état : couleur sélectionnée, couleurs actives, avertissement
-		// si le plugin ne peut rien générer faute de prompt configuré.
+		// Reflète l'état des pastilles + avertissement si rien n'est configuré.
 		function refreshSwatches() {
 			let map = readColorMap();
+			let anyPrompt = false;
 			for (let el of swatchBox.children) {
 				let hex = el.getAttribute("data-color");
 				let name = el.getAttribute("data-name") || hex;
+				let entry = normalize(map[hex]);
+				if (entry) anyPrompt = true;
 				el.setAttribute("data-selected", hex === current ? "true" : "false");
-				el.setAttribute("data-has-prompt", map[hex] ? "true" : "false");
-				el.setAttribute("title",
-					map[hex] ? name + " — has a prompt" : name + " — inactive, no prompt");
+				el.setAttribute("data-has-prompt", entry ? "true" : "false");
+				let tip = entry
+					? name + " — " + (entry.trigger === "manual" ? "on request" : "automatic")
+					: name + " — inactive, no prompt";
+				el.setAttribute("title", tip);
 			}
-			if (idleWarning) {
-				idleWarning.hidden = Object.keys(map).length > 0;
-			}
+			if (idleWarning) idleWarning.hidden = anyPrompt;
 		}
 
 		// --- Pastilles de couleur ---
@@ -138,6 +172,12 @@
 		textarea.addEventListener("input", scheduleSave);
 		textarea.addEventListener("blur", saveNow);
 
+		// --- Choix du mode (auto / manuel) ---
+		// Ne sauvegarde que si la couleur a déjà un prompt (sinon rien à régler).
+		triggerGroup.addEventListener("command", () => {
+			if (textarea.value && textarea.value.trim()) saveNow();
+		});
+
 		// --- Bouton d'effacement ---
 		if (clearBtn) {
 			let clearColor = () => {
@@ -145,6 +185,7 @@
 				delete map[current];
 				writeColorMap(map);
 				textarea.value = "";
+				triggerGroup.value = "auto";
 				refreshSwatches();
 				flashStatus("Cleared ✓");
 			};

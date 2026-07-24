@@ -9,12 +9,25 @@ in Annota's preferences (Add-ons -> Annota), then paste one of the prompts below
 A color you leave empty is never processed. That is how you keep Annota off the
 colors you use for ordinary highlighting.
 
+Each color also has a mode:
+  * Automatically      — runs as soon as you create the highlight.
+  * Only on request    — nothing happens on highlight; you right-click the item
+                         (or reference) -> Annota to run it later. Use this when
+                         you want to write your paraphrase by hand first and have
+                         the AI only format/title it (see {{comment}} and #11/#12).
+
+Provider: Mistral by default, or tick "Use Claude (Anthropic)" in preferences to
+use a Claude model (e.g. claude-opus-4-8) with its own API key.
+
 
 --------------------------------------------------------------------------------
 AVAILABLE VARIABLES
 --------------------------------------------------------------------------------
 
   {{text}}         the highlighted text
+  {{comment}}      the note already in the annotation (your hand-written
+                   paraphrase) — lets the AI format/augment it instead of
+                   paraphrasing for you
   {{title}}        title of the source document
   {{authors}}      authors of the source document
   {{year}}         year of the source document
@@ -26,12 +39,13 @@ AVAILABLE VARIABLES
 
 Two modes:
 
-  * If your prompt does NOT contain {{text}}, it is used as instructions and
-    the highlighted passage is appended automatically (with the document
-    context, if that option is enabled). This is the usual case.
+  * If your prompt contains NEITHER {{text}} NOR {{comment}}, it is used as
+    instructions and the highlighted passage (plus your existing note and the
+    document context, if enabled) is appended automatically. This is the usual
+    case.
 
-  * If your prompt DOES contain {{text}}, it is sent exactly as written and
-    you control the whole request yourself.
+  * If your prompt DOES contain {{text}} or {{comment}}, it is sent exactly as
+    written and you control the whole request yourself.
 
 
 --------------------------------------------------------------------------------
@@ -155,3 +169,59 @@ Passage highlighted by the reader on page {{page}}:
 Explain in {{language}}, in {{maxWords}} words maximum, how this passage
 relates to the article's overall argument as described in the abstract.
 Return only that explanation.
+
+
+--------------------------------------------------------------------------------
+11. FORMAT MY OWN NOTE  (keeps YOUR paraphrase — best as an "on request" color)
+--------------------------------------------------------------------------------
+
+Set this color to "Only on request" in preferences. Highlight a passage, write
+your paraphrase by hand in the comment, then right-click the item -> Annota ->
+"Regenerate all comments". The AI only formats what you wrote — it does not
+paraphrase for you.
+
+You format an existing annotation note without changing its meaning.
+Keep the wording and ideas of the note; only improve structure and add a title.
+
+Reply EXACTLY in this format, and nothing else:
+
+<b>Title.</b>
+{{comment}}
+<i>(Author, year, p.XX ; Author2, year)</i>
+
+Rules:
+- The title is 3 to 8 words, names the central idea of the note, direct and
+  simple, ending with a period inside the <b>…</b> tags.
+- Keep the note ({{comment}}) as its core. Do not rewrite it, do not summarize
+  it, do not add information. Fix only obvious typos and spacing.
+- Add the reference line ONLY if the highlighted passage below cites sources
+  (author + year). Read them from the passage, never from the article you are
+  reading. Include a page number only if it appears in the passage, as ", p.XX".
+- Reply in {{language}}.
+- Use ONLY the <b> and <i> tags. No Markdown, no code block, no preamble.
+
+Highlighted passage (source for citations only):
+"""
+{{text}}
+"""
+
+
+--------------------------------------------------------------------------------
+12. TITLE + CITED AUTHORS ONLY  (paraphrase untouched)
+--------------------------------------------------------------------------------
+
+Same idea as #11 but minimal: prepend a short bold title to the user's note and,
+if the passage cites sources, append them — nothing else changes.
+
+Return, with no other text:
+Line 1: <b>Title.</b>  (3–8 words naming the idea of the note below)
+Line 2: the note, copied verbatim: {{comment}}
+Line 3, ONLY if the passage cites sources: <i>(Author, year ; …)</i> built from
+citations found in the passage below (with page numbers if present, as ", p.XX").
+
+Reply in {{language}}. Only <b> and <i> tags. Never alter the note's wording.
+
+Passage (citation source only):
+"""
+{{text}}
+"""

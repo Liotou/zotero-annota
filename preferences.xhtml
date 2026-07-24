@@ -27,7 +27,14 @@
   </groupbox>
 
   <groupbox>
-    <label><html:h2>API</html:h2></label>
+    <label><html:h2>AI provider</html:h2></label>
+    <hbox align="center">
+      <checkbox label="Use Claude (Anthropic) instead of Mistral"
+                preference="extensions.zotero.annota.useAnthropic"
+                native="true"/>
+    </hbox>
+
+    <label style="margin-top: 6px;"><html:b>Mistral / OpenAI-compatible</html:b></label>
     <grid>
       <columns>
         <column/>
@@ -56,10 +63,38 @@
         </row>
       </rows>
     </grid>
+
+    <label style="margin-top: 10px;"><html:b>Claude (Anthropic)</html:b></label>
+    <grid>
+      <columns>
+        <column/>
+        <column flex="1"/>
+      </columns>
+      <rows>
+        <row align="center">
+          <label value="Claude API key:" control="annota-claude-key"/>
+          <html:input id="annota-claude-key" type="password" style="width: 30em;"
+                      preference="extensions.zotero.annota.anthropicApiKey"/>
+        </row>
+        <row align="center">
+          <label value="Claude model:" control="annota-claude-model"/>
+          <html:input id="annota-claude-model" type="text" style="width: 30em;"
+                      preference="extensions.zotero.annota.anthropicModel"/>
+        </row>
+        <row align="center">
+          <label value="Max tokens:" control="annota-maxtokens"/>
+          <html:input id="annota-maxtokens" type="number" min="64" max="8192" step="64"
+                      style="width: 7em;"
+                      preference="extensions.zotero.annota.maxTokens"/>
+        </row>
+      </rows>
+    </grid>
     <description style="max-width: 46em; opacity: 0.8;">
-      Works with any OpenAI-compatible chat/completions endpoint. Defaults to
-      Mistral — get a key at console.mistral.ai. Lower temperature = more
-      consistent output (0.2 recommended).
+      The Mistral path works with any OpenAI-compatible chat/completions endpoint
+      (get a key at console.mistral.ai). For Claude, tick the box above and paste
+      an Anthropic key from console.anthropic.com — default model
+      <html:code>claude-opus-4-8</html:code>. Temperature applies to the Mistral
+      path only (Claude rejects it). Only the ticked provider's key is used.
     </description>
   </groupbox>
 
@@ -144,6 +179,16 @@
     <html:textarea id="annota-prompt" rows="16"
                     style="width: 100%; font-family: monospace; font-size: 12px; margin-top: 6px;"/>
 
+    <vbox id="annota-trigger-box" style="margin-top: 8px;">
+      <label value="When does this color run?"/>
+      <radiogroup id="annota-trigger">
+        <radio value="auto"
+               label="Automatically, as soon as I create the highlight"/>
+        <radio value="manual"
+               label="Only on request (right-click → Annota) — I write my note first, the AI reworks it"/>
+      </radiogroup>
+    </vbox>
+
     <hbox style="margin-top: 6px;">
       <button id="annota-prompt-clear" label="Clear this color's prompt"/>
       <spacer flex="1"/>
@@ -152,12 +197,15 @@
 
     <description style="max-width: 46em; opacity: 0.8; margin-top: 6px;">
       Variables: <html:code>{{text}}</html:code> (the highlight),
+      <html:code>{{comment}}</html:code> (your existing note — use this to have
+      the AI format or title what you wrote instead of paraphrasing for you),
       <html:code>{{title}}</html:code>, <html:code>{{authors}}</html:code>,
       <html:code>{{year}}</html:code>, <html:code>{{abstract}}</html:code>,
       <html:code>{{publication}}</html:code>, <html:code>{{page}}</html:code>,
       <html:code>{{maxWords}}</html:code>, <html:code>{{language}}</html:code>.
-      Include <html:code>{{text}}</html:code> to control the whole request
-      yourself; leave it out and the highlight is appended for you.
+      A prompt using <html:code>{{text}}</html:code> or
+      <html:code>{{comment}}</html:code> is sent exactly as written; otherwise the
+      passage (and your note, if any) is appended for you.
     </description>
   </groupbox>
 
