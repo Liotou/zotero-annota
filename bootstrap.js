@@ -172,9 +172,10 @@ Annota = {
 
 	notifierCallback: {
 		notify(event, type, ids, _extraData) {
-			// On ne réagit qu'à la CRÉATION d'items.
+			// On ne réagit qu'à la CRÉATION d'items. Il n'y a pas d'interrupteur
+			// global : handleItem() ne génère que pour les couleurs réglées sur
+			// « auto ». Tout mettre sur « à la demande » désactive l'automatique.
 			if (event !== "add" || type !== "item") return;
-			if (!getPref("enabled", true)) return;
 			for (let id of ids) {
 				// fire-and-forget : ne pas bloquer la transaction Zotero
 				Annota.handleItem(id).catch(e => log("handleItem: " + e));

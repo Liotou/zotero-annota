@@ -52,7 +52,11 @@ reinstall. Zotero polls periodically; you can also force a check via
 **Add-ons → Annota**, or **Preferences → Annota**:
 
 ### General
-- **Enable automatic generation** — master on/off switch.
+There is no global on/off switch: each color decides whether it runs
+automatically or only on request (see **Prompt**), and a color with no prompt is
+never touched. To stop all automatic generation, set your colors to *Only on
+request*.
+
 - **Also process underlines** — by default only highlights (`highlight`) trigger
   generation; this adds `underline`.
 - **Overwrite an existing comment** — off by default (already-commented
@@ -141,9 +145,9 @@ selection of annotations** in your library and use the **Annota** submenu:
 - **Regenerate all comments** — overwrites existing comments too.
 
 Works on multiple selected items at once, with a progress indicator. This is an
-explicit action, so it runs even when automatic generation is turned off, and
-each annotation uses the prompt of its own color. Highlights whose color has no
-prompt are skipped and reported as such.
+explicit action, so it runs colors set to *Only on request* as well as automatic
+ones, and each annotation uses the prompt of its own color. Highlights whose
+color has no prompt are skipped and reported as such.
 
 ## How it works
 

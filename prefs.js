@@ -7,7 +7,6 @@ pref("extensions.zotero.annota.cliModel", "");
 pref("extensions.zotero.annota.apiKey", "");
 pref("extensions.zotero.annota.model", "mistral-large-latest");
 pref("extensions.zotero.annota.endpoint", "https://api.mistral.ai/v1/chat/completions");
-pref("extensions.zotero.annota.enabled", true);
 pref("extensions.zotero.annota.overwrite", false);
 pref("extensions.zotero.annota.showPlaceholder", true);
 pref("extensions.zotero.annota.alsoUnderline", false);

@@ -4,11 +4,11 @@
   <groupbox>
     <label><html:h2>Annota</html:h2></label>
 
-    <hbox align="center">
-      <checkbox label="Generate a comment automatically when I create a highlight"
-                preference="extensions.zotero.annota.enabled"
-                native="true"/>
-    </hbox>
+    <description style="max-width: 46em; opacity: 0.8;">
+      Each highlight color decides on its own whether it runs automatically or
+      only on request — see <html:b>Prompt</html:b> below. Colors with no prompt
+      are never touched.
+    </description>
     <hbox align="center">
       <checkbox label="Also trigger on underlines"
                 preference="extensions.zotero.annota.alsoUnderline"
