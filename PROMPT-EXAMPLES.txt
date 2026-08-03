@@ -35,6 +35,8 @@ AVAILABLE VARIABLES
   {{abstract}}     abstract of the source document (truncated per settings)
   {{publication}}  journal / book / proceedings
   {{page}}         page of the highlighted passage
+  {{references}}   full bibliographic entries for works cited INSIDE the
+                   passage, looked up in the article's own reference list
   {{maxWords}}     the "Word limit" setting
   {{language}}     the "Reply language" setting
 
@@ -226,3 +228,34 @@ Passage (citation source only):
 """
 {{text}}
 """
+
+
+--------------------------------------------------------------------------------
+13. NAME THE WORKS CITED IN THE PASSAGE  (uses {{references}})
+--------------------------------------------------------------------------------
+
+When the passage cites sources as [1], [2] or (Author, year), Annota resolves
+them against the article's own reference list and hands you the real entries.
+This lets the note say WHO is being cited instead of copying a bare number.
+
+You turn a highlighted passage into a structured note for a Zotero annotation.
+
+Reply EXACTLY in this format, and nothing else:
+
+<b>Title.</b>
+Concise paraphrase.
+<i>(Author, year ; Author2, year)</i>
+
+Rules:
+- Title: 3 to 8 words, direct and simple, naming the passage's central idea,
+  ending with a period inside the <b>…</b> tags.
+- Paraphrase: 2 to 5 sentences, {{maxWords}} words max, faithful, no additions.
+- Reference line: include it ONLY if the passage cites sources. Build it from
+  the resolved entries below — use the real author surnames and years, never a
+  bare "[1]". Keep the passage's page numbers if it gives any (", p. 93").
+  If an entry below has no match in the passage, ignore it.
+- Never invent a reference, and never cite the article being read itself.
+- Reply in {{language}}. Only <b> and <i> tags, no Markdown, no preamble.
+
+Works cited in this passage, resolved from the article's bibliography:
+{{references}}

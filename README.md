@@ -91,6 +91,14 @@ Two providers; the CLI wins if ticked, otherwise Mistral is used.
   omitted.
 - **Max abstract length** — abstracts are truncated to limit token usage
   (default 1200 characters; set 0 for no truncation).
+- **Look up citations found in the passage** — when the highlighted text cites
+  sources (`[1]`, `[2]`, `(Author, year)`, `Author (year)`), Annota reads the
+  article's own reference list from the PDF and passes the matching entries to
+  the AI as `{{references}}`. The model can then name who is actually being
+  cited instead of guessing. Needs the bibliography to be real text in the PDF
+  (true for most publisher PDFs); if a citation can't be resolved, nothing is
+  sent and the rest works as before. **Max references sent** caps how many
+  entries go with each call (default 8).
 
 ### Prompt
 Above the prompt box is a row of **color swatches** — the same colors you use to
@@ -125,6 +133,7 @@ Each color also picks **when it runs**:
 | `{{abstract}}` | abstract of the source document (truncated per settings) |
 | `{{publication}}` | journal / book / proceedings |
 | `{{page}}` | page of the highlighted passage |
+| `{{references}}` | bibliographic entries for the works cited **inside** the passage |
 | `{{maxWords}}` | the "max length" setting |
 | `{{language}}` | the "output language" setting |
 

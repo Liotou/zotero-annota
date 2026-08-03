@@ -156,6 +156,33 @@
       skipped. Long abstracts cost tokens on every highlight — 0 disables
       truncation.
     </description>
+
+    <hbox align="center" style="margin-top: 8px;">
+      <checkbox label="Look up citations found in the passage ([1], (Author, year)) in the PDF's reference list"
+                preference="extensions.zotero.annota.resolveCitations"
+                native="true"/>
+    </hbox>
+    <grid>
+      <columns>
+        <column/>
+        <column flex="1"/>
+      </columns>
+      <rows>
+        <row align="center">
+          <label value="Max references sent:" control="annota-maxrefs"/>
+          <html:input id="annota-maxrefs" type="number" min="1" max="30"
+                      style="width: 6em;"
+                      preference="extensions.zotero.annota.maxRefs"/>
+        </row>
+      </rows>
+    </grid>
+    <description style="max-width: 46em; opacity: 0.8;">
+      When the highlighted passage cites sources, Annota reads the article's own
+      bibliography and passes the matching entries to the AI as
+      <html:code>{{references}}</html:code> — so it can name who is being cited
+      instead of guessing. Requires the reference list to be real text in the PDF
+      (it is for most publisher PDFs). Nothing is sent when no citation is found.
+    </description>
   </groupbox>
 
   <groupbox>
@@ -207,7 +234,9 @@
       <html:code>{{title}}</html:code>, <html:code>{{authors}}</html:code>,
       <html:code>{{year}}</html:code>, <html:code>{{abstract}}</html:code>,
       <html:code>{{publication}}</html:code>, <html:code>{{page}}</html:code>,
-      <html:code>{{maxWords}}</html:code>, <html:code>{{language}}</html:code>.
+      <html:code>{{references}}</html:code> (bibliographic entries for the works
+      cited inside the passage), <html:code>{{maxWords}}</html:code>,
+      <html:code>{{language}}</html:code>.
       A prompt using <html:code>{{text}}</html:code> or
       <html:code>{{comment}}</html:code> is sent exactly as written; otherwise the
       passage (and your note, if any) is appended for you.

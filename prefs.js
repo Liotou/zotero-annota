@@ -14,6 +14,10 @@ pref("extensions.zotero.annota.maxWords", 80);
 // Transmettre le contexte du document (titre, auteurs, année, revue, résumé, page).
 pref("extensions.zotero.annota.sendContext", true);
 pref("extensions.zotero.annota.maxAbstractChars", 1200);
+// Résoudre les appels de citation du passage ([1], (Auteur, année)) dans la
+// bibliographie du PDF et transmettre les entrées à l'IA.
+pref("extensions.zotero.annota.resolveCitations", true);
+pref("extensions.zotero.annota.maxRefs", 8);
 pref("extensions.zotero.annota.language", "français");
 pref("extensions.zotero.annota.temperature", "0.2");
 // JSON { "#ffd400": "prompt…", … } : le prompt de chaque couleur.

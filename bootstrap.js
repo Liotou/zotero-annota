@@ -237,6 +237,7 @@ Annota = {
 			}
 
 			let ctx = this.getContext(item);
+			ctx.references = await this.getReferences(item, text);
 			let comment = await this.generateComment({
 				text, ctx, color: item.annotationColor, comment: existing
 			});
@@ -315,6 +316,181 @@ Annota = {
 		return ctx;
 	},
 
+	// ---- Résolution des références citées dans le passage ----
+	//
+	// Quand le passage contient « [1] » ou « (Moulin, 1999) », on va chercher
+	// l'entrée bibliographique correspondante DANS LE PDF (section References)
+	// et on la transmet à l'IA. Le texte du PDF est extrait via
+	// Zotero.PDFWorker.getFullText puis mis en cache par pièce jointe.
+	//
+	// Limite assumée : suppose que la bibliographie est présente comme texte
+	// dans le PDF. Sinon on renvoie "" et rien ne change.
+
+	_fullTextCache: new Map(),
+
+	// Détecte les appels de citation dans le passage surligné.
+	detectCitationMarkers(text) {
+		let numbers = new Set();
+		let authorYears = [];
+		let seen = new Set();
+		let m;
+
+		// Numériques : [1] [1,2] [1-3] [1, 2, 5–7]
+		let numRe = /\[([\d\s,;‐-―-]+)\]/g;
+		while ((m = numRe.exec(text)) !== null) {
+			if (!/\d/.test(m[1])) continue;
+			for (let part of m[1].split(/[,;]/)) {
+				part = part.trim();
+				let range = part.match(/^(\d{1,3})\s*[‐-―-]\s*(\d{1,3})$/);
+				if (range) {
+					let a = parseInt(range[1], 10), b = parseInt(range[2], 10);
+					if (b >= a && b - a < 30) for (let i = a; i <= b; i++) numbers.add(i);
+				}
+				else if (/^\d{1,3}$/.test(part)) numbers.add(parseInt(part, 10));
+			}
+		}
+
+		let pushAY = (author, year) => {
+			author = String(author).trim().replace(/\s+/g, " ");
+			let key = author.toLowerCase() + "|" + year;
+			if (author && !seen.has(key)) { seen.add(key); authorYears.push({ author, year }); }
+		};
+
+		// Auteur-année entre parenthèses : (Moulin, 1999 ; Jacques et al., 2009)
+		let parenRe = /\(([^()]{3,200})\)/g;
+		while ((m = parenRe.exec(text)) !== null) {
+			for (let chunk of m[1].split(/;/)) {
+				let ay = chunk.match(
+					/([\p{Lu}][\p{L}'’-]+(?:\s+(?:et\s+al\.?|and|&|y|und)\s*[\p{L}'’-]*)?)[,\s]+((?:1[6-9]|20)\d{2})[a-z]?/u);
+				if (ay) pushAY(ay[1], ay[2]);
+			}
+		}
+
+		// Auteur-année narratif : Moulin (1999), Jacques et al. (2009)
+		let narrRe = /([\p{Lu}][\p{L}'’-]+(?:\s+(?:et\s+al\.?|and|&)\s*[\p{L}'’-]*)?)\s*\(((?:1[6-9]|20)\d{2})[a-z]?\)/gu;
+		while ((m = narrRe.exec(text)) !== null) pushAY(m[1], m[2]);
+
+		return { numbers: Array.from(numbers).sort((a, b) => a - b), authorYears };
+	},
+
+	// Texte intégral du PDF parent, mis en cache par pièce jointe.
+	async getAttachmentFullText(item) {
+		try {
+			let att = item.parentItem;   // l'annotation appartient à la pièce jointe
+			if (!att || !att.isPDFAttachment || !att.isPDFAttachment()) return "";
+			if (this._fullTextCache.has(att.id)) return this._fullTextCache.get(att.id);
+
+			let res = await Zotero.PDFWorker.getFullText(att.id, null);
+			let text = (res && res.text) ? String(res.text) : "";
+			// Cache borné : quelques documents en mémoire au plus.
+			if (this._fullTextCache.size > 5) {
+				this._fullTextCache.delete(this._fullTextCache.keys().next().value);
+			}
+			this._fullTextCache.set(att.id, text);
+			return text;
+		}
+		catch (e) {
+			log("getAttachmentFullText: " + e);
+			return "";
+		}
+	},
+
+	// Isole la section bibliographique (dernière occurrence d'un titre connu).
+	findBibliographySection(fullText) {
+		if (!fullText) return "";
+		let re = /\b(references?|bibliograph(?:y|ie)|works\s+cited|literature\s+cited|r[eé]f[eé]rences?(?:\s+bibliographiques)?|referencias|refer[eê]ncias|literaturverzeichnis)\b\s*:?/gi;
+		let last = -1, m;
+		let floor = Math.floor(fullText.length * 0.4);   // seconde partie du document
+		while ((m = re.exec(fullText)) !== null) {
+			if (m.index >= floor) last = m.index + m[0].length;
+		}
+		return last < 0 ? "" : fullText.slice(last);
+	},
+
+	// Coupe une entrée trop longue proprement.
+	_trimEntry(s, max = 320) {
+		s = String(s).replace(/\s+/g, " ").trim();
+		if (s.length <= max) return s;
+		let cut = s.slice(0, max);
+		let dot = cut.lastIndexOf(". ");
+		return dot > max * 0.5 ? cut.slice(0, dot + 1) : cut.trim() + "…";
+	},
+
+	// Entrées numérotées : « [12] Auteur… » ou « 12. Auteur… »
+	resolveNumericRefs(bib, numbers) {
+		if (!bib || !numbers.length) return [];
+		let markers = [], m;
+		let re = /(?:^|[\s\n])(?:\[(\d{1,3})\]|(\d{1,3})\.(?=\s))/g;
+		while ((m = re.exec(bib)) !== null) {
+			markers.push({ n: parseInt(m[1] || m[2], 10), start: m.index + m[0].length, mStart: m.index });
+		}
+		if (!markers.length) return [];
+
+		let out = [], wanted = new Set(numbers);
+		for (let i = 0; i < markers.length; i++) {
+			if (!wanted.has(markers[i].n)) continue;
+			let end = (i + 1 < markers.length)
+				? markers[i + 1].mStart
+				: Math.min(bib.length, markers[i].start + 600);
+			let body = this._trimEntry(bib.slice(markers[i].start, end));
+			if (body.length > 15) {
+				out.push("[" + markers[i].n + "] " + body);
+				wanted.delete(markers[i].n);
+			}
+		}
+		return out;
+	},
+
+	// Entrées auteur-année : fenêtre autour du nom suivi de l'année.
+	resolveAuthorYearRefs(bib, pairs) {
+		if (!bib || !pairs.length) return [];
+		let out = [];
+		for (let { author, year } of pairs) {
+			// Nom de famille = premier mot (« Moulin et al. » → « Moulin »).
+			let surname = author.split(/\s+/)[0].replace(/[^\p{L}'’-]/gu, "");
+			if (surname.length < 2) continue;
+			let esc = surname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+			let re = new RegExp("\\b" + esc + "\\b", "giu");
+			let m, found = null;
+			while ((m = re.exec(bib)) !== null) {
+				let win = bib.slice(m.index, m.index + 700);
+				if (win.includes(year)) { found = win; break; }
+			}
+			if (found) {
+				// Fin d'entrée = début de l'entrée suivante (« Nom, P. » en début
+				// de ligne). Ne PAS couper au premier point : il tombe juste après
+				// « (1999). » et amputerait le titre et la revue.
+				let next = found.search(/\n\s*\p{Lu}[\p{L}'’-]+,\s+\p{Lu}\./u);
+				let body = this._trimEntry(next > 40 ? found.slice(0, next) : found);
+				if (body.length > 15) out.push("(" + author + ", " + year + ") → " + body);
+			}
+		}
+		return out;
+	},
+
+	// Orchestrateur : renvoie les entrées trouvées, une par ligne, ou "".
+	async getReferences(item, text) {
+		if (!getPref("resolveCitations", true)) return "";
+		try {
+			let markers = this.detectCitationMarkers(text);
+			if (!markers.numbers.length && !markers.authorYears.length) return "";
+
+			let fullText = await this.getAttachmentFullText(item);
+			if (!fullText) return "";
+			let bib = this.findBibliographySection(fullText);
+			if (!bib) return "";
+
+			let max = parseInt(getPref("maxRefs", 8), 10) || 8;
+			let refs = this.resolveNumericRefs(bib, markers.numbers)
+				.concat(this.resolveAuthorYearRefs(bib, markers.authorYears));
+			return refs.slice(0, max).join("\n");
+		}
+		catch (e) {
+			log("getReferences: " + e);
+			return "";
+		}
+	},
+
 	// Bloc de contexte lisible, transmis à l'IA en mode standard.
 	formatContextBlock(vars) {
 		let lines = [];
@@ -324,7 +500,13 @@ Annota = {
 		if (vars.publication) lines.push("Publication: " + vars.publication);
 		if (vars.page) lines.push("Passage page: " + vars.page);
 		if (vars.abstract) lines.push("Document abstract: " + vars.abstract);
-		return lines.length ? "Document context:\n" + lines.join("\n") : "";
+		let block = lines.length ? "Document context:\n" + lines.join("\n") : "";
+		if (vars.references) {
+			block += (block ? "\n\n" : "")
+				+ "Works cited in the passage (resolved from this article's reference list):\n"
+				+ vars.references;
+		}
+		return block;
 	},
 
 	// Remplace {{variable}} par sa valeur (chaîne vide si inconnue).
@@ -350,6 +532,7 @@ Annota = {
 			abstract: (ctx && ctx.abstract) || "",
 			publication: (ctx && ctx.publication) || "",
 			page: (ctx && ctx.page) || "",
+			references: (ctx && ctx.references) || "",
 			maxWords: parseInt(getPref("maxWords", 80), 10) || 80,
 			language: String(getPref("language", "français")).trim() || "français"
 		};
@@ -591,12 +774,14 @@ Annota = {
 		for (let i = 0; i < targets.length; i++) {
 			let ann = targets[i];
 			try {
+				let annText = (ann.annotationText || "").trim();
 				let ctx = this.getContext(ann);
+				ctx.references = await this.getReferences(ann, annText);
 				// Le menu contextuel traite toutes les couleurs ayant un prompt,
 				// « auto » ou « manuel ». Le commentaire existant (paraphrase
 				// manuelle) est transmis via {{comment}}.
 				let comment = await this.generateComment({
-					text: (ann.annotationText || "").trim(),
+					text: annText,
 					ctx,
 					color: ann.annotationColor,
 					comment: (ann.annotationComment || "").trim()
