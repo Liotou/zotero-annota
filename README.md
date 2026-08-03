@@ -64,20 +64,16 @@ request*.
 - **⏳ while generating** — shows an indicator during the network call.
 
 ### AI provider
-Two providers; the CLI wins if ticked, otherwise Mistral is used.
-- **Mistral / OpenAI-compatible** (default) — API key (console.mistral.ai),
-  model (`mistral-large-latest`), endpoint (any chat/completions URL), and
-  temperature (0–2, lower = steadier).
-- **Claude Code CLI (local)** — tick *Use Claude Code CLI*. Annota then runs
-  `claude -p` as a local process, using whatever your `claude` command is logged
-  into (your Claude subscription) — **no API key, no per-token billing**.
-  - **`claude` path** — use the **absolute** path (Zotero doesn't inherit your
-    shell PATH), e.g. `/Users/you/.local/bin/claude`.
-  - **Model** — `sonnet`, `opus`, or a full id; blank = the CLI's default.
-  - It spawns a fresh process per call (a few seconds of cold start each), so
-    it fits the **on-request** mode better than bulk auto-generation, and needs
-    `claude` to be logged in (`claude` once in a terminal). Temperature is
-    Mistral-only.
+Pick one in the dropdown; only that provider's settings are shown.
+
+| Provider | What it is |
+|---|---|
+| **Mistral / OpenAI-compatible** | Any remote `chat/completions` endpoint. Needs an API key (console.mistral.ai). |
+| **Ollama (local)** | A model running on your own machine — no API key, no per-token cost, nothing leaves the computer. Start Ollama and `ollama pull llama3.1` first, then set the model tag. The first call after startup is slow while the model loads. |
+| **Claude Code CLI (local)** | Runs `claude -p` using whatever your `claude` command is logged into (your subscription). Use the **absolute** path — Zotero doesn't see your shell PATH. A few seconds of cold start per call. |
+
+**Temperature** (0–2, lower = steadier) applies to the two HTTP providers; the
+Claude CLI ignores it.
 
 ### Text generation
 - **Output language** — available in the prompt via `{{language}}`.
@@ -121,6 +117,25 @@ write that color's prompt.
 - Everything is empty on a fresh install, so nothing happens until you set up at
   least one color. Copyable examples live in
   [PROMPT-EXAMPLES.txt](PROMPT-EXAMPLES.txt).
+
+#### Comment layout — mixing AI output with deterministic text
+
+Each color has an optional **layout** applied after generation. Leave it empty
+and the comment is just the AI's reply. Fill it in and you compose the comment
+yourself: `{{ai}}` is the model's reply, every other variable is inserted
+**verbatim** — not written by a model, so it can't be paraphrased or invented.
+
+```
+{{ai}}
+<i>{{references}}</i>
+```
+
+That gives the AI note followed by the works cited in the passage, exactly as
+found in the PDF. A line whose variables are all empty is dropped, so an
+unresolved citation leaves no stray `<i></i>`.
+
+Omit `{{ai}}` entirely and **no AI request is made at all** — the comment becomes
+purely deterministic (and needs no API key or provider).
 
 Each color also picks **when it runs**:
 - **Automatically** — as soon as you create the highlight (the classic flow: the

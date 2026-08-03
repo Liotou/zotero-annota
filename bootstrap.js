@@ -108,24 +108,38 @@ Annota = {
 		}
 	},
 
-	// Réglage d'une couleur, normalisé : { prompt, trigger } ou null si vide.
-	// Rétrocompat : une valeur chaîne = { prompt, trigger: "auto" }.
-	// trigger "auto"   = génère à la création du surlignage (mode 1)
-	// trigger "manual" = uniquement via le menu contextuel (mode 2)
+	// Réglage d'une couleur, normalisé : { prompt, trigger, template } ou null.
+	// Rétrocompat : une valeur chaîne = { prompt, trigger: "auto", template: "" }.
+	// trigger  "auto"   = génère à la création du surlignage
+	//          "manual" = uniquement via le menu contextuel
+	// template = gabarit du commentaire final ; vide = la réponse de l'IA seule.
+	// Une couleur est active si elle a un prompt OU un gabarit (un gabarit sans
+	// {{ai}} produit un commentaire entièrement déterministe, sans appel IA).
 	getColorEntry(color) {
 		if (!color) return null;
 		let raw = this.getColorPrompts()[String(color).toLowerCase()];
 		if (!raw) return null;
 		if (typeof raw === "string") {
-			return raw.trim() ? { prompt: raw, trigger: "auto" } : null;
+			return raw.trim() ? { prompt: raw, trigger: "auto", template: "" } : null;
 		}
-		if (typeof raw === "object" && raw.prompt && String(raw.prompt).trim()) {
-			return {
-				prompt: String(raw.prompt),
-				trigger: raw.trigger === "manual" ? "manual" : "auto"
-			};
-		}
-		return null;
+		if (typeof raw !== "object") return null;
+		let prompt = String(raw.prompt || "");
+		let template = String(raw.template || "");
+		if (!prompt.trim() && !template.trim()) return null;
+		return {
+			prompt,
+			template,
+			trigger: raw.trigger === "manual" ? "manual" : "auto"
+		};
+	},
+
+	// Le gabarit réclame-t-il une réponse d'IA ?
+	// Gabarit vide → oui (la réponse EST le commentaire).
+	// Gabarit contenant {{ai}} → oui. Gabarit sans {{ai}} → non (déterministe).
+	entryNeedsAI(entry) {
+		if (!entry) return false;
+		let tpl = entry.template || "";
+		return !tpl.trim() || /\{\{\s*ai\s*\}\}/.test(tpl);
 	},
 
 	// Prompt configuré pour cette couleur, ou "" si la couleur n'en a pas.
@@ -134,18 +148,52 @@ Annota = {
 		return entry ? entry.prompt : "";
 	},
 
-	// Fournisseur actif : CLI local si activé, sinon Mistral/compatible OpenAI.
+	// Fournisseur actif : "openai" (Mistral ou tout endpoint compatible),
+	// "ollama" (local), "cli" (Claude Code local).
 	provider() {
-		return getPref("useClaudeCLI", false) ? "cli" : "mistral";
+		let p = String(getPref("provider", "")).trim();
+		if (p === "openai" || p === "ollama" || p === "cli") return p;
+		// Rétrocompat avec l'ancienne case à cocher.
+		return getPref("useClaudeCLI", false) ? "cli" : "openai";
 	},
+
+	// Réglages du chemin compatible OpenAI (Mistral distant ou Ollama local).
+	chatConfig() {
+		if (this.provider() === "ollama") {
+			return {
+				endpoint: String(getPref("ollamaEndpoint",
+					"http://localhost:11434/v1/chat/completions")).trim(),
+				model: String(getPref("ollamaModel", "llama3.1")).trim() || "llama3.1",
+				apiKey: "",          // Ollama n'exige aucune clé
+				requiresKey: false
+			};
+		}
+		return {
+			endpoint: String(getPref("endpoint",
+				"https://api.mistral.ai/v1/chat/completions")).trim(),
+			model: String(getPref("model", "mistral-large-latest")).trim()
+				|| "mistral-large-latest",
+			apiKey: String(getPref("apiKey", "")).trim(),
+			requiresKey: true
+		};
+	},
+
 	// Vérifie que le fournisseur choisi est prêt ; renvoie un message ou null.
 	providerReadyError() {
-		if (this.provider() === "cli") {
+		let p = this.provider();
+		if (p === "cli") {
 			return String(getPref("cliPath", "claude")).trim()
 				? null : "Claude CLI path not set (Preferences → Annota).";
 		}
-		return String(getPref("apiKey", "")).trim()
-			? null : "API key missing (Preferences → Annota).";
+		let cfg = this.chatConfig();
+		if (!cfg.endpoint) {
+			return (p === "ollama" ? "Ollama endpoint" : "API endpoint")
+				+ " not set (Preferences → Annota).";
+		}
+		if (cfg.requiresKey && !cfg.apiKey) {
+			return "API key missing (Preferences → Annota).";
+		}
+		return null;
 	},
 
 	init({ id, version, rootURI }) {
@@ -221,16 +269,20 @@ Annota = {
 		let overwrite = getPref("overwrite", false);
 		if (existing && !overwrite) return;
 
-		let notReady = this.providerReadyError();
-		if (notReady) {
-			toast("Annota", notReady, "error");
-			return;
+		// Un gabarit purement déterministe (sans {{ai}}) n'appelle aucun modèle :
+		// inutile d'exiger une clé API ou le CLI dans ce cas.
+		if (this.entryNeedsAI(entry)) {
+			let notReady = this.providerReadyError();
+			if (notReady) {
+				toast("Annota", notReady, "error");
+				return;
+			}
 		}
 
 		this.inProgress.add(id);
 		let usedPlaceholder = false;
 		try {
-			if (getPref("showPlaceholder", true)) {
+			if (getPref("showPlaceholder", true) && this.entryNeedsAI(entry)) {
 				item.annotationComment = PLACEHOLDER;
 				await item.saveTx();
 				usedPlaceholder = true;
@@ -238,9 +290,10 @@ Annota = {
 
 			let ctx = this.getContext(item);
 			ctx.references = await this.getReferences(item, text);
-			let comment = await this.generateComment({
+			let comment = await this.buildComment({
 				text, ctx, color: item.annotationColor, comment: existing
 			});
+			if (comment === null) return;
 
 			// Recharger l'item au cas où il aurait changé pendant l'appel réseau.
 			let fresh = await Zotero.Items.getAsync(id);
@@ -677,10 +730,10 @@ Annota = {
 	//   dans le message utilisateur, l'utilisateur contrôle la structure.
 	// - Mode standard : le prompt sert d'instructions (system), le passage (et
 	//   le contexte du document si activé) est ajouté comme message utilisateur.
-	buildPrompt({ text, ctx, color, comment }) {
-		let tpl = this.getPromptForColor(color);
-		let vars = {
-			text: text,
+	// Variables disponibles dans le prompt ET dans le gabarit de sortie.
+	buildVars({ text, ctx, comment }) {
+		return {
+			text: text || "",
 			comment: comment || "",
 			title: (ctx && ctx.title) || "",
 			authors: (ctx && ctx.authors) || "",
@@ -692,6 +745,11 @@ Annota = {
 			maxWords: parseInt(getPref("maxWords", 80), 10) || 80,
 			language: String(getPref("language", "français")).trim() || "français"
 		};
+	},
+
+	buildPrompt({ text, ctx, color, comment }) {
+		let tpl = this.getPromptForColor(color);
+		let vars = this.buildVars({ text, ctx, comment });
 
 		let selfContained = /\{\{\s*(text|comment)\s*\}\}/.test(tpl);
 		if (selfContained) {
@@ -716,6 +774,43 @@ Annota = {
 		return this.provider() === "cli"
 			? this.callCLI(prompt)
 			: this.callOpenAI(prompt);
+	},
+
+	// Rend le gabarit de sortie. Une ligne dont TOUTES les variables sont vides
+	// est supprimée : sans cela, une référence non résolue laisserait une ligne
+	// orpheline du type « <i></i> » dans le commentaire.
+	renderTemplate(tpl, vars) {
+		let out = [];
+		for (let line of String(tpl).split("\n")) {
+			let names = [];
+			line.replace(/\{\{\s*(\w+)\s*\}\}/g, (m, n) => { names.push(n); return m; });
+			if (names.length) {
+				let allEmpty = names.every(
+					n => !(vars[n] != null && String(vars[n]).trim()));
+				if (allEmpty) continue;
+			}
+			out.push(this.substitute(line, vars));
+		}
+		return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+	},
+
+	// Produit le commentaire final d'une annotation : réponse de l'IA seule, ou
+	// gabarit mêlant cette réponse ({{ai}}) et des entrées déterministes.
+	// Renvoie null si la couleur n'a rien à produire.
+	async buildComment({ text, ctx, color, comment }) {
+		let entry = this.getColorEntry(color);
+		if (!entry) return null;
+
+		let ai = "";
+		if (this.entryNeedsAI(entry)) {
+			if (!entry.prompt.trim()) return null;   // rien à demander au modèle
+			ai = await this.generateComment({ text, ctx, color, comment });
+		}
+		if (!entry.template.trim()) return ai;
+
+		let vars = this.buildVars({ text, ctx, comment });
+		vars.ai = ai;
+		return this.renderTemplate(entry.template, vars);
 	},
 
 	// Claude Code CLI local (`claude -p`). Utilise l'abonnement connecté du CLI,
@@ -780,10 +875,9 @@ Annota = {
 
 	// Fournisseur compatible OpenAI (Mistral par défaut).
 	async callOpenAI({ system, user }) {
-		let apiKey = String(getPref("apiKey", "")).trim();
-		if (!apiKey) throw new Error("Mistral API key missing");
-		let endpoint = String(getPref("endpoint", "https://api.mistral.ai/v1/chat/completions")).trim();
-		let model = String(getPref("model", "mistral-large-latest")).trim() || "mistral-large-latest";
+		let cfg = this.chatConfig();
+		if (cfg.requiresKey && !cfg.apiKey) throw new Error("API key missing");
+		if (!cfg.endpoint) throw new Error("Endpoint not set");
 		let temp = parseFloat(getPref("temperature", 0.2));
 		if (isNaN(temp)) temp = 0.2;
 		temp = Math.max(0, Math.min(2, temp));
@@ -792,10 +886,12 @@ Annota = {
 			? [{ role: "system", content: system }, { role: "user", content: user }]
 			: [{ role: "user", content: user }];
 
-		let resp = await this.httpJSON(endpoint, {
-			"Content-Type": "application/json",
-			"Authorization": "Bearer " + apiKey
-		}, { model, temperature: temp, messages });
+		let headers = { "Content-Type": "application/json" };
+		// Ollama ignore l'autorisation : on n'envoie l'en-tête que si une clé existe.
+		if (cfg.apiKey) headers["Authorization"] = "Bearer " + cfg.apiKey;
+
+		let resp = await this.httpJSON(cfg.endpoint, headers,
+			{ model: cfg.model, temperature: temp, messages, stream: false });
 
 		let data = resp.response;
 		let content = data && data.choices && data.choices[0]
@@ -806,12 +902,14 @@ Annota = {
 
 	// POST JSON commun, avec message d'erreur lisible.
 	async httpJSON(url, headers, payload) {
+		// Un modèle local doit d'abord être chargé en mémoire : délai plus large.
+		let timeout = this.provider() === "ollama" ? 180000 : 45000;
 		try {
 			return await Zotero.HTTP.request("POST", url, {
 				headers,
 				body: JSON.stringify(payload),
 				responseType: "json",
-				timeout: 45000
+				timeout
 			});
 		}
 		catch (e) {
@@ -936,12 +1034,13 @@ Annota = {
 				// Le menu contextuel traite toutes les couleurs ayant un prompt,
 				// « auto » ou « manuel ». Le commentaire existant (paraphrase
 				// manuelle) est transmis via {{comment}}.
-				let comment = await this.generateComment({
+				let comment = await this.buildComment({
 					text: annText,
 					ctx,
 					color: ann.annotationColor,
 					comment: (ann.annotationComment || "").trim()
 				});
+				if (comment === null) { failed++; continue; }
 				let fresh = await Zotero.Items.getAsync(ann.id);
 				if (fresh) {
 					fresh.annotationComment = comment;

@@ -11,6 +11,7 @@
 
 (function () {
 	const PREF_COLORS = "annota.colorPrompts";
+	const PREF_PROVIDER = "annota.provider";
 	const XHTML_NS = "http://www.w3.org/1999/xhtml";
 
 	function api() {
@@ -23,19 +24,23 @@
 		return (a && Array.isArray(a.COLORS)) ? a.COLORS : [];
 	}
 
-	// Normalise une valeur brute (chaîne ancienne ou objet) en { prompt, trigger }.
+	// Normalise une valeur brute en { prompt, trigger, template }.
+	// Une couleur est active si elle a un prompt OU un gabarit (un gabarit sans
+	// {{ai}} produit un commentaire déterministe, sans appel à l'IA).
 	function normalize(raw) {
 		if (!raw) return null;
 		if (typeof raw === "string") {
-			return raw.trim() ? { prompt: raw, trigger: "auto" } : null;
+			return raw.trim() ? { prompt: raw, trigger: "auto", template: "" } : null;
 		}
-		if (typeof raw === "object" && raw.prompt && String(raw.prompt).trim()) {
-			return {
-				prompt: String(raw.prompt),
-				trigger: raw.trigger === "manual" ? "manual" : "auto"
-			};
-		}
-		return null;
+		if (typeof raw !== "object") return null;
+		let prompt = String(raw.prompt || "");
+		let template = String(raw.template || "");
+		if (!prompt.trim() && !template.trim()) return null;
+		return {
+			prompt,
+			template,
+			trigger: raw.trigger === "manual" ? "manual" : "auto"
+		};
 	}
 
 	function readColorMap() {
@@ -60,6 +65,39 @@
 		Zotero.Prefs.set(PREF_COLORS, Object.keys(clean).length ? JSON.stringify(clean) : "");
 	}
 
+	// Sélecteur de fournisseur : n'affiche que les réglages du fournisseur actif.
+	// La pref est écrite à la main (un <select> n'a pas de binding « preference »).
+	function setupProvider() {
+		let sel = document.getElementById("annota-provider");
+		let panes = {
+			openai: document.getElementById("annota-cfg-openai"),
+			ollama: document.getElementById("annota-cfg-ollama"),
+			cli: document.getElementById("annota-cfg-cli")
+		};
+		if (!sel || !panes.openai || !panes.ollama || !panes.cli) {
+			requestAnimationFrame(setupProvider);
+			return;
+		}
+
+		function current() {
+			let p = String(Zotero.Prefs.get(PREF_PROVIDER) || "").trim();
+			if (p === "openai" || p === "ollama" || p === "cli") return p;
+			// Rétrocompat avec l'ancienne case à cocher.
+			return Zotero.Prefs.get("annota.useClaudeCLI") ? "cli" : "openai";
+		}
+
+		function apply(p) {
+			for (let key of Object.keys(panes)) panes[key].hidden = (key !== p);
+		}
+
+		sel.value = current();
+		apply(sel.value);
+		sel.addEventListener("change", () => {
+			Zotero.Prefs.set(PREF_PROVIDER, sel.value);
+			apply(sel.value);
+		});
+	}
+
 	function setup() {
 		let textarea = document.getElementById("annota-prompt");
 		let clearBtn = document.getElementById("annota-prompt-clear");
@@ -68,7 +106,8 @@
 		let targetName = document.getElementById("annota-target-name");
 		let idleWarning = document.getElementById("annota-idle-warning");
 		let triggerGroup = document.getElementById("annota-trigger");
-		if (!textarea || !swatchBox || !triggerGroup) {
+		let templateArea = document.getElementById("annota-template");
+		if (!textarea || !swatchBox || !triggerGroup || !templateArea) {
 			requestAnimationFrame(setup);
 			return;
 		}
@@ -98,8 +137,10 @@
 		function save() {
 			let map = readColorMap();
 			let prompt = textarea.value;
-			if (prompt && prompt.trim()) {
-				map[current] = { prompt, trigger: currentTrigger() };
+			let template = templateArea.value;
+			// Actif si prompt OU gabarit : un gabarit sans {{ai}} est déterministe.
+			if ((prompt && prompt.trim()) || (template && template.trim())) {
+				map[current] = { prompt, template, trigger: currentTrigger() };
 			}
 			else {
 				delete map[current];
@@ -123,6 +164,7 @@
 			current = hex;
 			let entry = normalize(readColorMap()[hex]);
 			textarea.value = entry ? entry.prompt : "";
+			templateArea.value = entry ? (entry.template || "") : "";
 			triggerGroup.value = entry ? entry.trigger : "auto";
 			if (targetName) {
 				let c = palette.find(x => x.hex === hex);
@@ -171,11 +213,16 @@
 			"Empty — Annota ignores highlights of this color.");
 		textarea.addEventListener("input", scheduleSave);
 		textarea.addEventListener("blur", saveNow);
+		templateArea.setAttribute("placeholder",
+			"Empty — the comment is the AI's reply as-is.");
+		templateArea.addEventListener("input", scheduleSave);
+		templateArea.addEventListener("blur", saveNow);
 
 		// --- Choix du mode (auto / manuel) ---
 		// Ne sauvegarde que si la couleur a déjà un prompt (sinon rien à régler).
 		triggerGroup.addEventListener("command", () => {
-			if (textarea.value && textarea.value.trim()) saveNow();
+			if ((textarea.value && textarea.value.trim())
+					|| (templateArea.value && templateArea.value.trim())) saveNow();
 		});
 
 		// --- Bouton d'effacement ---
@@ -185,6 +232,7 @@
 				delete map[current];
 				writeColorMap(map);
 				textarea.value = "";
+				templateArea.value = "";
 				triggerGroup.value = "auto";
 				refreshSwatches();
 				flashStatus("Cleared ✓");
@@ -197,4 +245,5 @@
 	}
 
 	setup();
+	setupProvider();
 })();
