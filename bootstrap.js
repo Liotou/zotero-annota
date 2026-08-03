@@ -460,6 +460,26 @@ Annota = {
 		return last < 0 ? "" : fullText.slice(last);
 	},
 
+	// Coupe au début de l'entrée bibliographique SUIVANTE.
+	//
+	// Dans le texte extrait d'un PDF, les entrées se suivent souvent sans retour
+	// à la ligne : « …(last accessed 2023). Haddaway, N.R., P. Woodcock… ».
+	// Se fier au saut de ligne laissait donc déborder l'entrée voisine.
+	// On repère « ponctuation + espace » suivi d'un début d'entrée :
+	//   - « Nom, X. »  (nom de famille puis initiale) ;
+	//   - « [12] »     (bibliographie numérotée).
+	// Le seuil minKeep protège le début de l'entrée courante.
+	_cutAtNextEntry(s, minKeep = 40) {
+		s = String(s);
+		let re = /[.!?)\]]\s+(\[\d{1,3}\]|\p{Lu}[\p{L}'’-]+,\s+\p{Lu}\.)/gu;
+		let m;
+		while ((m = re.exec(s)) !== null) {
+			let idx = m.index + m[0].indexOf(m[1]);
+			if (idx >= minKeep) return s.slice(0, idx).trim();
+		}
+		return s;
+	},
+
 	// Coupe une entrée trop longue proprement.
 	_trimEntry(s, max = 320) {
 		s = String(s).replace(/\s+/g, " ").trim();
@@ -485,7 +505,8 @@ Annota = {
 			let end = (i + 1 < markers.length)
 				? markers[i + 1].mStart
 				: Math.min(bib.length, markers[i].start + 600);
-			let body = this._trimEntry(bib.slice(markers[i].start, end));
+			let body = this._trimEntry(
+				this._cutAtNextEntry(bib.slice(markers[i].start, end)));
 			if (body.length > 15) {
 				out.push("[" + markers[i].n + "] " + body);
 				wanted.delete(markers[i].n);
@@ -510,11 +531,10 @@ Annota = {
 				if (win.includes(year)) { found = win; break; }
 			}
 			if (found) {
-				// Fin d'entrée = début de l'entrée suivante (« Nom, P. » en début
-				// de ligne). Ne PAS couper au premier point : il tombe juste après
+				// Fin d'entrée = début de l'entrée suivante, avec ou sans retour à
+				// la ligne. Ne PAS couper au premier point : il tombe juste après
 				// « (1999). » et amputerait le titre et la revue.
-				let next = found.search(/\n\s*\p{Lu}[\p{L}'’-]+,\s+\p{Lu}\./u);
-				let body = this._trimEntry(next > 40 ? found.slice(0, next) : found);
+				let body = this._trimEntry(this._cutAtNextEntry(found));
 				if (body.length > 15) out.push("(" + author + ", " + year + ") → " + body);
 			}
 		}
@@ -658,7 +678,7 @@ Annota = {
 				seen.add(key);
 
 				let txt = await this._textAtDestination(pdfDoc, target.pageIndex, target.y);
-				txt = this._trimEntry(txt);
+				txt = this._trimEntry(this._cutAtNextEntry(txt));
 				if (txt.length > 15) out.push(txt);
 			}
 			if (out.length) log("Références résolues par lien PDF : " + out.length);
