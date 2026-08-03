@@ -70,6 +70,7 @@ Pick one in the dropdown; only that provider's settings are shown.
 |---|---|
 | **Mistral / OpenAI-compatible** | Any remote `chat/completions` endpoint. Needs an API key (console.mistral.ai). |
 | **Ollama (local)** | A model running on your own machine — no API key, no per-token cost, nothing leaves the computer. The model dropdown is read from your running Ollama (hit **Refresh** after `ollama pull …`). **Tags matter**: `llama3.1:8b` and `llama3.1` are different names, and only what is installed will answer. The first call after startup is slow while the model loads. |
+| **Apple Intelligence (on-device)** | The model built into macOS 26+ — no API key, no cost, nothing leaves the Mac, ~1 s per call. Needs Apple Intelligence enabled and the Xcode Command Line Tools (`xcode-select --install`): Annota compiles a small Swift helper once on first use, since Apple exposes this model to native code only. |
 | **Claude Code CLI (local)** | Runs `claude -p` using whatever your `claude` command is logged into (your subscription). Use the **absolute** path — Zotero doesn't see your shell PATH. A few seconds of cold start per call. |
 
 **Temperature** (0–2, lower = steadier) applies to the two HTTP providers; the
@@ -167,27 +168,6 @@ Two modes depending on the prompt:
   enabled) is appended automatically.
 - **Advanced** (the prompt contains `{{text}}` or `{{comment}}`) — the prompt is
   sent as-is; you fully control the structure of the request.
-
-## Bibliographic index note
-
-**Right-click a reference → Annota → Build bibliographic index note** creates a
-child note listing every work cited **inside your highlighted passages**, linked
-to its full bibliographic entry.
-
-For each cited work the note gives an `Author, year` key, the complete entry, the
-DOI when present, the citation markers used (`[1]`, `(Author, year)`), the pages
-where you cited it, and the quoted passages themselves. Works cited from several
-highlights are merged into a single record.
-
-The **Index note line** setting shapes each line — variables `{{key}}`,
-`{{entry}}`, `{{doi}}`, `{{marker}}`, `{{pages}}`. The default is:
-
-```
-[[{{key}}]] — {{entry}}
-```
-
-so the key becomes a wikilink once the note reaches Obsidian, ready to resolve
-against a pending-reference folder named by `Author, year`.
 
 ## Generating comments after the fact
 

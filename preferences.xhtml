@@ -10,6 +10,7 @@
       <html:select id="annota-provider" style="min-width: 26em;">
         <html:option value="openai">Mistral / OpenAI-compatible API (remote)</html:option>
         <html:option value="ollama">Ollama (local model, no API key)</html:option>
+        <html:option value="apple">Apple Intelligence (on-device, macOS 26+)</html:option>
         <html:option value="cli">Claude Code CLI (local, uses your subscription)</html:option>
       </html:select>
     </hbox>
@@ -70,6 +71,33 @@
         not the same name, and only what is installed will answer. The first call
         after startup is slow while the model loads into memory.
       </description>
+    </vbox>
+
+    <vbox id="annota-cfg-apple" style="margin-top: 8px;">
+      <description style="max-width: 46em; opacity: 0.8;">
+        Uses the model built into macOS — fully on-device, no API key, no cost,
+        nothing leaves the Mac, and faster than the Claude CLI (about a second
+        per call). Requires macOS 26+ with Apple Intelligence switched on, and
+        the Xcode Command Line Tools
+        (<html:code>xcode-select --install</html:code>): Annota compiles a tiny
+        Swift helper once on first use, because Apple exposes this model only to
+        native code. Nothing to configure — the fields below are escape hatches.
+      </description>
+      <grid>
+        <columns><column/><column flex="1"/></columns>
+        <rows>
+          <row align="center">
+            <label value="swiftc path:" control="annota-swiftc"/>
+            <html:input id="annota-swiftc" type="text" style="width: 30em;"
+                        preference="extensions.zotero.annota.swiftcPath"/>
+          </row>
+          <row align="center">
+            <label value="Helper binary (optional):" control="annota-applepath"/>
+            <html:input id="annota-applepath" type="text" style="width: 30em;"
+                        preference="extensions.zotero.annota.applePath"/>
+          </row>
+        </rows>
+      </grid>
     </vbox>
 
     <vbox id="annota-cfg-cli" style="margin-top: 8px;">
@@ -218,22 +246,24 @@
       the PDF text. Nothing is sent when a citation can't be resolved.
     </description>
 
-    <hbox align="center" style="margin-top: 10px;">
-      <label value="Index note line:" control="annota-indexline"/>
-      <html:input id="annota-indexline" type="text" style="width: 28em;"
-                  preference="extensions.zotero.annota.indexLineFormat"/>
-    </hbox>
+    <label style="margin-top: 10px;"><html:b>Index note — entry layout</html:b></label>
     <description style="max-width: 46em; opacity: 0.8;">
       Right-click a reference → <html:b>Annota → Build bibliographic index
       note</html:b> creates a child note listing every work cited inside your
-      highlighted passages, with the full entry, the pages, and the quoted
-      passage. Line variables: <html:code>{{key}}</html:code> (a
-      « Author, year » key), <html:code>{{entry}}</html:code>,
-      <html:code>{{doi}}</html:code>, <html:code>{{marker}}</html:code>,
-      <html:code>{{pages}}</html:code>. The default wraps the key in
-      <html:code>[[…]]</html:code> so it becomes a wikilink once exported to
-      Obsidian.
+      highlighted passages. Each entry is <html:b>already split into fields</html:b>
+      — title, authors, year, source, DOI, URL — so the reference is complete on
+      arrival and needs no placeholder to fill in later.
+      Variables: <html:code>{{key}}</html:code> («&#160;Author, year&#160;»),
+      <html:code>{{title}}</html:code>, <html:code>{{authors}}</html:code>,
+      <html:code>{{year}}</html:code>, <html:code>{{container}}</html:code>,
+      <html:code>{{doi}}</html:code>, <html:code>{{url}}</html:code>,
+      <html:code>{{marker}}</html:code>, <html:code>{{pages}}</html:code>,
+      <html:code>{{entry}}</html:code> (raw entry). A line whose variables are all
+      empty is dropped, so nothing is ever invented. Leave empty for the built-in
+      layout.
     </description>
+    <html:textarea id="annota-indextpl" rows="8"
+                    style="width: 100%; font-family: monospace; font-size: 12px; margin-top: 4px;"/>
   </groupbox>
 
   <!-- ===================== 4. COMPORTEMENT & SORTIE ===================== -->

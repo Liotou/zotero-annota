@@ -15,6 +15,11 @@ pref("extensions.zotero.annota.endpoint", "https://api.mistral.ai/v1/chat/comple
 pref("extensions.zotero.annota.ollamaEndpoint", "http://localhost:11434/v1/chat/completions");
 pref("extensions.zotero.annota.ollamaModel", "llama3.1");
 
+// Apple Intelligence (local, macOS 26+). Binaire compilé à la demande ;
+// laisser vide pour utiliser celui géré par Annota.
+pref("extensions.zotero.annota.applePath", "");
+pref("extensions.zotero.annota.swiftcPath", "/usr/bin/swiftc");
+
 // Claude Code CLI (local).
 pref("extensions.zotero.annota.cliPath", "claude");
 pref("extensions.zotero.annota.cliModel", "");
@@ -37,11 +42,6 @@ pref("extensions.zotero.annota.maxRefs", 8);
 pref("extensions.zotero.annota.alsoUnderline", false);
 pref("extensions.zotero.annota.overwrite", false);
 pref("extensions.zotero.annota.showPlaceholder", true);
-
-// ---- Index bibliographique ----
-// Format de chaque ligne de la note d'index. Variables : {{key}} (« Auteur,
-// année »), {{entry}} (entrée complète), {{doi}}, {{marker}}, {{pages}}.
-pref("extensions.zotero.annota.indexLineFormat", "[[{{key}}]] — {{entry}}");
 
 // ---- Couleurs ----
 // JSON { "#ffd400": { prompt, trigger, template }, … }.

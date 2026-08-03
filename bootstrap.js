@@ -149,10 +149,10 @@ Annota = {
 	},
 
 	// Fournisseur actif : "openai" (Mistral ou tout endpoint compatible),
-	// "ollama" (local), "cli" (Claude Code local).
+	// "ollama" (local), "cli" (Claude Code local), "apple" (Apple Intelligence).
 	provider() {
 		let p = String(getPref("provider", "")).trim();
-		if (p === "openai" || p === "ollama" || p === "cli") return p;
+		if (p === "openai" || p === "ollama" || p === "cli" || p === "apple") return p;
 		// Rétrocompat avec l'ancienne case à cocher.
 		return getPref("useClaudeCLI", false) ? "cli" : "openai";
 	},
@@ -181,6 +181,10 @@ Annota = {
 	// Vérifie que le fournisseur choisi est prêt ; renvoie un message ou null.
 	providerReadyError() {
 		let p = this.provider();
+		if (p === "apple") {
+			// Disponibilité réellement vérifiée au premier appel (compilation).
+			return null;
+		}
 		if (p === "cli") {
 			return String(getPref("cliPath", "claude")).trim()
 				? null : "Claude CLI path not set (Preferences → Annota).";
@@ -822,9 +826,10 @@ Annota = {
 
 	async generateComment({ text, ctx, color, comment }) {
 		let prompt = this.buildPrompt({ text, ctx, color, comment });
-		return this.provider() === "cli"
-			? this.callCLI(prompt)
-			: this.callOpenAI(prompt);
+		let p = this.provider();
+		if (p === "cli") return this.callCLI(prompt);
+		if (p === "apple") return this.callApple(prompt);
+		return this.callOpenAI(prompt);
 	},
 
 	// Rend le gabarit de sortie. Une ligne dont TOUTES les variables sont vides
@@ -862,6 +867,132 @@ Annota = {
 		let vars = this.buildVars({ text, ctx, comment });
 		vars.ai = ai;
 		return this.renderTemplate(entry.template, vars);
+	},
+
+	// ---- Apple Intelligence (modèle embarqué de macOS) ----
+	//
+	// macOS 26+ expose le modèle Apple Intelligence via le framework
+	// FoundationModels, accessible uniquement depuis du code Swift : il n'existe
+	// ni endpoint HTTP ni CLI fourni. Annota écrit donc un petit programme Swift,
+	// le compile UNE FOIS (~1 s) dans le répertoire de données Zotero, puis
+	// réutilise le binaire (~1-2 s par appel). Tout reste sur la machine.
+	APPLE_SWIFT_SOURCE: [
+		"import Foundation",
+		"import FoundationModels",
+		"",
+		"let instructions = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : \"\"",
+		"let prompt = String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8) ?? \"\"",
+		"",
+		"guard case .available = SystemLanguageModel.default.availability else {",
+		"    FileHandle.standardError.write(\"Apple Intelligence unavailable on this Mac\\n\".data(using: .utf8)!)",
+		"    exit(2)",
+		"}",
+		"",
+		"let sem = DispatchSemaphore(value: 0)",
+		"var out = \"\", err = \"\"",
+		"Task {",
+		"    do {",
+		"        let session = instructions.isEmpty",
+		"            ? LanguageModelSession()",
+		"            : LanguageModelSession(instructions: instructions)",
+		"        let r = try await session.respond(to: prompt)",
+		"        out = r.content",
+		"    } catch {",
+		"        err = \"\\(error)\"",
+		"    }",
+		"    sem.signal()",
+		"}",
+		"sem.wait()",
+		"if !err.isEmpty {",
+		"    FileHandle.standardError.write((err + \"\\n\").data(using: .utf8)!)",
+		"    exit(1)",
+		"}",
+		"print(out)"
+	].join("\n"),
+
+	// Répertoire où déposer la source et le binaire.
+	_appleDir() {
+		try {
+			if (Zotero.DataDirectory && Zotero.DataDirectory.dir) return Zotero.DataDirectory.dir;
+		}
+		catch (e) { /* ignore */ }
+		return Zotero.getTempDirectory().path;
+	},
+
+	// Compile le binaire si nécessaire, renvoie son chemin.
+	async ensureAppleBinary(Subprocess) {
+		let custom = String(getPref("applePath", "")).trim();
+		if (custom) return custom;
+
+		let dir = this._appleDir();
+		let bin = PathUtils.join(dir, "annota-apple-ai");
+		if (await IOUtils.exists(bin)) return bin;
+
+		let srcPath = PathUtils.join(dir, "annota-apple-ai.swift");
+		await IOUtils.writeUTF8(srcPath, this.APPLE_SWIFT_SOURCE);
+
+		let swiftc = String(getPref("swiftcPath", "/usr/bin/swiftc")).trim() || "/usr/bin/swiftc";
+		let proc;
+		try {
+			proc = await Subprocess.call({
+				command: swiftc,
+				arguments: ["-O", "-o", bin, srcPath],
+				stderr: "pipe"
+			});
+		}
+		catch (e) {
+			throw new Error("swiftc introuvable (" + swiftc + ") — installez les "
+				+ "Xcode Command Line Tools : xcode-select --install");
+		}
+		let errText = "", c;
+		while ((c = await proc.stderr.readString()) !== "") errText += c;
+		let { exitCode } = await proc.wait();
+		if (exitCode !== 0 || !(await IOUtils.exists(bin))) {
+			throw new Error("Compilation Swift échouée : "
+				+ (errText.trim() || "code " + exitCode).slice(0, 300));
+		}
+		log("Binaire Apple Intelligence compilé : " + bin);
+		return bin;
+	},
+
+	async callApple({ system, user }) {
+		let Subprocess;
+		try {
+			({ Subprocess } = ChromeUtils.importESModule(
+				"resource://gre/modules/Subprocess.sys.mjs"));
+		}
+		catch (e) {
+			throw new Error("Subprocess indisponible : " + (e.message || e));
+		}
+
+		let bin = await this.ensureAppleBinary(Subprocess);
+		let proc = await Subprocess.call({
+			command: bin,
+			arguments: system ? [system] : [],
+			stderr: "pipe"
+		});
+
+		let killTimer = setTimeout(() => { try { proc.kill(); } catch (e) {} }, 120000);
+		try {
+			await proc.stdin.write(user);
+			await proc.stdin.close();
+
+			let out = "", chunk;
+			while ((chunk = await proc.stdout.readString()) !== "") out += chunk;
+			let errText = "", ce;
+			while ((ce = await proc.stderr.readString()) !== "") errText += ce;
+
+			let { exitCode } = await proc.wait();
+			if (exitCode !== 0) {
+				throw new Error("Apple Intelligence (code " + exitCode + ") : "
+					+ (errText.trim() || "pas de détail").slice(0, 300));
+			}
+			if (!out.trim()) throw new Error("Réponse vide d'Apple Intelligence");
+			return this.sanitize(out);
+		}
+		finally {
+			clearTimeout(killTimer);
+		}
 	},
 
 	// Claude Code CLI local (`claude -p`). Utilise l'abonnement connecté du CLI,
@@ -1140,188 +1271,6 @@ Annota = {
 			+ noPrompt + " sans prompt");
 	},
 
-	// ---- Index bibliographique ----
-	//
-	// Produit une note enfant listant les œuvres citées DANS les passages
-	// surlignés, chacune reliée à son entrée bibliographique complète.
-	// Pensé pour alimenter une chaîne Obsidian (Ariane) : la clé produite suit
-	// la convention « Auteur, année » / « A & B, année » / « A et al., année »,
-	// et le DOI est extrait quand il figure dans l'entrée.
-
-	// DOI présent dans une entrée bibliographique, ou "".
-	_extractDOI(entry) {
-		let m = String(entry).match(/\b10\.\d{4,9}\/[^\s"'<>,;)\]]+/);
-		return m ? m[0].replace(/[.,;]+$/, "") : "";
-	},
-
-	// Clé de citation « Auteur, année » déduite d'une entrée bibliographique.
-	// Deux auteurs → « A & B, année » ; trois ou plus → « A et al., année ».
-	_entryToKey(entry) {
-		let s = String(entry).replace(/^\[\d{1,3}\]\s*/, "").trim();
-		let ym = s.match(/\((?:19|20)\d{2}[a-z]?\)|\b(?:19|20)\d{2}\b/);
-		let year = ym ? ym[0].replace(/[()]/g, "").replace(/[a-z]$/, "") : "";
-		let first = s.match(/^([\p{Lu}][\p{L}'’-]+)/u);
-		if (!first) return "";
-		let surname = first[1];
-
-		// Portion précédant l'année : sert à compter les auteurs.
-		let head = ym ? s.slice(0, s.indexOf(ym[0])) : s.slice(0, 120);
-		if (/\bet\s+al\b/i.test(head)) return surname + " et al., " + year;
-
-		// Autres patronymes « Nom, X. » ou « X. Nom » après le premier.
-		let others = head.slice(surname.length)
-			.match(/[\p{Lu}][\p{L}'’-]+,\s*[\p{Lu}]\.|[\p{Lu}]\.\s*[\p{Lu}][\p{L}'’-]+/gu) || [];
-		if (others.length >= 2) return surname + " et al., " + year;
-		if (others.length === 1) {
-			let second = others[0].match(/[\p{Lu}][\p{L}'’-]{2,}/u);
-			if (second) return surname + " & " + second[0] + ", " + year;
-		}
-		return surname + ", " + year;
-	},
-
-	// Parcourt les annotations et agrège les œuvres citées.
-	// Renvoie [{ key, doi, entry, markers:[], places:[{page, snippet}] }].
-	async collectCitationIndex(annotations) {
-		let byEntry = new Map();
-		for (let ann of annotations) {
-			let text = (ann.annotationText || "").trim();
-			if (!text) continue;
-
-			let refs = await this.collectReferencesStructured(ann, text);
-			if (!refs.length) continue;
-
-			let page = ann.annotationPageLabel || "";
-			let snippet = this._trimEntry(text, 220);
-			for (let r of refs) {
-				// Regrouper sur le début de l'entrée : une même œuvre citée à
-				// plusieurs endroits ne doit apparaître qu'une fois.
-				let k = r.entry.slice(0, 90).toLowerCase().replace(/\s+/g, " ");
-				let rec = byEntry.get(k);
-				if (!rec) {
-					rec = {
-						key: this._entryToKey(r.entry),
-						doi: this._extractDOI(r.entry),
-						entry: r.entry,
-						markers: [],
-						places: []
-					};
-					byEntry.set(k, rec);
-				}
-				if (r.marker && !rec.markers.includes(r.marker)) rec.markers.push(r.marker);
-				if (!rec.places.some(p => p.page === page && p.snippet === snippet)) {
-					rec.places.push({ page, snippet });
-				}
-			}
-		}
-		return Array.from(byEntry.values())
-			.sort((a, b) => (a.key || a.entry).localeCompare(b.key || b.entry, "fr"));
-	},
-
-	_esc(s) {
-		return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-	},
-
-	// Rend la note (HTML Zotero, converti proprement en Markdown à l'export).
-	renderIndexNote(topItem, records, annCount) {
-		let title = "";
-		try { title = topItem.getField("title") || ""; } catch (e) {}
-		let lineTpl = String(getPref("indexLineFormat",
-			"[[{{key}}]] — {{entry}}")).trim() || "[[{{key}}]] — {{entry}}";
-
-		let h = [];
-		h.push("<h1>" + this._esc("Index bibliographique — " + title) + "</h1>");
-		h.push("<p>" + records.length + " œuvre(s) citée(s) dans "
-			+ annCount + " annotation(s).</p>");
-		if (!records.length) {
-			h.push("<p>Aucune citation résolue dans les passages surlignés.</p>");
-			return h.join("\n");
-		}
-
-		h.push("<h2>Œuvres citées dans mes surlignages</h2>");
-		h.push("<ul>");
-		for (let r of records) {
-			let line = this.renderTemplate(lineTpl, {
-				key: r.key,
-				entry: r.entry,
-				doi: r.doi,
-				marker: r.markers.join(", "),
-				pages: r.places.map(p => p.page).filter(Boolean).join(", ")
-			});
-			h.push("<li><p>" + this._esc(line) + "</p>");
-
-			let meta = [];
-			if (r.markers.length) meta.push("appel : " + r.markers.join(", "));
-			let pages = r.places.map(p => p.page).filter(Boolean);
-			if (pages.length) meta.push("p. " + pages.join(", "));
-			if (r.doi) meta.push("doi:" + r.doi);
-			if (meta.length) {
-				h.push("<p><i>" + this._esc(meta.join(" · ")) + "</i></p>");
-			}
-			for (let p of r.places) {
-				h.push("<blockquote><p>" + this._esc(p.snippet) + "</p></blockquote>");
-			}
-			h.push("</li>");
-		}
-		h.push("</ul>");
-		return h.join("\n");
-	},
-
-	// Action du menu : construit la note pour chaque référence sélectionnée.
-	async buildIndexNote(window) {
-		let selected;
-		try { selected = window.ZoteroPane.getSelectedItems(); }
-		catch (e) { return; }
-		if (!selected || !selected.length) return;
-
-		// Regrouper les annotations par item parent de haut niveau.
-		let byTop = new Map();
-		let annotations = await this.collectAnnotations(selected);
-		for (let ann of annotations) {
-			try {
-				let att = ann.parentItem;
-				let top = (att && att.parentItem) ? att.parentItem : att;
-				if (!top) continue;
-				if (!byTop.has(top.id)) byTop.set(top.id, { top, anns: [] });
-				byTop.get(top.id).anns.push(ann);
-			}
-			catch (e) { /* ignore */ }
-		}
-		if (!byTop.size) {
-			toast("Annota", "No annotations found in the selection.");
-			return;
-		}
-
-		let pw = new Zotero.ProgressWindow({ closeOnClick: false });
-		pw.changeHeadline("Annota");
-		let bar = new pw.ItemProgress("chrome://zotero/skin/tick.png",
-			"Building index…");
-		pw.show();
-
-		let made = 0, empty = 0;
-		for (let { top, anns } of byTop.values()) {
-			try {
-				let records = await this.collectCitationIndex(anns);
-				if (!records.length) { empty++; continue; }
-				let note = new Zotero.Item("note");
-				note.libraryID = top.libraryID;
-				note.parentID = top.id;
-				note.setNote(this.renderIndexNote(top, records, anns.length));
-				await note.saveTx();
-				made++;
-			}
-			catch (e) {
-				log("buildIndexNote: " + e);
-			}
-		}
-
-		bar.setProgress(100);
-		let msg = made + " index note" + (made > 1 ? "s" : "") + " created";
-		if (empty) msg += ", " + empty + " skipped (no citation resolved)";
-		bar.setText(msg);
-		pw.startCloseTimer(5000);
-		log("buildIndexNote : " + made + " créées, " + empty + " vides");
-	},
-
 	// ---- Menu contextuel (une entrée par fenêtre principale) ----
 
 	_windows: new Map(),
@@ -1368,16 +1317,6 @@ Annota = {
 					.catch(e => log("runBatch: " + e));
 			});
 			popup.appendChild(all);
-
-			let sep = doc.createXULElement("menuseparator");
-			popup.appendChild(sep);
-
-			let index = doc.createXULElement("menuitem");
-			index.setAttribute("label", "Build bibliographic index note");
-			index.addEventListener("command", () => {
-				Annota.buildIndexNote(window).catch(e => log("buildIndexNote: " + e));
-			});
-			popup.appendChild(index);
 
 			menu.appendChild(popup);
 			itemmenu.appendChild(menu);

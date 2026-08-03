@@ -72,16 +72,17 @@
 		let panes = {
 			openai: document.getElementById("annota-cfg-openai"),
 			ollama: document.getElementById("annota-cfg-ollama"),
+			apple: document.getElementById("annota-cfg-apple"),
 			cli: document.getElementById("annota-cfg-cli")
 		};
-		if (!sel || !panes.openai || !panes.ollama || !panes.cli) {
+		if (!sel || !panes.openai || !panes.ollama || !panes.apple || !panes.cli) {
 			requestAnimationFrame(setupProvider);
 			return;
 		}
 
 		function current() {
 			let p = String(Zotero.Prefs.get(PREF_PROVIDER) || "").trim();
-			if (p === "openai" || p === "ollama" || p === "cli") return p;
+			if (p === "openai" || p === "ollama" || p === "cli" || p === "apple") return p;
 			// Rétrocompat avec l'ancienne case à cocher.
 			return Zotero.Prefs.get("annota.useClaudeCLI") ? "cli" : "openai";
 		}
