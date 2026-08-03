@@ -468,10 +468,167 @@ Annota = {
 		return out;
 	},
 
-	// Orchestrateur : renvoie les entrées trouvées, une par ligne, ou "".
+	// ---- Voie déterministe : les liens internes du PDF ----
+	//
+	// C'est le mécanisme qui produit le popup au survol dans le lecteur Zotero :
+	// l'appel de citation est une annotation /Link du PDF dont la destination
+	// pointe sur l'entrée bibliographique. On suit ce lien plutôt que de deviner.
+	// Nécessite que le PDF soit ouvert dans un onglet (pdf.js y est chargé) ;
+	// sinon on retombe sur l'analyse du texte.
+
+	// Lecteur ouvert pour cette pièce jointe, ou null.
+	findReaderFor(attachmentID) {
+		try {
+			let readers = Zotero.Reader && Zotero.Reader._readers;
+			if (!readers) return null;
+			return readers.find(r => r && r.itemID === attachmentID) || null;
+		}
+		catch (e) {
+			return null;
+		}
+	},
+
+	// Document pdf.js du lecteur (traverse l'iframe du visualiseur).
+	getPDFDocument(reader) {
+		try {
+			let win = reader && reader._internalReader
+				&& reader._internalReader._primaryView
+				&& reader._internalReader._primaryView._iframeWindow;
+			if (!win) return null;
+			let app = win.PDFViewerApplication
+				|| (win.wrappedJSObject && win.wrappedJSObject.PDFViewerApplication);
+			return (app && app.pdfDocument) || null;
+		}
+		catch (e) {
+			log("getPDFDocument: " + e);
+			return null;
+		}
+	},
+
+	// Deux rectangles PDF se recouvrent-ils ? (marge pour les exposants)
+	_rectsOverlap(a, b, pad = 2) {
+		let ax1 = Math.min(a[0], a[2]) - pad, ax2 = Math.max(a[0], a[2]) + pad;
+		let ay1 = Math.min(a[1], a[3]) - pad, ay2 = Math.max(a[1], a[3]) + pad;
+		let bx1 = Math.min(b[0], b[2]), bx2 = Math.max(b[0], b[2]);
+		let by1 = Math.min(b[1], b[3]), by2 = Math.max(b[1], b[3]);
+		return ax1 <= bx2 && bx1 <= ax2 && ay1 <= by2 && by1 <= ay2;
+	},
+
+	// Résout la destination d'un lien en { pageIndex, y }.
+	async _resolveDestination(pdfDoc, dest) {
+		try {
+			let d = dest;
+			if (typeof d === "string") d = await pdfDoc.getDestination(d);
+			if (!Array.isArray(d) || !d.length) return null;
+			let pageIndex = await pdfDoc.getPageIndex(d[0]);
+			// [ref, {name:'XYZ'}, x, y, zoom] — y absent pour /Fit.
+			let y = (typeof d[3] === "number") ? d[3] : null;
+			return { pageIndex, y };
+		}
+		catch (e) {
+			log("_resolveDestination: " + e);
+			return null;
+		}
+	},
+
+	// Texte de la page à partir de la position de destination (vers le bas).
+	async _textAtDestination(pdfDoc, pageIndex, y, maxChars = 600) {
+		try {
+			let page = await pdfDoc.getPage(pageIndex + 1);
+			let content = await page.getTextContent();
+			let items = (content && content.items) || [];
+			let rows = [];
+			for (let it of items) {
+				let str = it.str;
+				if (!str) continue;
+				let ty = (it.transform && it.transform.length > 5) ? it.transform[5] : null;
+				if (ty === null) continue;
+				// En coordonnées PDF l'origine est en bas : l'entrée commence à y
+				// et se poursuit vers le bas (y décroissant). Marge vers le haut
+				// pour rattraper une destination pointant la ligne au-dessus.
+				if (y !== null && ty > y + 12) continue;
+				rows.push({ y: ty, str, eol: it.hasEOL });
+			}
+			rows.sort((a, b) => b.y - a.y);
+			// Début d'une entrée bibliographique : « [12] », « 12. » ou « Nom, P. ».
+			let entryStart = /^(\[\d{1,3}\]|\d{1,3}\.\s|\p{Lu}[\p{L}'’-]+,\s+\p{Lu}\.)/u;
+			let out = "";
+			for (let r of rows) {
+				// S'arrêter au début de l'entrée SUIVANTE, sinon on colle deux
+				// références bout à bout et l'IA attribue la mauvaise source.
+				if (out.length > 30 && entryStart.test(r.str.trim())) break;
+				out += r.str + (r.eol ? "\n" : " ");
+				if (out.length >= maxChars) break;
+			}
+			return out.trim();
+		}
+		catch (e) {
+			log("_textAtDestination: " + e);
+			return "";
+		}
+	},
+
+	// Suit les liens internes chevauchant le surlignage. Renvoie [] si le PDF
+	// n'est pas ouvert ou ne contient pas de liens exploitables.
+	async getLinkedReferences(item) {
+		try {
+			let att = item.parentItem;
+			if (!att) return [];
+			let reader = this.findReaderFor(att.id);
+			if (!reader) return [];
+			let pdfDoc = this.getPDFDocument(reader);
+			if (!pdfDoc) return [];
+
+			let pos = item.annotationPosition;
+			if (typeof pos === "string") pos = JSON.parse(pos);
+			if (!pos || typeof pos.pageIndex !== "number" || !Array.isArray(pos.rects)) return [];
+
+			let page = await pdfDoc.getPage(pos.pageIndex + 1);
+			let annots = await page.getAnnotations();
+			if (!annots || !annots.length) return [];
+
+			let max = parseInt(getPref("maxRefs", 8), 10) || 8;
+			let out = [], seen = new Set();
+			for (let a of annots) {
+				if (out.length >= max) break;
+				// Uniquement les liens internes (une destination, pas une URL).
+				let isLink = a && (a.subtype === "Link" || a.subtype === "link");
+				let dest = a && (a.dest || (a.action && a.action.dest));
+				if (!isLink || !dest || a.url) continue;
+				if (!Array.isArray(a.rect)) continue;
+				if (!pos.rects.some(r => this._rectsOverlap(a.rect, r))) continue;
+
+				let target = await this._resolveDestination(pdfDoc, dest);
+				if (!target) continue;
+				let key = target.pageIndex + ":" + (target.y === null ? "?" : Math.round(target.y));
+				if (seen.has(key)) continue;
+				seen.add(key);
+
+				let txt = await this._textAtDestination(pdfDoc, target.pageIndex, target.y);
+				txt = this._trimEntry(txt);
+				if (txt.length > 15) out.push(txt);
+			}
+			if (out.length) log("Références résolues par lien PDF : " + out.length);
+			return out;
+		}
+		catch (e) {
+			log("getLinkedReferences: " + e);
+			return [];
+		}
+	},
+
+	// Orchestrateur : liens internes du PDF d'abord (déterministe, même principe
+	// que le popup de Zotero), analyse du texte en repli.
 	async getReferences(item, text) {
 		if (!getPref("resolveCitations", true)) return "";
 		try {
+			let max = parseInt(getPref("maxRefs", 8), 10) || 8;
+
+			// 1. Voie sûre : suivre les liens du PDF.
+			let linked = await this.getLinkedReferences(item);
+			if (linked.length) return linked.slice(0, max).join("\n");
+
+			// 2. Repli : détecter les appels et chercher dans la bibliographie.
 			let markers = this.detectCitationMarkers(text);
 			if (!markers.numbers.length && !markers.authorYears.length) return "";
 
@@ -480,7 +637,6 @@ Annota = {
 			let bib = this.findBibliographySection(fullText);
 			if (!bib) return "";
 
-			let max = parseInt(getPref("maxRefs", 8), 10) || 8;
 			let refs = this.resolveNumericRefs(bib, markers.numbers)
 				.concat(this.resolveAuthorYearRefs(bib, markers.authorYears));
 			return refs.slice(0, max).join("\n");

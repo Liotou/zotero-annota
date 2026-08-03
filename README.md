@@ -92,13 +92,22 @@ Two providers; the CLI wins if ticked, otherwise Mistral is used.
 - **Max abstract length** — abstracts are truncated to limit token usage
   (default 1200 characters; set 0 for no truncation).
 - **Look up citations found in the passage** — when the highlighted text cites
-  sources (`[1]`, `[2]`, `(Author, year)`, `Author (year)`), Annota reads the
-  article's own reference list from the PDF and passes the matching entries to
-  the AI as `{{references}}`. The model can then name who is actually being
-  cited instead of guessing. Needs the bibliography to be real text in the PDF
-  (true for most publisher PDFs); if a citation can't be resolved, nothing is
-  sent and the rest works as before. **Max references sent** caps how many
-  entries go with each call (default 8).
+  sources (`[1]`, `[2]`, `(Author, year)`, `Author (year)`), Annota resolves them
+  to the actual bibliographic entries and passes them to the AI as
+  `{{references}}`, so the model can name who is being cited instead of guessing.
+  **Max references sent** caps how many entries go with each call (default 8).
+
+  Two strategies, tried in order:
+  1. **PDF links (reliable)** — the same mechanism behind Zotero's hover popup:
+     the citation marker is a `/Link` annotation whose destination points at the
+     bibliography entry, so Annota follows the link instead of guessing. Requires
+     the PDF to be **open in a reader tab** (it is when you highlight) and the
+     publisher to have embedded those links.
+  2. **Text fallback** — if there is no link (or the PDF isn't open, e.g. bulk
+     right-click from the library), Annota detects the citation markers and looks
+     them up in the article's reference list extracted from the PDF text.
+
+  If neither resolves, nothing is sent and the rest works exactly as before.
 
 ### Prompt
 Above the prompt box is a row of **color swatches** — the same colors you use to

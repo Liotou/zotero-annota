@@ -177,11 +177,13 @@
       </rows>
     </grid>
     <description style="max-width: 46em; opacity: 0.8;">
-      When the highlighted passage cites sources, Annota reads the article's own
-      bibliography and passes the matching entries to the AI as
+      When the highlighted passage cites sources, Annota resolves them to real
+      bibliographic entries and passes them to the AI as
       <html:code>{{references}}</html:code> — so it can name who is being cited
-      instead of guessing. Requires the reference list to be real text in the PDF
-      (it is for most publisher PDFs). Nothing is sent when no citation is found.
+      instead of guessing. It first follows the PDF's internal links (the same
+      mechanism as Zotero's hover popup, reliable but needs the PDF open in a
+      tab), and otherwise falls back to reading the article's reference list from
+      the PDF text. Nothing is sent when a citation can't be resolved.
     </description>
   </groupbox>
 
