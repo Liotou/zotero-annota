@@ -69,7 +69,7 @@ Pick one in the dropdown; only that provider's settings are shown.
 | Provider | What it is |
 |---|---|
 | **Mistral / OpenAI-compatible** | Any remote `chat/completions` endpoint. Needs an API key (console.mistral.ai). |
-| **Ollama (local)** | A model running on your own machine — no API key, no per-token cost, nothing leaves the computer. Start Ollama and `ollama pull llama3.1` first, then set the model tag. The first call after startup is slow while the model loads. |
+| **Ollama (local)** | A model running on your own machine — no API key, no per-token cost, nothing leaves the computer. The model dropdown is read from your running Ollama (hit **Refresh** after `ollama pull …`). **Tags matter**: `llama3.1:8b` and `llama3.1` are different names, and only what is installed will answer. The first call after startup is slow while the model loads. |
 | **Claude Code CLI (local)** | Runs `claude -p` using whatever your `claude` command is logged into (your subscription). Use the **absolute** path — Zotero doesn't see your shell PATH. A few seconds of cold start per call. |
 
 **Temperature** (0–2, lower = steadier) applies to the two HTTP providers; the

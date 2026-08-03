@@ -48,8 +48,12 @@
         <rows>
           <row align="center">
             <label value="Model:" control="annota-ollama-model"/>
-            <html:input id="annota-ollama-model" type="text" style="width: 20em;"
-                        preference="extensions.zotero.annota.ollamaModel"/>
+            <hbox align="center">
+              <html:select id="annota-ollama-model" style="min-width: 18em;"/>
+              <button id="annota-ollama-refresh" label="Refresh"
+                      style="margin-left: 6px;"/>
+              <label id="annota-ollama-status" value="" style="opacity: 0.75; margin-left: 8px;"/>
+            </hbox>
           </row>
           <row align="center">
             <label value="Endpoint:" control="annota-ollama-endpoint"/>
@@ -60,10 +64,11 @@
       </grid>
       <description style="max-width: 46em; opacity: 0.8;">
         Runs on your machine — nothing leaves it, no API key, no per-token cost.
-        Start Ollama and pull a model first (<html:code>ollama pull llama3.1</html:code>).
-        Use the model's exact tag (<html:code>llama3.1</html:code>,
-        <html:code>mistral</html:code>, <html:code>qwen2.5:14b</html:code>…).
-        The first call after startup is slow while the model loads.
+        The list is read from your running Ollama; hit <html:b>Refresh</html:b>
+        after <html:code>ollama pull …</html:code>. Tags matter —
+        <html:code>llama3.1:8b</html:code> and <html:code>llama3.1</html:code> are
+        not the same name, and only what is installed will answer. The first call
+        after startup is slow while the model loads into memory.
       </description>
     </vbox>
 

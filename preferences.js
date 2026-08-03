@@ -98,6 +98,83 @@
 		});
 	}
 
+	// ---- Modèles Ollama : liste réelle des modèles installés ----
+	// Évite l'échec « model not found » : les tags comptent (llama3.1:8b).
+	function setupOllama() {
+		let sel = document.getElementById("annota-ollama-model");
+		let btn = document.getElementById("annota-ollama-refresh");
+		let status = document.getElementById("annota-ollama-status");
+		if (!sel || !btn) {
+			requestAnimationFrame(setupOllama);
+			return;
+		}
+
+		const PREF_MODEL = "annota.ollamaModel";
+		const PREF_ENDPOINT = "annota.ollamaEndpoint";
+
+		function stored() {
+			return String(Zotero.Prefs.get(PREF_MODEL) || "").trim();
+		}
+
+		// http://host:11434/v1/chat/completions → http://host:11434/api/tags
+		function tagsURL() {
+			let ep = String(Zotero.Prefs.get(PREF_ENDPOINT) || "").trim();
+			if (!ep) return "http://localhost:11434/api/tags";
+			return ep.replace(/\/v1\/.*$/, "") .replace(/\/+$/, "") + "/api/tags";
+		}
+
+		function setStatus(msg) {
+			if (status) status.setAttribute("value", msg || "");
+		}
+
+		function fill(names) {
+			let keep = stored();
+			// Toujours conserver la valeur enregistrée, même absente d'Ollama,
+			// pour ne pas l'effacer silencieusement.
+			if (keep && !names.includes(keep)) names = [keep].concat(names);
+			sel.textContent = "";
+			for (let n of names) {
+				let opt = document.createElementNS(XHTML_NS, "option");
+				opt.setAttribute("value", n);
+				opt.textContent = n;
+				sel.appendChild(opt);
+			}
+			if (keep) sel.value = keep;
+			else if (names.length) {
+				sel.value = names[0];
+				Zotero.Prefs.set(PREF_MODEL, names[0]);
+			}
+		}
+
+		async function refresh() {
+			setStatus("…");
+			try {
+				let resp = await Zotero.HTTP.request("GET", tagsURL(),
+					{ responseType: "json", timeout: 5000 });
+				let models = (resp.response && resp.response.models) || [];
+				let names = models.map(m => m && m.name).filter(Boolean);
+				fill(names);
+				setStatus(names.length
+					? names.length + " installed"
+					: "none installed — run: ollama pull llama3.1:8b");
+			}
+			catch (e) {
+				fill([]);
+				setStatus("Ollama unreachable — is it running?");
+			}
+		}
+
+		sel.addEventListener("change", () => {
+			Zotero.Prefs.set(PREF_MODEL, sel.value);
+			setStatus("Saved ✓");
+		});
+		btn.addEventListener("command", refresh);
+		btn.addEventListener("click", refresh);
+
+		fill([]);        // afficher au moins la valeur enregistrée
+		refresh();       // puis interroger Ollama
+	}
+
 	function setup() {
 		let textarea = document.getElementById("annota-prompt");
 		let clearBtn = document.getElementById("annota-prompt-clear");
@@ -246,4 +323,5 @@
 
 	setup();
 	setupProvider();
+	setupOllama();
 })();

@@ -914,9 +914,32 @@ Annota = {
 		}
 		catch (e) {
 			let status = e && e.xmlhttp ? e.xmlhttp.status : "?";
-			let detail = "";
-			try { detail = e.xmlhttp ? e.xmlhttp.responseText : ""; } catch (e2) {}
-			throw new Error("API (HTTP " + status + ") " + detail.slice(0, 300));
+			let raw = "";
+			try { raw = e.xmlhttp ? e.xmlhttp.responseText : ""; } catch (e2) {}
+
+			// Extraire le message de l'API plutôt que d'afficher le JSON brut :
+			// « model 'llama3.1' not found » est autrement noyé dans l'objet.
+			let msg = "";
+			try {
+				let d = JSON.parse(raw);
+				msg = (d && d.error && (d.error.message || d.error))
+					|| (d && d.message) || "";
+				if (typeof msg !== "string") msg = JSON.stringify(msg);
+			}
+			catch (e2) { /* pas du JSON */ }
+			if (!msg) msg = raw.slice(0, 200);
+
+			// Aide ciblée sur les deux échecs Ollama les plus fréquents.
+			if (this.provider() === "ollama") {
+				if (/not found/i.test(msg)) {
+					msg += " — pick an installed model in Preferences → Annota "
+						+ "(tags matter: « llama3.1:8b », not « llama3.1 »).";
+				}
+				else if (!status || status === 0) {
+					msg = "Ollama unreachable — is it running? (" + msg + ")";
+				}
+			}
+			throw new Error("API (HTTP " + status + ") " + msg);
 		}
 	},
 
