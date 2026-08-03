@@ -489,8 +489,22 @@ Annota = {
 		return dot > max * 0.5 ? cut.slice(0, dot + 1) : cut.trim() + "…";
 	},
 
-	// Entrées numérotées : « [12] Auteur… » ou « 12. Auteur… »
+	// Variantes « structurées » : renvoient { marker, entry } au lieu d'une
+	// chaîne. Les fonctions historiques ci-dessous s'appuient dessus, afin que
+	// l'index bibliographique et le prompt partagent exactement la même
+	// résolution.
 	resolveNumericRefs(bib, numbers) {
+		return this.resolveNumericRefsStructured(bib, numbers)
+			.map(r => r.marker + " " + r.entry);
+	},
+
+	resolveAuthorYearRefs(bib, pairs) {
+		return this.resolveAuthorYearRefsStructured(bib, pairs)
+			.map(r => r.marker + " → " + r.entry);
+	},
+
+	// Entrées numérotées : « [12] Auteur… » ou « 12. Auteur… »
+	resolveNumericRefsStructured(bib, numbers) {
 		if (!bib || !numbers.length) return [];
 		let markers = [], m;
 		let re = /(?:^|[\s\n])(?:\[(\d{1,3})\]|(\d{1,3})\.(?=\s))/g;
@@ -508,7 +522,7 @@ Annota = {
 			let body = this._trimEntry(
 				this._cutAtNextEntry(bib.slice(markers[i].start, end)));
 			if (body.length > 15) {
-				out.push("[" + markers[i].n + "] " + body);
+				out.push({ marker: "[" + markers[i].n + "]", entry: body });
 				wanted.delete(markers[i].n);
 			}
 		}
@@ -516,7 +530,7 @@ Annota = {
 	},
 
 	// Entrées auteur-année : fenêtre autour du nom suivi de l'année.
-	resolveAuthorYearRefs(bib, pairs) {
+	resolveAuthorYearRefsStructured(bib, pairs) {
 		if (!bib || !pairs.length) return [];
 		let out = [];
 		for (let { author, year } of pairs) {
@@ -535,7 +549,9 @@ Annota = {
 				// la ligne. Ne PAS couper au premier point : il tombe juste après
 				// « (1999). » et amputerait le titre et la revue.
 				let body = this._trimEntry(this._cutAtNextEntry(found));
-				if (body.length > 15) out.push("(" + author + ", " + year + ") → " + body);
+				if (body.length > 15) {
+					out.push({ marker: "(" + author + ", " + year + ")", entry: body });
+				}
 			}
 		}
 		return out;
@@ -690,34 +706,49 @@ Annota = {
 		}
 	},
 
-	// Orchestrateur : liens internes du PDF d'abord (déterministe, même principe
+	// Socle commun : liens internes du PDF d'abord (déterministe, même principe
 	// que le popup de Zotero), analyse du texte en repli.
-	async getReferences(item, text) {
-		if (!getPref("resolveCitations", true)) return "";
+	// Renvoie [{ marker, entry }] — le prompt et l'index partagent ce résultat.
+	async collectReferencesStructured(item, text) {
+		if (!getPref("resolveCitations", true)) return [];
 		try {
 			let max = parseInt(getPref("maxRefs", 8), 10) || 8;
+			let markers = this.detectCitationMarkers(text);
 
 			// 1. Voie sûre : suivre les liens du PDF.
 			let linked = await this.getLinkedReferences(item);
-			if (linked.length) return linked.slice(0, max).join("\n");
+			if (linked.length) {
+				// Si le nombre d'appels numériques correspond exactement, les
+				// apparier dans l'ordre pour conserver « [1] », « [2] ».
+				let nums = markers.numbers;
+				let pair = (nums.length === linked.length);
+				return linked.slice(0, max).map((entry, i) => ({
+					marker: pair ? "[" + nums[i] + "]" : "",
+					entry
+				}));
+			}
 
 			// 2. Repli : détecter les appels et chercher dans la bibliographie.
-			let markers = this.detectCitationMarkers(text);
-			if (!markers.numbers.length && !markers.authorYears.length) return "";
-
+			if (!markers.numbers.length && !markers.authorYears.length) return [];
 			let fullText = await this.getAttachmentFullText(item);
-			if (!fullText) return "";
+			if (!fullText) return [];
 			let bib = this.findBibliographySection(fullText);
-			if (!bib) return "";
+			if (!bib) return [];
 
-			let refs = this.resolveNumericRefs(bib, markers.numbers)
-				.concat(this.resolveAuthorYearRefs(bib, markers.authorYears));
-			return refs.slice(0, max).join("\n");
+			return this.resolveNumericRefsStructured(bib, markers.numbers)
+				.concat(this.resolveAuthorYearRefsStructured(bib, markers.authorYears))
+				.slice(0, max);
 		}
 		catch (e) {
-			log("getReferences: " + e);
-			return "";
+			log("collectReferencesStructured: " + e);
+			return [];
 		}
+	},
+
+	// Version texte, transmise à l'IA via {{references}}.
+	async getReferences(item, text) {
+		let refs = await this.collectReferencesStructured(item, text);
+		return refs.map(r => r.marker ? r.marker + " " + r.entry : r.entry).join("\n");
 	},
 
 	// Bloc de contexte lisible, transmis à l'IA en mode standard.
@@ -1109,6 +1140,188 @@ Annota = {
 			+ noPrompt + " sans prompt");
 	},
 
+	// ---- Index bibliographique ----
+	//
+	// Produit une note enfant listant les œuvres citées DANS les passages
+	// surlignés, chacune reliée à son entrée bibliographique complète.
+	// Pensé pour alimenter une chaîne Obsidian (Ariane) : la clé produite suit
+	// la convention « Auteur, année » / « A & B, année » / « A et al., année »,
+	// et le DOI est extrait quand il figure dans l'entrée.
+
+	// DOI présent dans une entrée bibliographique, ou "".
+	_extractDOI(entry) {
+		let m = String(entry).match(/\b10\.\d{4,9}\/[^\s"'<>,;)\]]+/);
+		return m ? m[0].replace(/[.,;]+$/, "") : "";
+	},
+
+	// Clé de citation « Auteur, année » déduite d'une entrée bibliographique.
+	// Deux auteurs → « A & B, année » ; trois ou plus → « A et al., année ».
+	_entryToKey(entry) {
+		let s = String(entry).replace(/^\[\d{1,3}\]\s*/, "").trim();
+		let ym = s.match(/\((?:19|20)\d{2}[a-z]?\)|\b(?:19|20)\d{2}\b/);
+		let year = ym ? ym[0].replace(/[()]/g, "").replace(/[a-z]$/, "") : "";
+		let first = s.match(/^([\p{Lu}][\p{L}'’-]+)/u);
+		if (!first) return "";
+		let surname = first[1];
+
+		// Portion précédant l'année : sert à compter les auteurs.
+		let head = ym ? s.slice(0, s.indexOf(ym[0])) : s.slice(0, 120);
+		if (/\bet\s+al\b/i.test(head)) return surname + " et al., " + year;
+
+		// Autres patronymes « Nom, X. » ou « X. Nom » après le premier.
+		let others = head.slice(surname.length)
+			.match(/[\p{Lu}][\p{L}'’-]+,\s*[\p{Lu}]\.|[\p{Lu}]\.\s*[\p{Lu}][\p{L}'’-]+/gu) || [];
+		if (others.length >= 2) return surname + " et al., " + year;
+		if (others.length === 1) {
+			let second = others[0].match(/[\p{Lu}][\p{L}'’-]{2,}/u);
+			if (second) return surname + " & " + second[0] + ", " + year;
+		}
+		return surname + ", " + year;
+	},
+
+	// Parcourt les annotations et agrège les œuvres citées.
+	// Renvoie [{ key, doi, entry, markers:[], places:[{page, snippet}] }].
+	async collectCitationIndex(annotations) {
+		let byEntry = new Map();
+		for (let ann of annotations) {
+			let text = (ann.annotationText || "").trim();
+			if (!text) continue;
+
+			let refs = await this.collectReferencesStructured(ann, text);
+			if (!refs.length) continue;
+
+			let page = ann.annotationPageLabel || "";
+			let snippet = this._trimEntry(text, 220);
+			for (let r of refs) {
+				// Regrouper sur le début de l'entrée : une même œuvre citée à
+				// plusieurs endroits ne doit apparaître qu'une fois.
+				let k = r.entry.slice(0, 90).toLowerCase().replace(/\s+/g, " ");
+				let rec = byEntry.get(k);
+				if (!rec) {
+					rec = {
+						key: this._entryToKey(r.entry),
+						doi: this._extractDOI(r.entry),
+						entry: r.entry,
+						markers: [],
+						places: []
+					};
+					byEntry.set(k, rec);
+				}
+				if (r.marker && !rec.markers.includes(r.marker)) rec.markers.push(r.marker);
+				if (!rec.places.some(p => p.page === page && p.snippet === snippet)) {
+					rec.places.push({ page, snippet });
+				}
+			}
+		}
+		return Array.from(byEntry.values())
+			.sort((a, b) => (a.key || a.entry).localeCompare(b.key || b.entry, "fr"));
+	},
+
+	_esc(s) {
+		return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+	},
+
+	// Rend la note (HTML Zotero, converti proprement en Markdown à l'export).
+	renderIndexNote(topItem, records, annCount) {
+		let title = "";
+		try { title = topItem.getField("title") || ""; } catch (e) {}
+		let lineTpl = String(getPref("indexLineFormat",
+			"[[{{key}}]] — {{entry}}")).trim() || "[[{{key}}]] — {{entry}}";
+
+		let h = [];
+		h.push("<h1>" + this._esc("Index bibliographique — " + title) + "</h1>");
+		h.push("<p>" + records.length + " œuvre(s) citée(s) dans "
+			+ annCount + " annotation(s).</p>");
+		if (!records.length) {
+			h.push("<p>Aucune citation résolue dans les passages surlignés.</p>");
+			return h.join("\n");
+		}
+
+		h.push("<h2>Œuvres citées dans mes surlignages</h2>");
+		h.push("<ul>");
+		for (let r of records) {
+			let line = this.renderTemplate(lineTpl, {
+				key: r.key,
+				entry: r.entry,
+				doi: r.doi,
+				marker: r.markers.join(", "),
+				pages: r.places.map(p => p.page).filter(Boolean).join(", ")
+			});
+			h.push("<li><p>" + this._esc(line) + "</p>");
+
+			let meta = [];
+			if (r.markers.length) meta.push("appel : " + r.markers.join(", "));
+			let pages = r.places.map(p => p.page).filter(Boolean);
+			if (pages.length) meta.push("p. " + pages.join(", "));
+			if (r.doi) meta.push("doi:" + r.doi);
+			if (meta.length) {
+				h.push("<p><i>" + this._esc(meta.join(" · ")) + "</i></p>");
+			}
+			for (let p of r.places) {
+				h.push("<blockquote><p>" + this._esc(p.snippet) + "</p></blockquote>");
+			}
+			h.push("</li>");
+		}
+		h.push("</ul>");
+		return h.join("\n");
+	},
+
+	// Action du menu : construit la note pour chaque référence sélectionnée.
+	async buildIndexNote(window) {
+		let selected;
+		try { selected = window.ZoteroPane.getSelectedItems(); }
+		catch (e) { return; }
+		if (!selected || !selected.length) return;
+
+		// Regrouper les annotations par item parent de haut niveau.
+		let byTop = new Map();
+		let annotations = await this.collectAnnotations(selected);
+		for (let ann of annotations) {
+			try {
+				let att = ann.parentItem;
+				let top = (att && att.parentItem) ? att.parentItem : att;
+				if (!top) continue;
+				if (!byTop.has(top.id)) byTop.set(top.id, { top, anns: [] });
+				byTop.get(top.id).anns.push(ann);
+			}
+			catch (e) { /* ignore */ }
+		}
+		if (!byTop.size) {
+			toast("Annota", "No annotations found in the selection.");
+			return;
+		}
+
+		let pw = new Zotero.ProgressWindow({ closeOnClick: false });
+		pw.changeHeadline("Annota");
+		let bar = new pw.ItemProgress("chrome://zotero/skin/tick.png",
+			"Building index…");
+		pw.show();
+
+		let made = 0, empty = 0;
+		for (let { top, anns } of byTop.values()) {
+			try {
+				let records = await this.collectCitationIndex(anns);
+				if (!records.length) { empty++; continue; }
+				let note = new Zotero.Item("note");
+				note.libraryID = top.libraryID;
+				note.parentID = top.id;
+				note.setNote(this.renderIndexNote(top, records, anns.length));
+				await note.saveTx();
+				made++;
+			}
+			catch (e) {
+				log("buildIndexNote: " + e);
+			}
+		}
+
+		bar.setProgress(100);
+		let msg = made + " index note" + (made > 1 ? "s" : "") + " created";
+		if (empty) msg += ", " + empty + " skipped (no citation resolved)";
+		bar.setText(msg);
+		pw.startCloseTimer(5000);
+		log("buildIndexNote : " + made + " créées, " + empty + " vides");
+	},
+
 	// ---- Menu contextuel (une entrée par fenêtre principale) ----
 
 	_windows: new Map(),
@@ -1155,6 +1368,16 @@ Annota = {
 					.catch(e => log("runBatch: " + e));
 			});
 			popup.appendChild(all);
+
+			let sep = doc.createXULElement("menuseparator");
+			popup.appendChild(sep);
+
+			let index = doc.createXULElement("menuitem");
+			index.setAttribute("label", "Build bibliographic index note");
+			index.addEventListener("command", () => {
+				Annota.buildIndexNote(window).catch(e => log("buildIndexNote: " + e));
+			});
+			popup.appendChild(index);
 
 			menu.appendChild(popup);
 			itemmenu.appendChild(menu);

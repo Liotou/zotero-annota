@@ -217,6 +217,23 @@
       PDF open in a tab — and otherwise reads the article's reference list from
       the PDF text. Nothing is sent when a citation can't be resolved.
     </description>
+
+    <hbox align="center" style="margin-top: 10px;">
+      <label value="Index note line:" control="annota-indexline"/>
+      <html:input id="annota-indexline" type="text" style="width: 28em;"
+                  preference="extensions.zotero.annota.indexLineFormat"/>
+    </hbox>
+    <description style="max-width: 46em; opacity: 0.8;">
+      Right-click a reference → <html:b>Annota → Build bibliographic index
+      note</html:b> creates a child note listing every work cited inside your
+      highlighted passages, with the full entry, the pages, and the quoted
+      passage. Line variables: <html:code>{{key}}</html:code> (a
+      « Author, year » key), <html:code>{{entry}}</html:code>,
+      <html:code>{{doi}}</html:code>, <html:code>{{marker}}</html:code>,
+      <html:code>{{pages}}</html:code>. The default wraps the key in
+      <html:code>[[…]]</html:code> so it becomes a wikilink once exported to
+      Obsidian.
+    </description>
   </groupbox>
 
   <!-- ===================== 4. COMPORTEMENT & SORTIE ===================== -->

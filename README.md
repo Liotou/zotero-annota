@@ -168,6 +168,27 @@ Two modes depending on the prompt:
 - **Advanced** (the prompt contains `{{text}}` or `{{comment}}`) — the prompt is
   sent as-is; you fully control the structure of the request.
 
+## Bibliographic index note
+
+**Right-click a reference → Annota → Build bibliographic index note** creates a
+child note listing every work cited **inside your highlighted passages**, linked
+to its full bibliographic entry.
+
+For each cited work the note gives an `Author, year` key, the complete entry, the
+DOI when present, the citation markers used (`[1]`, `(Author, year)`), the pages
+where you cited it, and the quoted passages themselves. Works cited from several
+highlights are merged into a single record.
+
+The **Index note line** setting shapes each line — variables `{{key}}`,
+`{{entry}}`, `{{doi}}`, `{{marker}}`, `{{pages}}`. The default is:
+
+```
+[[{{key}}]] — {{entry}}
+```
+
+so the key becomes a wikilink once the note reaches Obsidian, ready to resolve
+against a pending-reference folder named by `Author, year`.
+
 ## Generating comments after the fact
 
 Highlights you made before installing Annota — or before changing your prompt —

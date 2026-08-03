@@ -38,6 +38,11 @@ pref("extensions.zotero.annota.alsoUnderline", false);
 pref("extensions.zotero.annota.overwrite", false);
 pref("extensions.zotero.annota.showPlaceholder", true);
 
+// ---- Index bibliographique ----
+// Format de chaque ligne de la note d'index. Variables : {{key}} (« Auteur,
+// année »), {{entry}} (entrée complète), {{doi}}, {{marker}}, {{pages}}.
+pref("extensions.zotero.annota.indexLineFormat", "[[{{key}}]] — {{entry}}");
+
 // ---- Couleurs ----
 // JSON { "#ffd400": { prompt, trigger, template }, … }.
 // Vide par défaut : aucune couleur n'est traitée tant que rien n'est configuré.
