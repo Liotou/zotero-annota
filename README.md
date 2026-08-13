@@ -169,6 +169,16 @@ Two modes depending on the prompt:
 - **Advanced** (the prompt contains `{{text}}` or `{{comment}}`) — the prompt is
   sent as-is; you fully control the structure of the request.
 
+## Running a prompt on one annotation
+
+**In the PDF reader, right-click an annotation in the sidebar → Annota —
+generate comment.** This targets exactly that annotation (or the several you
+selected), instead of a whole document.
+
+It always overwrites the existing comment, because that is the point of the
+*Only on request* workflow: you write your paraphrase by hand, then ask the AI
+to format or title it (`{{comment}}`). Colors with no prompt stay untouched.
+
 ## Generating comments after the fact
 
 Highlights you made before installing Annota — or before changing your prompt —

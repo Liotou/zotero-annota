@@ -1194,6 +1194,13 @@ Annota = {
 		if (!selected || !selected.length) return;
 
 		let all = await this.collectAnnotations(selected);
+		return this.processAnnotations(all, opts);
+	},
+
+	// Traitement commun : bibliothèque (menu contextuel) et lecteur (annotation
+	// ciblée). `all` = annotations candidates, déjà collectées.
+	async processAnnotations(all, opts = {}) {
+		let overwrite = !!opts.overwrite;
 		let eligible = all.filter(a => this.isEligible(a, overwrite));
 
 		// Les couleurs sans prompt sont ignorées : on les compte à part pour
@@ -1269,6 +1276,86 @@ Annota = {
 		pw.startCloseTimer(failed ? 8000 : 4000);
 		log("runBatch terminé : " + ok + " ok, " + failed + " échecs, "
 			+ noPrompt + " sans prompt");
+	},
+
+	// ---- Menu contextuel des annotations du lecteur ----
+	//
+	// API officielle de Zotero (reader.js) : registerEventListener avec le type
+	// « createAnnotationContextMenu ». Permet de viser UNE annotation précise
+	// depuis le panneau latéral, plutôt que tout un document.
+	// params.ids contient des CLÉS d'items (reader.js : annotation.key =
+	// annotation.id), pas des identifiants numériques.
+
+	_readerListener: null,
+
+	registerReaderMenu() {
+		try {
+			if (!Zotero.Reader || !Zotero.Reader.registerEventListener) return;
+			this._readerListener = (event) => {
+				try {
+					let { reader, params, append } = event;
+					let keys = (params && params.ids) || [];
+					if (!keys.length) return;
+					append({
+						label: keys.length > 1
+							? "Annota — generate " + keys.length + " comments"
+							: "Annota — generate comment",
+						onCommand: () => {
+							Annota.runOnReaderAnnotations(reader, keys)
+								.catch(e => log("runOnReaderAnnotations: " + e));
+						}
+					});
+				}
+				catch (e) {
+					log("createAnnotationContextMenu: " + e);
+				}
+			};
+			Zotero.Reader.registerEventListener(
+				"createAnnotationContextMenu", this._readerListener, "annota@equiriconi");
+			log("Menu du lecteur enregistré");
+		}
+		catch (e) {
+			log("registerReaderMenu: " + e);
+		}
+	},
+
+	unregisterReaderMenu() {
+		try {
+			if (this._readerListener && Zotero.Reader
+					&& Zotero.Reader.unregisterEventListener) {
+				Zotero.Reader.unregisterEventListener(
+					"createAnnotationContextMenu", this._readerListener);
+			}
+		}
+		catch (e) { /* ignore */ }
+		this._readerListener = null;
+	},
+
+	// Exécute le prompt sur les annotations visées dans le lecteur.
+	// L'action étant explicite, elle écrase le commentaire existant : c'est ce
+	// qui permet d'écrire sa paraphrase à la main puis de la faire mettre en
+	// forme (mode « à la demande » + {{comment}}).
+	async runOnReaderAnnotations(reader, keys) {
+		let notReady = this.providerReadyError();
+		if (notReady) {
+			toast("Annota", notReady, "error");
+			return;
+		}
+		let anns = [];
+		try {
+			let att = await Zotero.Items.getAsync(reader.itemID);
+			if (!att) return;
+			for (let key of keys) {
+				let it = await Zotero.Items.getByLibraryAndKeyAsync(att.libraryID, key);
+				if (it && it.isAnnotation && it.isAnnotation()) anns.push(it);
+			}
+		}
+		catch (e) {
+			log("runOnReaderAnnotations: résolution des clés : " + e);
+			return;
+		}
+		if (!anns.length) return;
+		return this.processAnnotations(anns, { overwrite: true });
 	},
 
 	// ---- Menu contextuel (une entrée par fenêtre principale) ----
@@ -1364,6 +1451,7 @@ function install() {}
 async function startup({ id, version, rootURI }) {
 	Annota.init({ id, version, rootURI });
 	Annota.registerNotifier();
+	Annota.registerReaderMenu();
 
 	// Exposé pour le script du panneau de préférences (prompt par défaut, reset).
 	Zotero.Annota = Annota;
@@ -1396,6 +1484,7 @@ function onMainWindowUnload({ window }) {
 function shutdown() {
 	if (Annota) {
 		Annota.unregisterNotifier();
+		Annota.unregisterReaderMenu();
 		Annota.removeFromAllWindows();
 	}
 	try { delete Zotero.Annota; } catch (e) {}
