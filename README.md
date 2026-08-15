@@ -119,6 +119,38 @@ write that color's prompt.
   least one color. Copyable examples live in
   [PROMPT-EXAMPLES.txt](PROMPT-EXAMPLES.txt).
 
+#### Custom fields — what you fill in by hand
+
+Each color can define **fields you fill in yourself** for each annotation. They
+show up as a small form under **✎ Annota** in the reader's annotation sidebar,
+and each becomes a variable usable in the prompt *and* in the layout.
+
+One field per line — `name | Label | type | options`:
+
+```
+titre      | Titre                | text
+paraphrase | Paraphrase           | textarea
+reference  | Référence indirecte  | text
+verifie    | Vérifié              | check
+nature     | Nature               | select | idée, méthode, résultat
+```
+
+Types: `text` (default), `textarea`, `check`, `select`. That gives `{{titre}}`,
+`{{paraphrase}}`, `{{reference}}`, `{{verifie}}`, `{{nature}}`. Built-in variable
+names are reserved and silently ignored if reused, so a field can never shadow
+`{{text}}` or `{{comment}}`.
+
+Combined with a layout that has no `{{ai}}`, this gives a **fully manual,
+structured annotation** with no AI call at all:
+
+```
+<b>{{titre}}</b>
+{{paraphrase}}
+<i>{{reference}}</i>
+```
+
+Fields are filled per run; they are not stored on the annotation afterwards.
+
 #### Comment layout — mixing AI output with deterministic text
 
 Each color has an optional **layout** applied after generation. Leave it empty

@@ -166,6 +166,26 @@
              label="Only on request (right-click → Annota) — e.g. I write my note first, the AI reworks it"/>
     </radiogroup>
 
+    <label style="margin-top: 10px;"><html:b>Custom fields (optional)</html:b></label>
+    <description style="max-width: 46em; opacity: 0.8;">
+      Fields you fill in by hand for each annotation. They appear as a small form
+      under <html:b>✎ Annota</html:b> in the reader's annotation sidebar, and each
+      one becomes a variable usable in the prompt and in the layout below.
+      One field per line: <html:code>name | Label | type | options</html:code> —
+      type is <html:code>text</html:code> (default), <html:code>textarea</html:code>,
+      <html:code>check</html:code> or <html:code>select</html:code> (options are
+      comma-separated). Example:
+      <html:pre style="margin: 4px 0; font-size: 11px;">titre | Titre | text
+paraphrase | Paraphrase | textarea
+reference | Référence indirecte | text
+verifie | Vérifié | check</html:pre>
+      gives <html:code>{{titre}}</html:code>, <html:code>{{paraphrase}}</html:code>,
+      <html:code>{{reference}}</html:code>, <html:code>{{verifie}}</html:code>.
+      Built-in variable names are reserved and ignored if reused.
+    </description>
+    <html:textarea id="annota-fields" rows="5"
+                    style="width: 100%; font-family: monospace; font-size: 12px; margin-top: 4px;"/>
+
     <label style="margin-top: 10px;"><html:b>Comment layout (optional)</html:b></label>
     <description style="max-width: 46em; opacity: 0.8;">
       Leave empty and the comment is simply the AI's reply. Fill it in to compose

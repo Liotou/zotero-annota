@@ -30,15 +30,17 @@
 	function normalize(raw) {
 		if (!raw) return null;
 		if (typeof raw === "string") {
-			return raw.trim() ? { prompt: raw, trigger: "auto", template: "" } : null;
+			return raw.trim() ? { prompt: raw, trigger: "auto", template: "", fields: "" } : null;
 		}
 		if (typeof raw !== "object") return null;
 		let prompt = String(raw.prompt || "");
 		let template = String(raw.template || "");
-		if (!prompt.trim() && !template.trim()) return null;
+		let fields = String(raw.fields || "");
+		if (!prompt.trim() && !template.trim() && !fields.trim()) return null;
 		return {
 			prompt,
 			template,
+			fields,
 			trigger: raw.trigger === "manual" ? "manual" : "auto"
 		};
 	}
@@ -185,7 +187,8 @@
 		let idleWarning = document.getElementById("annota-idle-warning");
 		let triggerGroup = document.getElementById("annota-trigger");
 		let templateArea = document.getElementById("annota-template");
-		if (!textarea || !swatchBox || !triggerGroup || !templateArea) {
+		let fieldsArea = document.getElementById("annota-fields");
+		if (!textarea || !swatchBox || !triggerGroup || !templateArea || !fieldsArea) {
 			requestAnimationFrame(setup);
 			return;
 		}
@@ -216,9 +219,11 @@
 			let map = readColorMap();
 			let prompt = textarea.value;
 			let template = templateArea.value;
-			// Actif si prompt OU gabarit : un gabarit sans {{ai}} est déterministe.
-			if ((prompt && prompt.trim()) || (template && template.trim())) {
-				map[current] = { prompt, template, trigger: currentTrigger() };
+			let fields = fieldsArea.value;
+			// Actif si prompt OU gabarit OU champs.
+			if ((prompt && prompt.trim()) || (template && template.trim())
+					|| (fields && fields.trim())) {
+				map[current] = { prompt, template, fields, trigger: currentTrigger() };
 			}
 			else {
 				delete map[current];
@@ -243,6 +248,7 @@
 			let entry = normalize(readColorMap()[hex]);
 			textarea.value = entry ? entry.prompt : "";
 			templateArea.value = entry ? (entry.template || "") : "";
+			fieldsArea.value = entry ? (entry.fields || "") : "";
 			triggerGroup.value = entry ? entry.trigger : "auto";
 			if (targetName) {
 				let c = palette.find(x => x.hex === hex);
@@ -295,12 +301,16 @@
 			"Empty — the comment is the AI's reply as-is.");
 		templateArea.addEventListener("input", scheduleSave);
 		templateArea.addEventListener("blur", saveNow);
+		fieldsArea.setAttribute("placeholder", "name | Label | type | options");
+		fieldsArea.addEventListener("input", scheduleSave);
+		fieldsArea.addEventListener("blur", saveNow);
 
 		// --- Choix du mode (auto / manuel) ---
 		// Ne sauvegarde que si la couleur a déjà un prompt (sinon rien à régler).
 		triggerGroup.addEventListener("command", () => {
 			if ((textarea.value && textarea.value.trim())
-					|| (templateArea.value && templateArea.value.trim())) saveNow();
+					|| (templateArea.value && templateArea.value.trim())
+					|| (fieldsArea.value && fieldsArea.value.trim())) saveNow();
 		});
 
 		// --- Bouton d'effacement ---
@@ -311,6 +321,7 @@
 				writeColorMap(map);
 				textarea.value = "";
 				templateArea.value = "";
+				fieldsArea.value = "";
 				triggerGroup.value = "auto";
 				refreshSwatches();
 				flashStatus("Cleared ✓");

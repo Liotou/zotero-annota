@@ -120,17 +120,61 @@ Annota = {
 		let raw = this.getColorPrompts()[String(color).toLowerCase()];
 		if (!raw) return null;
 		if (typeof raw === "string") {
-			return raw.trim() ? { prompt: raw, trigger: "auto", template: "" } : null;
+			return raw.trim() ? { prompt: raw, trigger: "auto", template: "", fields: "" } : null;
 		}
 		if (typeof raw !== "object") return null;
 		let prompt = String(raw.prompt || "");
 		let template = String(raw.template || "");
-		if (!prompt.trim() && !template.trim()) return null;
+		let fields = String(raw.fields || "");
+		if (!prompt.trim() && !template.trim() && !fields.trim()) return null;
 		return {
 			prompt,
 			template,
+			fields,
 			trigger: raw.trigger === "manual" ? "manual" : "auto"
 		};
+	},
+
+	// ---- Champs personnalisés par couleur ----
+	//
+	// Syntaxe, une ligne par champ :  nom | Libellé | type | options
+	//   type ∈ text (défaut) | textarea | check | select
+	//   options : pour « select », les choix séparés par des virgules.
+	// Chaque champ devient une variable {{nom}} dans le prompt ET le gabarit.
+	// Les noms réservés (variables intégrées) sont ignorés pour éviter qu'un
+	// champ n'écrase silencieusement {{text}}, {{comment}}, etc.
+	RESERVED_VARS: [
+		"text", "comment", "title", "authors", "year", "abstract",
+		"publication", "page", "references", "maxWords", "language", "ai"
+	],
+
+	parseFieldSchema(raw) {
+		let out = [];
+		for (let line of String(raw || "").split("\n")) {
+			line = line.trim();
+			if (!line || line.startsWith("#")) continue;
+			let parts = line.split("|").map(x => x.trim());
+			let name = (parts[0] || "").replace(/[^\w]/g, "");
+			if (!name) continue;
+			if (this.RESERVED_VARS.includes(name)) {
+				log("champ « " + name + " » ignoré : nom réservé");
+				continue;
+			}
+			let type = (parts[2] || "text").toLowerCase();
+			if (!["text", "textarea", "check", "select"].includes(type)) type = "text";
+			out.push({
+				name,
+				label: parts[1] || name,
+				type,
+				options: (parts[3] || "").split(",").map(x => x.trim()).filter(Boolean)
+			});
+		}
+		return out;
+	},
+
+	fieldsForColor(color) {
+		let entry = this.getColorEntry(color);
+		return entry ? this.parseFieldSchema(entry.fields) : [];
 	},
 
 	// Le gabarit réclame-t-il une réponse d'IA ?
@@ -786,8 +830,8 @@ Annota = {
 	// - Mode standard : le prompt sert d'instructions (system), le passage (et
 	//   le contexte du document si activé) est ajouté comme message utilisateur.
 	// Variables disponibles dans le prompt ET dans le gabarit de sortie.
-	buildVars({ text, ctx, comment }) {
-		return {
+	buildVars({ text, ctx, comment, fields }) {
+		let vars = {
 			text: text || "",
 			comment: comment || "",
 			title: (ctx && ctx.title) || "",
@@ -800,11 +844,18 @@ Annota = {
 			maxWords: parseInt(getPref("maxWords", 80), 10) || 80,
 			language: String(getPref("language", "français")).trim() || "français"
 		};
+		// Champs saisis à la main : n'écrasent jamais une variable intégrée.
+		if (fields) {
+			for (let k of Object.keys(fields)) {
+				if (!this.RESERVED_VARS.includes(k)) vars[k] = fields[k];
+			}
+		}
+		return vars;
 	},
 
-	buildPrompt({ text, ctx, color, comment }) {
+	buildPrompt({ text, ctx, color, comment, fields }) {
 		let tpl = this.getPromptForColor(color);
-		let vars = this.buildVars({ text, ctx, comment });
+		let vars = this.buildVars({ text, ctx, comment, fields });
 
 		let selfContained = /\{\{\s*(text|comment)\s*\}\}/.test(tpl);
 		if (selfContained) {
@@ -824,8 +875,8 @@ Annota = {
 		return { system: this.substitute(tpl, vars), user: parts.join("\n\n") };
 	},
 
-	async generateComment({ text, ctx, color, comment }) {
-		let prompt = this.buildPrompt({ text, ctx, color, comment });
+	async generateComment({ text, ctx, color, comment, fields }) {
+		let prompt = this.buildPrompt({ text, ctx, color, comment, fields });
 		let p = this.provider();
 		if (p === "cli") return this.callCLI(prompt);
 		if (p === "apple") return this.callApple(prompt);
@@ -853,18 +904,18 @@ Annota = {
 	// Produit le commentaire final d'une annotation : réponse de l'IA seule, ou
 	// gabarit mêlant cette réponse ({{ai}}) et des entrées déterministes.
 	// Renvoie null si la couleur n'a rien à produire.
-	async buildComment({ text, ctx, color, comment }) {
+	async buildComment({ text, ctx, color, comment, fields }) {
 		let entry = this.getColorEntry(color);
 		if (!entry) return null;
 
 		let ai = "";
 		if (this.entryNeedsAI(entry)) {
 			if (!entry.prompt.trim()) return null;   // rien à demander au modèle
-			ai = await this.generateComment({ text, ctx, color, comment });
+			ai = await this.generateComment({ text, ctx, color, comment, fields });
 		}
 		if (!entry.template.trim()) return ai;
 
-		let vars = this.buildVars({ text, ctx, comment });
+		let vars = this.buildVars({ text, ctx, comment, fields });
 		vars.ai = ai;
 		return this.renderTemplate(entry.template, vars);
 	},
@@ -1208,7 +1259,9 @@ Annota = {
 		let targets = [];
 		let noPrompt = 0;
 		for (let a of eligible) {
-			if (this.getPromptForColor(a.annotationColor)) targets.push(a);
+			// getColorEntry, pas getPromptForColor : une couleur peut être active
+			// avec un gabarit ou des champs seuls (commentaire déterministe).
+			if (this.getColorEntry(a.annotationColor)) targets.push(a);
 			else noPrompt++;
 		}
 
@@ -1250,7 +1303,8 @@ Annota = {
 					text: annText,
 					ctx,
 					color: ann.annotationColor,
-					comment: (ann.annotationComment || "").trim()
+					comment: (ann.annotationComment || "").trim(),
+					fields: opts.fields
 				});
 				if (comment === null) { failed++; continue; }
 				let fresh = await Zotero.Items.getAsync(ann.id);
@@ -1276,6 +1330,131 @@ Annota = {
 		pw.startCloseTimer(failed ? 8000 : 4000);
 		log("runBatch terminé : " + ok + " ok, " + failed + " échecs, "
 			+ noPrompt + " sans prompt");
+	},
+
+	// ---- Formulaire de champs dans le panneau latéral du lecteur ----
+	//
+	// Hook officiel « renderSidebarAnnotationHeader » : Zotero appelle ce
+	// gestionnaire pour chaque annotation affichée dans la barre latérale et
+	// nous laisse y injecter du DOM. On y place un bouton qui déplie un
+	// formulaire construit d'après les champs définis pour LA COULEUR de
+	// l'annotation, puis lance la génération avec les valeurs saisies.
+
+	_sidebarListener: null,
+
+	registerSidebarForm() {
+		try {
+			if (!Zotero.Reader || !Zotero.Reader.registerEventListener) return;
+			this._sidebarListener = (event) => {
+				try { this._renderSidebarForm(event); }
+				catch (e) { log("renderSidebarAnnotationHeader: " + e); }
+			};
+			Zotero.Reader.registerEventListener(
+				"renderSidebarAnnotationHeader", this._sidebarListener, "annota@equiriconi");
+			log("Formulaire latéral enregistré");
+		}
+		catch (e) {
+			log("registerSidebarForm: " + e);
+		}
+	},
+
+	unregisterSidebarForm() {
+		try {
+			if (this._sidebarListener && Zotero.Reader
+					&& Zotero.Reader.unregisterEventListener) {
+				Zotero.Reader.unregisterEventListener(
+					"renderSidebarAnnotationHeader", this._sidebarListener);
+			}
+		}
+		catch (e) { /* ignore */ }
+		this._sidebarListener = null;
+	},
+
+	_renderSidebarForm({ reader, doc, params, append }) {
+		let ann = params && params.annotation;
+		if (!ann || !doc || !append) return;
+		let schema = this.fieldsForColor(ann.color);
+		if (!schema.length) return;      // couleur sans champs : rien à afficher
+
+		let wrap = doc.createElement("div");
+		wrap.style.cssText = "display:flex;flex-direction:column;gap:4px;margin-top:4px;";
+
+		let toggle = doc.createElement("button");
+		toggle.textContent = "✎ Annota";
+		toggle.title = "Fill the fields for this annotation";
+		toggle.style.cssText = "align-self:flex-start;font-size:11px;padding:1px 6px;cursor:pointer;";
+
+		let form = doc.createElement("div");
+		form.hidden = true;
+		form.style.cssText = "display:flex;flex-direction:column;gap:3px;";
+
+		let inputs = {};
+		for (let f of schema) {
+			let row = doc.createElement("div");
+			row.style.cssText = "display:flex;flex-direction:column;gap:1px;";
+			let lab = doc.createElement("label");
+			lab.textContent = f.label;
+			lab.style.cssText = "font-size:10px;opacity:.75;";
+			let el;
+			if (f.type === "textarea") {
+				el = doc.createElement("textarea");
+				el.rows = 3;
+			}
+			else if (f.type === "check") {
+				el = doc.createElement("input");
+				el.type = "checkbox";
+			}
+			else if (f.type === "select") {
+				el = doc.createElement("select");
+				for (let o of [""].concat(f.options)) {
+					let opt = doc.createElement("option");
+					opt.value = o;
+					opt.textContent = o || "—";
+					el.appendChild(opt);
+				}
+			}
+			else {
+				el = doc.createElement("input");
+				el.type = "text";
+			}
+			el.style.cssText = "font-size:11px;width:100%;box-sizing:border-box;";
+			inputs[f.name] = { el, type: f.type };
+			row.appendChild(lab);
+			row.appendChild(el);
+			form.appendChild(row);
+		}
+
+		let run = doc.createElement("button");
+		run.textContent = "Generate";
+		run.style.cssText = "align-self:flex-start;font-size:11px;padding:1px 6px;cursor:pointer;";
+		run.addEventListener("click", async () => {
+			run.disabled = true;
+			let before = run.textContent;
+			run.textContent = "…";
+			try {
+				let values = {};
+				for (let name of Object.keys(inputs)) {
+					let { el, type } = inputs[name];
+					values[name] = (type === "check")
+						? (el.checked ? "true" : "")
+						: String(el.value || "");
+				}
+				await this.runOnReaderAnnotations(reader, [ann.id], { fields: values });
+			}
+			catch (e) {
+				log("formulaire latéral : " + e);
+			}
+			finally {
+				run.disabled = false;
+				run.textContent = before;
+			}
+		});
+
+		toggle.addEventListener("click", () => { form.hidden = !form.hidden; });
+		form.appendChild(run);
+		wrap.appendChild(toggle);
+		wrap.appendChild(form);
+		append(wrap);
 	},
 
 	// ---- Menu contextuel des annotations du lecteur ----
@@ -1335,7 +1514,7 @@ Annota = {
 	// L'action étant explicite, elle écrase le commentaire existant : c'est ce
 	// qui permet d'écrire sa paraphrase à la main puis de la faire mettre en
 	// forme (mode « à la demande » + {{comment}}).
-	async runOnReaderAnnotations(reader, keys) {
+	async runOnReaderAnnotations(reader, keys, opts = {}) {
 		let notReady = this.providerReadyError();
 		if (notReady) {
 			toast("Annota", notReady, "error");
@@ -1355,7 +1534,7 @@ Annota = {
 			return;
 		}
 		if (!anns.length) return;
-		return this.processAnnotations(anns, { overwrite: true });
+		return this.processAnnotations(anns, { overwrite: true, fields: opts.fields });
 	},
 
 	// ---- Menu contextuel (une entrée par fenêtre principale) ----
@@ -1452,6 +1631,7 @@ async function startup({ id, version, rootURI }) {
 	Annota.init({ id, version, rootURI });
 	Annota.registerNotifier();
 	Annota.registerReaderMenu();
+	Annota.registerSidebarForm();
 
 	// Exposé pour le script du panneau de préférences (prompt par défaut, reset).
 	Zotero.Annota = Annota;
@@ -1485,6 +1665,7 @@ function shutdown() {
 	if (Annota) {
 		Annota.unregisterNotifier();
 		Annota.unregisterReaderMenu();
+		Annota.unregisterSidebarForm();
 		Annota.removeFromAllWindows();
 	}
 	try { delete Zotero.Annota; } catch (e) {}
