@@ -49,7 +49,12 @@ reinstall. Zotero polls periodically; you can also force a check via
 
 ## Configuration
 
-**Add-ons → Annota**, or **Preferences → Annota**:
+**Add-ons → Annota**, or **Preferences → Annota**. The panel has three tabs:
+**🎨 Colors** (what each highlight color does — the only tab you need for a
+manual setup), **✨ AI** (provider and what gets sent, used only by colors that
+call the model) and **⚙️ General** (behaviour). Reference material — field types,
+the variable list, advanced paths — sits in collapsible blocks so the everyday
+view stays short.
 
 ### General
 There is no global on/off switch: each color decides whether it runs

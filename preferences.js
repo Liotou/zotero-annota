@@ -67,6 +67,39 @@
 		Zotero.Prefs.set(PREF_COLORS, Object.keys(clean).length ? JSON.stringify(clean) : "");
 	}
 
+	// Onglets. Boutons HTML + bascule de l'attribut hidden : même mécanique que
+	// le sélecteur de fournisseur ci-dessous, qui fonctionne déjà. Si le script
+	// échoue, tous les panneaux restent visibles plutôt qu'inaccessibles.
+	function setupTabs() {
+		let bar = document.getElementById("annota-tabs");
+		let panes = {
+			colors: document.getElementById("annota-pane-colors"),
+			ai: document.getElementById("annota-pane-ai"),
+			general: document.getElementById("annota-pane-general")
+		};
+		if (!bar || !panes.colors || !panes.ai || !panes.general) {
+			requestAnimationFrame(setupTabs);
+			return;
+		}
+
+		let tabs = Array.from(bar.querySelectorAll(".annota-tab"));
+		if (!tabs.length) return;
+
+		function apply(name) {
+			for (let key of Object.keys(panes)) panes[key].hidden = (key !== name);
+			for (let t of tabs) {
+				let on = t.getAttribute("data-pane") === name;
+				t.setAttribute("data-active", on ? "true" : "false");
+				t.setAttribute("aria-selected", on ? "true" : "false");
+			}
+		}
+
+		for (let t of tabs) {
+			t.addEventListener("click", () => apply(t.getAttribute("data-pane")));
+		}
+		apply("colors");
+	}
+
 	// Sélecteur de fournisseur : n'affiche que les réglages du fournisseur actif.
 	// La pref est écrite à la main (un <select> n'a pas de binding « preference »).
 	function setupProvider() {
@@ -333,6 +366,7 @@
 		load(current);
 	}
 
+	setupTabs();
 	setup();
 	setupProvider();
 	setupOllama();

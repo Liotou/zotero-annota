@@ -1,4 +1,155 @@
-/* Pastilles de couleur du panneau de préférences Annota. */
+/* Panneau de préférences Annota : onglets, sections, pastilles de couleur. */
+
+/* ---- Onglets ---- */
+
+#annota-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 14px;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.35);
+  padding-bottom: 0;
+}
+
+.annota-tab {
+  appearance: none;
+  -moz-appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  padding: 6px 14px;
+  margin-bottom: -1px;
+  font: inherit;
+  cursor: pointer;
+  color: inherit;
+  opacity: 0.7;
+}
+
+.annota-tab:hover {
+  background: rgba(128, 128, 128, 0.14);
+  opacity: 1;
+}
+
+.annota-tab[data-active="true"] {
+  background: Field;
+  border-color: rgba(128, 128, 128, 0.35);
+  opacity: 1;
+  font-weight: 600;
+}
+
+/* ---- Sections ---- */
+
+.annota-lead {
+  margin: 0 0 10px;
+  opacity: 0.85;
+}
+
+.annota-step {
+  margin: 16px 0 4px;
+}
+
+.annota-pane > .annota-step:first-of-type {
+  margin-top: 4px;
+}
+
+.annota-help {
+  margin: 0 0 6px;
+  opacity: 0.7;
+  font-size: 0.92em;
+}
+
+.annota-editing {
+  margin: 4px 0 0;
+  gap: 6px;
+}
+
+.annota-target {
+  font-weight: 600;
+}
+
+.annota-warn {
+  margin: 6px 0;
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: rgba(255, 190, 60, 0.16);
+  border: 1px solid rgba(200, 140, 0, 0.4);
+}
+
+.annota-code {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+
+.annota-provider-cfg {
+  margin: 6px 0 4px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(128, 128, 128, 0.09);
+}
+
+.annota-actions {
+  margin-top: 12px;
+  align-items: center;
+  gap: 8px;
+}
+
+.annota-status {
+  opacity: 0.75;
+}
+
+/* ---- Blocs repliables ---- */
+
+.annota-details {
+  margin: 6px 0;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 6px;
+  padding: 0;
+}
+
+.annota-details > summary {
+  cursor: pointer;
+  padding: 6px 9px;
+  opacity: 0.85;
+  list-style-position: inside;
+}
+
+.annota-details[open] > summary {
+  border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+  font-weight: 600;
+  opacity: 1;
+}
+
+.annota-details-body {
+  padding: 8px 10px;
+}
+
+.annota-details-body p {
+  margin: 0 0 6px;
+}
+
+.annota-details-body pre {
+  margin: 6px 0;
+  padding: 7px 9px;
+  overflow-x: auto;
+  border-radius: 5px;
+  background: rgba(128, 128, 128, 0.13);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.88em;
+}
+
+.annota-details-body code,
+.annota-help code,
+.annota-lead code {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(128, 128, 128, 0.18);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+
+/* ---- Pastilles de couleur ---- */
 
 #annota-swatches {
   display: flex;
