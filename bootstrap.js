@@ -309,7 +309,21 @@ Annota = {
 		// ET que ce prompt est réglé sur « auto ». Les couleurs « manuel » ne
 		// réagissent qu'au menu contextuel. Couleur sans prompt = ignorée.
 		let entry = this.getColorEntry(item.annotationColor);
-		if (!entry || entry.trigger !== "auto") return;
+		if (!entry) {
+			log("annotation " + id + " ignorée : couleur " + item.annotationColor
+				+ " sans prompt, gabarit ni champs");
+			return;
+		}
+		// Un formulaire rempli dans le popup de sélection VAUT demande explicite :
+		// on exécute même sur une couleur réglée sur « à la demande », sinon la
+		// saisie serait silencieusement perdue à la validation.
+		let pending = this.peekPendingFields(text);
+		let filled = this._hasFilledValues(pending);
+		if (entry.trigger !== "auto" && !filled) {
+			log("annotation " + id + " ignorée : couleur en mode « à la demande »"
+				+ " et aucun champ saisi");
+			return;
+		}
 
 		// Commentaire déjà saisi (paraphrase manuelle) : capturé avant tout,
 		// pour la variable {{comment}} et pour respecter « ne pas écraser ».
@@ -1382,7 +1396,8 @@ Annota = {
 			.toLowerCase();
 	},
 
-	takePendingFields(text) {
+	// consume=false : consulter sans effacer (pour décider s'il faut agir).
+	_matchPending(text, consume) {
 		let p = this._pendingFields;
 		if (!p) return null;
 		let age = Date.now() - p.ts;
@@ -1400,9 +1415,20 @@ Annota = {
 			log("champs en attente non appliqués : le passage ne correspond pas");
 			return null;
 		}
-		this._pendingFields = null;      // consommé une seule fois
-		log("champs appliqués (" + how + ")");
+		if (consume) {
+			this._pendingFields = null;   // consommé une seule fois
+			log("champs appliqués (" + how + ")");
+		}
 		return p.values;
+	},
+
+	peekPendingFields(text) { return this._matchPending(text, false); },
+	takePendingFields(text) { return this._matchPending(text, true); },
+
+	// Y a-t-il au moins une valeur non vide ? Un formulaire laissé vierge ne
+	// doit pas déclencher une génération sur une couleur « à la demande ».
+	_hasFilledValues(values) {
+		return !!values && Object.keys(values).some(k => String(values[k] || "").trim());
 	},
 
 	registerSelectionForm() {
