@@ -127,17 +127,29 @@ text-selection popup** — the little window that shows up when you select text,
 highlight color as usual; the annotation is created with those values already
 applied. Each field becomes a variable usable in the prompt *and* in the layout.
 
-One field per line — `name | Label | type | options`:
+**Fields are independent of the AI.** As soon as a color has fields, the comment
+is built from what you typed — no model call at all, even if a prompt is still
+configured. The AI only steps in for a field of type `ai`, or if you put
+`{{ai}}` in the layout.
+
+One field per line — `name | Label | type | options | format`:
 
 ```
-titre      | Titre                | text
+titre      | Titre                | text     | bold
 paraphrase | Paraphrase           | textarea
-reference  | Référence indirecte  | text
+reference  | Référence indirecte  | text     | italic
 verifie    | Vérifié              | check
-nature     | Nature               | select | idée, méthode, résultat
+nature     | Nature               | select   | idée, méthode, résultat | italic
+resume     | Résumé               | ai       | Résume le passage en une phrase.
 ```
 
-Types: `text` (default), `textarea`, `check`, `select`. That gives `{{titre}}`,
+Types: `text` (default), `textarea`, `check`, `select`, and `ai` (that field
+alone is written by the model, following the instruction in the options column).
+Formats: `bold`, `italic`, `bolditalic`, `underline`, `plain` (default) — the
+format may sit in the 4th column when the field has no options.
+
+With **no layout**, the comment is one line per field, in order, each wrapped in
+its format. That gives `{{titre}}`,
 `{{paraphrase}}`, `{{reference}}`, `{{verifie}}`, `{{nature}}`. Built-in variable
 names are reserved and silently ignored if reused, so a field can never shadow
 `{{text}}` or `{{comment}}`.

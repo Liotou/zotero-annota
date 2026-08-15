@@ -148,6 +148,32 @@ Annota = {
 		"publication", "page", "references", "maxWords", "language", "ai"
 	],
 
+	// Mises en forme reconnues, appliquées à la valeur du champ dans le
+	// commentaire final. « plain » laisse le texte tel quel.
+	FORMATS: {
+		plain: v => v,
+		bold: v => "<b>" + v + "</b>",
+		italic: v => "<i>" + v + "</i>",
+		bolditalic: v => "<b><i>" + v + "</i></b>",
+		underline: v => "<u>" + v + "</u>"
+	},
+
+	_normFormat(w) {
+		let k = String(w || "").toLowerCase().replace(/[\s_-]/g, "");
+		// Une colonne vide n'est PAS un format : sans cela « plain » serait
+		// retenu et la colonne précédente ne serait jamais examinée.
+		if (!k) return null;
+		if (k === "gras") k = "bold";
+		if (k === "italique") k = "italic";
+		if (k === "normal") k = "plain";
+		if (k === "souligne" || k === "souligné") k = "underline";
+		return Object.prototype.hasOwnProperty.call(this.FORMATS, k) ? k : null;
+	},
+
+	// Syntaxe :  nom | Libellé | type | options | format
+	// Le format peut occuper la 4e OU la 5e colonne : s'il est reconnu en 4e,
+	// c'est un format, sinon ce sont les options (choix d'un « select », ou
+	// consigne d'un champ « ai »). Cela garde la compatibilité ascendante.
 	parseFieldSchema(raw) {
 		let out = [];
 		for (let line of String(raw || "").split("\n")) {
@@ -161,15 +187,52 @@ Annota = {
 				continue;
 			}
 			let type = (parts[2] || "text").toLowerCase();
-			if (!["text", "textarea", "check", "select"].includes(type)) type = "text";
+			if (!["text", "textarea", "check", "select", "ai"].includes(type)) type = "text";
+
+			let col4 = parts[3] || "", col5 = parts[4] || "";
+			let format = this._normFormat(col5);
+			let extra = col4;
+			if (!format) {
+				// Pas de 5e colonne : la 4e est-elle un format connu ?
+				let asFormat = this._normFormat(col4);
+				// Un champ « ai » garde sa consigne en 4e colonne.
+				if (asFormat && type !== "ai" && !(type === "select" && col4.includes(","))) {
+					format = asFormat;
+					extra = "";
+				}
+			}
+
 			out.push({
 				name,
 				label: parts[1] || name,
 				type,
-				options: (parts[3] || "").split(",").map(x => x.trim()).filter(Boolean)
+				format: format || "plain",
+				// « select » : liste de choix. « ai » : consigne envoyée au modèle.
+				options: type === "select"
+					? extra.split(",").map(x => x.trim()).filter(Boolean) : [],
+				prompt: type === "ai" ? extra : ""
 			});
 		}
 		return out;
+	},
+
+	// Disposition par défaut quand une couleur a des champs mais aucun gabarit :
+	// une ligne par champ, dans l'ordre déclaré, le balisage de mise en forme
+	// étant intégré au gabarit lui-même. Ainsi {{nom}} reste la valeur brute et
+	// il n'y a jamais de double balisage si l'on écrit sa propre disposition.
+	defaultLayoutFromFields(schema) {
+		return schema.map(f => {
+			let fn = this.FORMATS[f.format] || this.FORMATS.plain;
+			return fn("{{" + f.name + "}}");
+		}).join("\n");
+	},
+
+	// Gabarit effectif d'une couleur : celui saisi, sinon celui déduit des champs.
+	effectiveTemplate(entry) {
+		let tpl = String((entry && entry.template) || "").trim();
+		if (tpl) return tpl;
+		let schema = this.parseFieldSchema(entry && entry.fields);
+		return schema.length ? this.defaultLayoutFromFields(schema) : "";
 	},
 
 	fieldsForColor(color) {
@@ -177,13 +240,25 @@ Annota = {
 		return entry ? this.parseFieldSchema(entry.fields) : [];
 	},
 
-	// Le gabarit réclame-t-il une réponse d'IA ?
-	// Gabarit vide → oui (la réponse EST le commentaire).
-	// Gabarit contenant {{ai}} → oui. Gabarit sans {{ai}} → non (déterministe).
+	// Faut-il une réponse d'IA pour LE COMMENTAIRE ENTIER ?
+	// Aucun gabarit ni champ → oui (la réponse EST le commentaire).
+	// Gabarit contenant {{ai}} → oui. Sinon → non : les champs suffisent.
 	entryNeedsAI(entry) {
 		if (!entry) return false;
-		let tpl = entry.template || "";
-		return !tpl.trim() || /\{\{\s*ai\s*\}\}/.test(tpl);
+		let tpl = this.effectiveTemplate(entry);
+		if (!tpl) return true;
+		return /\{\{\s*ai\s*\}\}/.test(tpl);
+	},
+
+	// Un champ de type « ai » réclame le modèle même si le commentaire, lui,
+	// est monté à partir des champs saisis.
+	entryHasAIFields(entry) {
+		return this.parseFieldSchema(entry && entry.fields).some(f => f.type === "ai");
+	},
+
+	// Le fournisseur est-il sollicité, à un titre ou à un autre ?
+	entryUsesProvider(entry) {
+		return this.entryNeedsAI(entry) || this.entryHasAIFields(entry);
 	},
 
 	// Prompt configuré pour cette couleur, ou "" si la couleur n'en a pas.
@@ -333,7 +408,7 @@ Annota = {
 
 		// Un gabarit purement déterministe (sans {{ai}}) n'appelle aucun modèle :
 		// inutile d'exiger une clé API ou le CLI dans ce cas.
-		if (this.entryNeedsAI(entry)) {
+		if (this.entryUsesProvider(entry)) {
 			let notReady = this.providerReadyError();
 			if (notReady) {
 				toast("Annota", notReady, "error");
@@ -344,7 +419,7 @@ Annota = {
 		this.inProgress.add(id);
 		let usedPlaceholder = false;
 		try {
-			if (getPref("showPlaceholder", true) && this.entryNeedsAI(entry)) {
+			if (getPref("showPlaceholder", true) && this.entryUsesProvider(entry)) {
 				item.annotationComment = PLACEHOLDER;
 				await item.saveTx();
 				usedPlaceholder = true;
@@ -875,8 +950,8 @@ Annota = {
 		return vars;
 	},
 
-	buildPrompt({ text, ctx, color, comment, fields }) {
-		let tpl = this.getPromptForColor(color);
+	buildPrompt({ text, ctx, color, comment, fields, promptOverride }) {
+		let tpl = promptOverride || this.getPromptForColor(color);
 		let vars = this.buildVars({ text, ctx, comment, fields });
 
 		let selfContained = /\{\{\s*(text|comment)\s*\}\}/.test(tpl);
@@ -897,8 +972,8 @@ Annota = {
 		return { system: this.substitute(tpl, vars), user: parts.join("\n\n") };
 	},
 
-	async generateComment({ text, ctx, color, comment, fields }) {
-		let prompt = this.buildPrompt({ text, ctx, color, comment, fields });
+	async generateComment({ text, ctx, color, comment, fields, promptOverride }) {
+		let prompt = this.buildPrompt({ text, ctx, color, comment, fields, promptOverride });
 		let p = this.provider();
 		if (p === "cli") return this.callCLI(prompt);
 		if (p === "apple") return this.callApple(prompt);
@@ -930,16 +1005,41 @@ Annota = {
 		let entry = this.getColorEntry(color);
 		if (!entry) return null;
 
+		let schema = this.parseFieldSchema(entry.fields);
+		let values = Object.assign({}, fields || {});
+
+		// 1. Champs de type « ai » : chacun a sa propre consigne et ne concerne
+		//    que lui. Les champs saisis à la main sont déjà disponibles pour
+		//    servir de contexte à ces consignes.
+		for (let f of schema) {
+			if (f.type !== "ai" || !f.prompt.trim()) continue;
+			try {
+				values[f.name] = await this.generateComment({
+					text, ctx, color, comment, fields: values, promptOverride: f.prompt
+				});
+			}
+			catch (e) {
+				log("champ IA « " + f.name + " » : " + e);
+				values[f.name] = "";
+			}
+		}
+
+		// 2. Réponse d'IA pour le commentaire ENTIER : uniquement si la
+		//    disposition la réclame ({{ai}}) ou s'il n'y a ni champs ni gabarit.
+		//    Une couleur dotée de champs se passe donc du modèle par défaut,
+		//    même si un prompt est encore renseigné.
 		let ai = "";
 		if (this.entryNeedsAI(entry)) {
 			if (!entry.prompt.trim()) return null;   // rien à demander au modèle
-			ai = await this.generateComment({ text, ctx, color, comment, fields });
+			ai = await this.generateComment({ text, ctx, color, comment, fields: values });
 		}
-		if (!entry.template.trim()) return ai;
 
-		let vars = this.buildVars({ text, ctx, comment, fields });
+		let tpl = this.effectiveTemplate(entry);
+		if (!tpl) return ai;
+
+		let vars = this.buildVars({ text, ctx, comment, fields: values });
 		vars.ai = ai;
-		return this.renderTemplate(entry.template, vars);
+		return this.renderTemplate(tpl, vars);
 	},
 
 	// ---- Apple Intelligence (modèle embarqué de macOS) ----
@@ -1498,6 +1598,7 @@ Annota = {
 		};
 
 		for (let f of schema) {
+			if (f.type === "ai") continue;   // rempli par le modèle, pas par vous
 			let row = doc.createElement("div");
 			let lab = doc.createElement("label");
 			lab.textContent = f.label;

@@ -173,16 +173,26 @@
       annotation exists: type the values, then validate by picking a highlight
       color as usual. Each one becomes a variable usable in the prompt and in the
       layout below.
-      One field per line: <html:code>name | Label | type | options</html:code> —
-      type is <html:code>text</html:code> (default), <html:code>textarea</html:code>,
-      <html:code>check</html:code> or <html:code>select</html:code> (options are
-      comma-separated). Example:
-      <html:pre style="margin: 4px 0; font-size: 11px;">titre | Titre | text
+      One field per line:
+      <html:code>name | Label | type | options | format</html:code>.
+      Types: <html:code>text</html:code> (default),
+      <html:code>textarea</html:code>, <html:code>check</html:code>,
+      <html:code>select</html:code> (comma-separated options), and
+      <html:code>ai</html:code> (that one field is written by the model — put its
+      instruction in the options column). Formats:
+      <html:code>bold</html:code>, <html:code>italic</html:code>,
+      <html:code>bolditalic</html:code>, <html:code>underline</html:code>,
+      <html:code>plain</html:code> (default). The format may sit in the 4th
+      column when there are no options.
+      <html:pre style="margin: 4px 0; font-size: 11px;">titre      | Titre      | text     | bold
 paraphrase | Paraphrase | textarea
-reference | Référence indirecte | text
-verifie | Vérifié | check</html:pre>
-      gives <html:code>{{titre}}</html:code>, <html:code>{{paraphrase}}</html:code>,
-      <html:code>{{reference}}</html:code>, <html:code>{{verifie}}</html:code>.
+reference  | Référence  | text     | italic
+resume     | Résumé     | ai       | Résume le passage en une phrase. | italic</html:pre>
+      <html:b>As soon as a color has fields, the comment is built from them — no
+      AI call at all</html:b>, even if a prompt is still filled in above. The
+      model is only used for <html:code>ai</html:code> fields, or if you put
+      <html:code>{{ai}}</html:code> in the layout below. With no layout, the
+      comment is simply one line per field, in order, with its format applied.
       Built-in variable names are reserved and ignored if reused.
     </description>
     <html:textarea id="annota-fields" rows="5"
