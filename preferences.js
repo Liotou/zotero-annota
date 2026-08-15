@@ -10,6 +10,19 @@
 // de changer de couleur.
 
 (function () {
+	// Le panneau est construit par Zotero de façon asynchrone : on réessaie
+	// jusqu'à ce que les éléments existent. Mais BORNÉ — un panneau refermé
+	// avant la fin laissait sinon une boucle d'animation tourner sur un
+	// document détruit (« can't access dead object » dans la console).
+	const MAX_RETRIES = 120;   // ~2 s à 60 images/s
+	function retry(fn, tries) {
+		if ((tries || 0) >= MAX_RETRIES) return;
+		requestAnimationFrame(() => {
+			try { fn((tries || 0) + 1); }
+			catch (e) { /* document fermé entre-temps */ }
+		});
+	}
+
 	const PREF_COLORS = "annota.colorPrompts";
 	const PREF_PROVIDER = "annota.provider";
 	const XHTML_NS = "http://www.w3.org/1999/xhtml";
@@ -70,7 +83,7 @@
 	// Onglets. Boutons HTML + bascule de l'attribut hidden : même mécanique que
 	// le sélecteur de fournisseur ci-dessous, qui fonctionne déjà. Si le script
 	// échoue, tous les panneaux restent visibles plutôt qu'inaccessibles.
-	function setupTabs() {
+	function setupTabs(tries) {
 		let bar = document.getElementById("annota-tabs");
 		let panes = {
 			colors: document.getElementById("annota-pane-colors"),
@@ -78,7 +91,7 @@
 			general: document.getElementById("annota-pane-general")
 		};
 		if (!bar || !panes.colors || !panes.ai || !panes.general) {
-			requestAnimationFrame(setupTabs);
+			retry(setupTabs, tries);
 			return;
 		}
 
@@ -102,7 +115,7 @@
 
 	// Sélecteur de fournisseur : n'affiche que les réglages du fournisseur actif.
 	// La pref est écrite à la main (un <select> n'a pas de binding « preference »).
-	function setupProvider() {
+	function setupProvider(tries) {
 		let sel = document.getElementById("annota-provider");
 		let panes = {
 			openai: document.getElementById("annota-cfg-openai"),
@@ -111,7 +124,7 @@
 			cli: document.getElementById("annota-cfg-cli")
 		};
 		if (!sel || !panes.openai || !panes.ollama || !panes.apple || !panes.cli) {
-			requestAnimationFrame(setupProvider);
+			retry(setupProvider, tries);
 			return;
 		}
 
@@ -136,12 +149,12 @@
 
 	// ---- Modèles Ollama : liste réelle des modèles installés ----
 	// Évite l'échec « model not found » : les tags comptent (llama3.1:8b).
-	function setupOllama() {
+	function setupOllama(tries) {
 		let sel = document.getElementById("annota-ollama-model");
 		let btn = document.getElementById("annota-ollama-refresh");
 		let status = document.getElementById("annota-ollama-status");
 		if (!sel || !btn) {
-			requestAnimationFrame(setupOllama);
+			retry(setupOllama, tries);
 			return;
 		}
 
@@ -211,7 +224,7 @@
 		refresh();       // puis interroger Ollama
 	}
 
-	function setup() {
+	function setup(tries) {
 		let textarea = document.getElementById("annota-prompt");
 		let clearBtn = document.getElementById("annota-prompt-clear");
 		let status = document.getElementById("annota-prompt-status");
@@ -222,13 +235,13 @@
 		let templateArea = document.getElementById("annota-template");
 		let fieldsArea = document.getElementById("annota-fields");
 		if (!textarea || !swatchBox || !triggerGroup || !templateArea || !fieldsArea) {
-			requestAnimationFrame(setup);
+			retry(setup, tries);
 			return;
 		}
 
 		let palette = colors();
 		if (!palette.length) {
-			requestAnimationFrame(setup);
+			retry(setup, tries);
 			return;
 		}
 
@@ -266,10 +279,16 @@
 			refreshSwatches();
 		}
 
+		// Tout le réglage des couleurs tient dans UNE préférence JSON de plusieurs
+		// kilo-octets, et Zotero écrit les préférences sur disque : sauvegarder à
+		// la frappe réécrivait le bloc entier toutes les demi-secondes (Firefox
+		// s'en plaint dans la console). On attend donc une vraie pause de frappe,
+		// la sortie du champ ou le changement de couleur, qui eux forcent
+		// l'enregistrement immédiat.
 		let saveTimer = null;
 		function scheduleSave() {
 			if (saveTimer) clearTimeout(saveTimer);
-			saveTimer = setTimeout(save, 500);
+			saveTimer = setTimeout(save, 2500);
 		}
 		function saveNow() {
 			if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }

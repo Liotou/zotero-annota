@@ -378,9 +378,10 @@ Annota = {
 			// global : handleItem() ne génère que pour les couleurs réglées sur
 			// « auto ». Tout mettre sur « à la demande » désactive l'automatique.
 			if (event !== "add" || type !== "item") return;
+			let t0 = Date.now();
 			for (let id of ids) {
 				// fire-and-forget : ne pas bloquer la transaction Zotero
-				Annota.handleItem(id).catch(e => log("handleItem: " + e));
+				Annota.handleItem(id, t0).catch(e => log("handleItem: " + e));
 			}
 		}
 	},
@@ -391,8 +392,9 @@ Annota = {
 		return types;
 	},
 
-	async handleItem(id) {
+	async handleItem(id, notifiedAt) {
 		if (this.inProgress.has(id)) return;
+		let tEnter = Date.now();
 
 		let item;
 		try {
@@ -459,6 +461,7 @@ Annota = {
 				usedPlaceholder = true;
 			}
 
+			let tBuild = Date.now();
 			let ctx = this.getContext(item);
 			// Valeurs saisies dans le popup de sélection juste avant validation.
 			let fields = this.takePendingFields(text);
@@ -481,8 +484,21 @@ Annota = {
 			let fresh = await Zotero.Items.getAsync(id);
 			if (!fresh) return;
 			fresh.annotationComment = comment;
+			let tSave = Date.now();
 			await fresh.saveTx();
-			log("Comment generated for annotation " + id);
+			tSave = Date.now() - tSave;
+
+			// Relevé complet : c'est la seule façon de distinguer ce qu'Annota
+			// consomme de ce qu'elle attend. « notif » = délai entre l'événement
+			// de création et notre prise en main (Zotero et les autres modules),
+			// « écriture » = durée de la transaction, qui peut être mise en file
+			// derrière d'autres travaux en cours.
+			let t = this._timings || { refs: 0, ai: 0, build: 0 };
+			log("annotation " + id + " — relevé : notif="
+				+ (notifiedAt ? tEnter - notifiedAt : 0) + " ms, prépa="
+				+ (tBuild - tEnter) + " ms, refs=" + t.refs + " ms, ia=" + t.ai
+				+ " ms, écriture=" + tSave + " ms, total Annota="
+				+ (Date.now() - tEnter) + " ms");
 		}
 		catch (e) {
 			log("Generation error: " + e);
@@ -1197,11 +1213,9 @@ Annota = {
 			tAI += Date.now() - t;
 		}
 
-		// Où passe le temps entre la validation et l'affichage du commentaire.
-		// Visible dans Aide → Débogage : « refs » = ouverture du PDF et
+		// Publié pour le relevé de handleItem : « refs » = ouverture du PDF et
 		// résolution des citations, « ia » = attente du modèle.
-		log("temps : refs=" + tRefs + " ms, ia=" + tAI + " ms, total="
-			+ (Date.now() - t0) + " ms");
+		this._timings = { refs: tRefs, ai: tAI, build: Date.now() - t0 };
 
 		let tpl = this.effectiveTemplate(entry);
 		if (!tpl) return ai;
