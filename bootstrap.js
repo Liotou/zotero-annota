@@ -344,6 +344,12 @@ Annota = {
 				text, ctx, color: item.annotationColor, comment: existing, fields
 			});
 			if (comment === null) return;
+			// Un commentaire vide signifie que rien n'a pu être produit (champs
+			// perdus, gabarit sans contenu) : ne pas écraser pour autant.
+			if (!String(comment).trim()) {
+				log("rien à écrire pour l'annotation " + id + " (résultat vide)");
+				return;
+			}
 
 			// Recharger l'item au cas où il aurait changé pendant l'appel réseau.
 			let fresh = await Zotero.Items.getAsync(id);
@@ -1362,12 +1368,40 @@ Annota = {
 	},
 
 	// Valeurs mises de côté pour un passage donné (validité : 10 minutes).
+	// Zotero normalise le texte à l'enregistrement (retours à la ligne, césures,
+	// espaces) : une égalité stricte avec le texte vu au moment de la sélection
+	// échoue presque toujours. On compare donc une forme normalisée, puis un
+	// préfixe, et à défaut on retient une saisie très récente — le geste étant
+	// « je tape puis je clique une couleur » dans la foulée.
+	_normText(t) {
+		return String(t || "")
+			.replace(/[\u00AD]/g, "")          // césures conditionnelles
+			.replace(/-\s*\n\s*/g, "")         // mots coupés en fin de ligne
+			.replace(/\s+/g, " ")
+			.trim()
+			.toLowerCase();
+	},
+
 	takePendingFields(text) {
 		let p = this._pendingFields;
 		if (!p) return null;
-		if (Date.now() - p.ts > 600000) { this._pendingFields = null; return null; }
-		if (p.text !== String(text || "").trim()) return null;
+		let age = Date.now() - p.ts;
+		if (age > 600000) { this._pendingFields = null; return null; }
+
+		let a = this._normText(p.text), b = this._normText(text);
+		let how = "";
+		if (a && b && a === b) how = "texte identique";
+		else if (a && b && (a.startsWith(b.slice(0, 40)) || b.startsWith(a.slice(0, 40)))) {
+			how = "préfixe commun";
+		}
+		else if (age < 60000) how = "saisie récente (" + Math.round(age / 1000) + " s)";
+
+		if (!how) {
+			log("champs en attente non appliqués : le passage ne correspond pas");
+			return null;
+		}
 		this._pendingFields = null;      // consommé une seule fois
+		log("champs appliqués (" + how + ")");
 		return p.values;
 	},
 
@@ -1410,9 +1444,18 @@ Annota = {
 		let prev = (this._pendingFields && this._pendingFields.text === text)
 			? this._pendingFields.values : {};
 
+		// Pas de largeur imposée : le formulaire épouse le popup. Un min-width
+		// débordait du cadre, les champs sortaient de la fenêtre.
 		let wrap = doc.createElement("div");
-		wrap.style.cssText =
-			"display:flex;flex-direction:column;gap:3px;padding:4px 2px;min-width:220px;";
+		wrap.style.cssText = "display:flex;flex-direction:column;gap:6px;"
+			+ "width:100%;max-width:100%;box-sizing:border-box;padding:2px 0;";
+
+		// Style commun, aligné sur le thème du lecteur (couleurs héritées).
+		const FIELD_CSS = "width:100%;max-width:100%;box-sizing:border-box;"
+			+ "font:inherit;font-size:12px;line-height:1.3;padding:4px 6px;"
+			+ "border:1px solid rgba(128,128,128,.45);border-radius:4px;"
+			+ "background:rgba(128,128,128,.12);color:inherit;outline:none;";
+		const LABEL_CSS = "font-size:11px;opacity:.65;";
 
 		let inputs = {};
 		let sync = () => {
@@ -1430,46 +1473,58 @@ Annota = {
 
 		for (let f of schema) {
 			let row = doc.createElement("div");
-			row.style.cssText = "display:flex;flex-direction:column;gap:1px;";
 			let lab = doc.createElement("label");
 			lab.textContent = f.label;
-			lab.style.cssText = "font-size:10px;opacity:.75;";
 			let el;
-			if (f.type === "textarea") {
-				el = doc.createElement("textarea");
-				el.rows = 2;
-			}
-			else if (f.type === "check") {
+
+			if (f.type === "check") {
+				// Case à cocher : libellé à droite, sur une seule ligne.
+				row.style.cssText = "display:flex;align-items:center;gap:6px;width:100%;";
 				el = doc.createElement("input");
 				el.type = "checkbox";
+				el.style.cssText = "margin:0;flex:none;";
 				if (prev[f.name]) el.checked = true;
-			}
-			else if (f.type === "select") {
-				el = doc.createElement("select");
-				for (let o of [""].concat(f.options)) {
-					let opt = doc.createElement("option");
-					opt.value = o;
-					opt.textContent = o || "—";
-					el.appendChild(opt);
-				}
+				lab.style.cssText = "font-size:12px;opacity:.85;";
+				row.appendChild(el);
+				row.appendChild(lab);
 			}
 			else {
-				el = doc.createElement("input");
-				el.type = "text";
+				row.style.cssText = "display:flex;flex-direction:column;gap:2px;width:100%;";
+				lab.style.cssText = LABEL_CSS;
+				if (f.type === "textarea") {
+					el = doc.createElement("textarea");
+					el.rows = 2;
+					el.style.cssText = FIELD_CSS + "resize:vertical;min-height:38px;";
+				}
+				else if (f.type === "select") {
+					el = doc.createElement("select");
+					for (let o of [""].concat(f.options)) {
+						let opt = doc.createElement("option");
+						opt.value = o;
+						opt.textContent = o || "—";
+						el.appendChild(opt);
+					}
+					el.style.cssText = FIELD_CSS;
+				}
+				else {
+					el = doc.createElement("input");
+					el.type = "text";
+					el.style.cssText = FIELD_CSS;
+				}
+				if (prev[f.name] !== undefined) el.value = prev[f.name];
+				row.appendChild(lab);
+				row.appendChild(el);
 			}
-			if (f.type !== "check" && prev[f.name] !== undefined) el.value = prev[f.name];
-			el.style.cssText = "font-size:11px;width:100%;box-sizing:border-box;";
+
 			el.addEventListener("input", sync);
 			el.addEventListener("change", sync);
 			inputs[f.name] = { el, type: f.type };
-			row.appendChild(lab);
-			row.appendChild(el);
 			wrap.appendChild(row);
 		}
 
 		let hint = doc.createElement("div");
-		hint.textContent = "Pick a highlight color to save";
-		hint.style.cssText = "font-size:10px;opacity:.6;margin-top:2px;";
+		hint.textContent = "↑ pick a color to save";
+		hint.style.cssText = "font-size:10px;opacity:.5;text-align:center;";
 		wrap.appendChild(hint);
 
 		sync();                       // conserver même sans frappe
