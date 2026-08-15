@@ -52,6 +52,90 @@ Two modes:
 
 
 --------------------------------------------------------------------------------
+0. ACADEMIC NOTE — FIELD VERSION (recommended)
+--------------------------------------------------------------------------------
+
+Same result as #1, but built on FIELDS instead of one free-form answer. Paste
+this in the "What goes in the comment" box:
+
+titre      | Titre      | text     | bold
+paraphrase | Paraphrase | textarea
+reference  | Référence  | text     | italic
+
+...and this in the prompt box:
+
+Tu transformes un passage surligné d'un article académique en une note de
+lecture structurée. Réponds en {{language}}.
+
+Le contexte joint (titre, auteurs, année, résumé) décrit l'article que je suis en
+train de lire. Il sert à comprendre le passage : ne le cite jamais comme source.
+
+Le bloc « Works cited in the passage » contient les entrées bibliographiques
+résolues depuis la bibliographie de l'article. C'est ta seule source pour nommer
+les auteurs cités. Il peut être vide, incomplet, ou contenir une entrée sans
+rapport : ne t'en sers que pour les appels de citation réellement présents dans
+le passage surligné.
+
+CHAMP titre
+- 3 à 8 mots. Nomme l'idée centrale du passage surligné.
+- Ne recopie pas le titre de l'article : ce n'est pas ce qui est demandé.
+- Formulation directe. Pas de sous-titre après deux-points, pas de question,
+  pas de formule d'accroche.
+- Se termine par un point.
+
+CHAMP paraphrase
+- Reformule le passage avec tes propres mots : 2 à 5 phrases,
+  {{maxWords}} mots maximum.
+- Fidèle au sens, sans ajout d'information, sans jugement, sans reprise
+  littérale de plus de quelques mots consécutifs.
+- N'y fais figurer aucun appel de citation, ni numéro, ni parenthèse d'auteur :
+  les sources vont uniquement dans le champ reference.
+
+CHAMP reference
+- Ne le renseigne QUE si le passage surligné contient lui-même un appel de
+  citation. Deux formes possibles :
+  · nominale — « (Moulin, 1999) », « Moulin et al. (2009) » ;
+  · numérique — « [1] », « [2, 5] », « [3-6] ».
+  Sinon, laisse-le entièrement vide — pas de parenthèses vides, pas de « aucune ».
+- Format attendu : (Auteur et Auteur2, année, p. XX ; Auteur3, année)
+- Le résultat est TOUJOURS en auteur-année. Ne laisse jamais un numéro : « [1] »
+  doit devenir « (Dyllick et Hockerts, 2002) » en utilisant l'entrée
+  correspondante du bloc des références.
+- Noms d'auteurs :
+  · appel nominal → reproduis les noms tels qu'ils apparaissent dans le passage
+    (« Moulin et Jones », « Moulin et al. ») ;
+  · appel numérique → prends les noms de famille dans l'entrée résolue :
+    un auteur « Dyllick » ; deux auteurs « Dyllick et Hockerts » ;
+    trois ou plus « Dyllick et al. ». Jamais les prénoms ni les initiales.
+- Sépare les références par « ; », dans leur ordre d'apparition dans le passage.
+- Si un appel de citation n'a aucune entrée correspondante, omets-le simplement.
+  N'écris jamais « [1] » ni « (auteur inconnu) ». Si aucun appel n'est
+  résolvable, laisse le champ vide.
+- Numéro de page : ne l'ajoute que s'il figure DANS LE PASSAGE, immédiatement
+  après l'année, sous la forme « , p. 93 » ou « , pp. 12-15 ».
+  · Conserve la forme (p. / pp. / plage) telle qu'écrite, MAIS écris toujours
+    une espace entre « p. » et le chiffre : « p.93 » devient « p. 93 ».
+  · Cette page est celle indiquée dans la citation contenue dans le passage.
+    N'utilise jamais la page de l'article que je suis en train de lire.
+  · N'extrais JAMAIS de numéro de page du bloc des références : la pagination
+    qui y figure (« 11(2), 130-141 ») est celle de la revue, pas une page citée.
+- N'invente jamais de référence, d'année ni de page.
+
+Aucune balise HTML, aucun Markdown, aucun guillemet autour des valeurs : écris
+le texte nu, la mise en forme est appliquée ensuite.
+
+Why this beats #1:
+  * The markup is declared once in the fields, not begged for in the prompt —
+    the model returns plain text and cannot break the formatting.
+  * The reference line disappears on its own when the field comes back empty:
+    a line whose variables are all empty is dropped. No more "omit the line".
+  * You can fill any field by hand in the selection popup. What you type is
+    never rewritten — the model only fills the blanks, and if you fill them all,
+    no request is sent at all.
+  * No layout needed: one line per field, in the declared order.
+
+
+--------------------------------------------------------------------------------
 1. ACADEMIC NOTE
 --------------------------------------------------------------------------------
 

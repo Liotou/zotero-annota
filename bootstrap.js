@@ -897,6 +897,15 @@ Annota = {
 			let max = parseInt(getPref("maxRefs", 8), 10) || 8;
 			let markers = this.detectCitationMarkers(text);
 
+			// Aucun appel de citation dans le passage : il n'y a rien à résoudre.
+			// Ce contrôle purement textuel est immédiat, alors que la suite ouvre
+			// le PDF et parcourt ses liens — plusieurs secondes sur un gros
+			// document. La grande majorité des passages ne cite personne.
+			if (!markers.numbers.length && !markers.authorYears.length) {
+				log("aucun appel de citation dans le passage : références ignorées");
+				return [];
+			}
+
 			// 1. Voie sûre : suivre les liens du PDF.
 			let linked = await this.getLinkedReferences(item);
 			if (linked.length) {
@@ -910,8 +919,7 @@ Annota = {
 				}));
 			}
 
-			// 2. Repli : détecter les appels et chercher dans la bibliographie.
-			if (!markers.numbers.length && !markers.authorYears.length) return [];
+			// 2. Repli : chercher les appels détectés dans la bibliographie.
 			let fullText = await this.getAttachmentFullText(item);
 			if (!fullText) return [];
 			let bib = this.findBibliographySection(fullText);
@@ -1122,10 +1130,15 @@ Annota = {
 		//    liens internes, soit plusieurs secondes sur un gros document. On ne
 		//    la déclenche donc que si quelque chose s'en sert réellement — un
 		//    commentaire monté à la main n'a rien à attendre.
+		let t0 = Date.now(), tRefs = 0, tAI = 0;
 		if (getRefs && !ctx.references) {
 			let tplWantsRefs = /\{\{\s*references\s*\}\}/.test(this.effectiveTemplate(entry));
 			let promptWantsRefs = this.willCallProvider(entry, values);
-			if (tplWantsRefs || promptWantsRefs) ctx.references = await getRefs();
+			if (tplWantsRefs || promptWantsRefs) {
+				let t = Date.now();
+				ctx.references = await getRefs();
+				tRefs = Date.now() - t;
+			}
 		}
 
 		// 1. Champs de type « ai » : chacun a sa propre consigne et ne concerne
@@ -1135,9 +1148,11 @@ Annota = {
 			if (f.type !== "ai" || !f.prompt.trim()) continue;
 			if (String(values[f.name] || "").trim()) continue;
 			try {
+				let t = Date.now();
 				values[f.name] = await this.generateComment({
 					text, ctx, color, comment, fields: values, promptOverride: f.prompt
 				});
+				tAI += Date.now() - t;
 			}
 			catch (e) {
 				log("champ IA « " + f.name + " » : " + e);
@@ -1154,11 +1169,13 @@ Annota = {
 			let toFill = this.fieldsToFill(schema, values);
 			if (toFill.length) {
 				try {
+					let t = Date.now();
 					let reply = await this.generateComment({
 						text, ctx, color, comment, fields: values,
 						promptOverride: entry.prompt + "\n"
 							+ this.buildFieldInstruction(toFill, schema, values)
 					});
+					tAI += Date.now() - t;
 					Object.assign(values, this.parseFieldReply(reply, toFill));
 				}
 				catch (e) {
@@ -1175,8 +1192,16 @@ Annota = {
 		let ai = "";
 		if (this.entryNeedsAI(entry)) {
 			if (!entry.prompt.trim()) return null;   // rien à demander au modèle
+			let t = Date.now();
 			ai = await this.generateComment({ text, ctx, color, comment, fields: values });
+			tAI += Date.now() - t;
 		}
+
+		// Où passe le temps entre la validation et l'affichage du commentaire.
+		// Visible dans Aide → Débogage : « refs » = ouverture du PDF et
+		// résolution des citations, « ia » = attente du modèle.
+		log("temps : refs=" + tRefs + " ms, ia=" + tAI + " ms, total="
+			+ (Date.now() - t0) + " ms");
 
 		let tpl = this.effectiveTemplate(entry);
 		if (!tpl) return ai;
