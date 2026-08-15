@@ -422,6 +422,10 @@ Annota = {
 				+ " sans prompt, gabarit ni champs");
 			return;
 		}
+		// Sert de couleur par défaut au prochain formulaire de sélection : on
+		// surligne rarement une seule fois dans la même couleur.
+		this._lastColor = item.annotationColor;
+
 		// Un formulaire rempli dans le popup de sélection VAUT demande explicite :
 		// on exécute même sur une couleur réglée sur « à la demande », sinon la
 		// saisie serait silencieusement perdue à la validation.
@@ -1644,14 +1648,17 @@ Annota = {
 	// champs, puis on valide en choisissant une couleur de surlignage dans le
 	// popup de Zotero ; l'annotation créée récupère les valeurs.
 	//
-	// La couleur n'étant pas connue au moment de la saisie, on affiche l'union
-	// des champs déclarés par les couleurs, et seuls ceux de la couleur
-	// finalement retenue sont utilisés à la création.
+	// Cliquer une pastille CRÉE l'annotation : il n'existe pas d'étape « choisir
+	// la couleur puis valider ». On n'affiche donc pas la couleur retenue, on
+	// affiche celle que vous vous apprêtez à cliquer — le survol des pastilles
+	// de Zotero pilote le groupe de champs. À défaut, nos propres pastilles.
 
 	_selectionListener: null,
-	_pendingFields: null,          // { text, values, ts }
+	_pendingFields: null,          // { text, values, ts, color }
+	_lastColor: null,              // dernière couleur réellement traitée
 
 	// Union des champs de toutes les couleurs, dédoublonnée par nom.
+	// Conservée comme repli quand aucune couleur n'est désignable.
 	allFieldsSchema() {
 		let seen = new Set(), out = [];
 		for (let c of this.COLORS) {
@@ -1662,6 +1669,52 @@ Annota = {
 			}
 		}
 		return out;
+	},
+
+	// Champs saisissables d'une couleur (les champs « ai » sont écrits par le
+	// modèle, jamais par vous).
+	visibleFieldsFor(hex) {
+		return this.fieldsForColor(hex).filter(f => f.type !== "ai");
+	},
+
+	// Couleurs ayant au moins un champ à saisir.
+	colorsWithFields() {
+		return this.COLORS.filter(c => this.visibleFieldsFor(c.hex).length);
+	},
+
+	// Groupe affiché tant qu'aucune pastille n'a été désignée : la dernière
+	// couleur utilisée, parce qu'on surligne rarement une seule fois.
+	defaultFieldColor() {
+		let withFields = this.colorsWithFields();
+		if (!withFields.length) return null;
+		if (this._lastColor && withFields.some(c => c.hex === this._lastColor)) {
+			return this._lastColor;
+		}
+		return withFields[0].hex;
+	},
+
+	// Pastilles du popup de Zotero. selection-popup.js les rend dans
+	// « .colors > .color-button », au même index que ANNOTATION_COLORS — donc au
+	// même index que Zotero.Annotations.COLORS, d'où notre propre liste. Nos
+	// champs étant injectés dans ce popup (CustomSections), on remonte jusqu'à
+	// lui. Un nombre de boutons inattendu = version qu'on ne sait pas lire :
+	// on renvoie null plutôt que d'associer des couleurs au hasard.
+	readerColorButtons(node) {
+		try {
+			let root = node && node.parentNode;
+			while (root && !(root.classList
+					&& root.classList.contains && root.classList.contains("selection-popup"))) {
+				root = root.parentNode;
+			}
+			if (!root || typeof root.querySelectorAll !== "function") return null;
+			let btns = Array.prototype.slice.call(
+				root.querySelectorAll(".colors .color-button"));
+			return btns.length === this.COLORS.length ? btns : null;
+		}
+		catch (e) {
+			log("readerColorButtons: " + e);
+			return null;
+		}
 	},
 
 	// Valeurs mises de côté pour un passage donné (validité : 10 minutes).
@@ -1767,15 +1820,19 @@ Annota = {
 	},
 
 	_renderSelectionForm({ doc, params, append }) {
-		let schema = this.allFieldsSchema();
-		if (!schema.length || !doc || !append) return;
+		if (!doc || !append) return;
+		let colors = this.colorsWithFields();
+		if (!colors.length) return;
 		let text = String((params && params.annotation && params.annotation.text) || "").trim();
 		if (!text) return;
 
-		// Réafficher les valeurs déjà saisies pour ce passage (le popup peut
-		// être re-rendu pendant la sélection).
-		let prev = (this._pendingFields && this._pendingFields.text === text)
-			? this._pendingFields.values : {};
+		// Le popup peut être re-rendu pendant la sélection, et l'on passe d'un
+		// groupe à l'autre : les valeurs déjà tapées survivent aux deux.
+		let values = (this._pendingFields && this._pendingFields.text === text)
+			? Object.assign({}, this._pendingFields.values) : {};
+		let current = (this._pendingFields && this._pendingFields.text === text
+				&& this._pendingFields.color)
+			? this._pendingFields.color : this.defaultFieldColor();
 
 		// Pas de largeur imposée : le formulaire épouse le popup. Un min-width
 		// débordait du cadre, les champs sortaient de la fenêtre.
@@ -1797,80 +1854,133 @@ Annota = {
 			+ "background:rgba(128,128,128,.12);color:inherit;outline:none;";
 		const LABEL_CSS = "font-size:11px;opacity:.65;";
 
-		let inputs = {};
-		let sync = () => {
-			let values = {};
-			for (let name of Object.keys(inputs)) {
-				let { el, type } = inputs[name];
-				values[name] = (type === "check")
-					? (el.checked ? "true" : "")
-					: String(el.value || "");
-			}
-			// Mémorisé au fil de la frappe : la validation se fait ensuite en
-			// cliquant une couleur dans le popup de Zotero.
-			this._pendingFields = { text, values, ts: Date.now() };
-		};
-
-		for (let f of schema) {
-			if (f.type === "ai") continue;   // rempli par le modèle, pas par vous
-			let row = doc.createElement("div");
-			let lab = doc.createElement("label");
-			lab.textContent = f.label;
-			let el;
-
-			if (f.type === "check") {
-				// Case à cocher : libellé à droite, sur une seule ligne.
-				row.style.cssText = "display:flex;align-items:center;gap:6px;width:100%;";
-				el = doc.createElement("input");
-				el.type = "checkbox";
-				el.style.cssText = "margin:0;flex:none;";
-				if (prev[f.name]) el.checked = true;
-				lab.style.cssText = "font-size:12px;opacity:.85;";
-				row.appendChild(el);
-				row.appendChild(lab);
-			}
-			else {
-				row.style.cssText = "display:flex;flex-direction:column;gap:2px;width:100%;";
-				lab.style.cssText = LABEL_CSS;
-				if (f.type === "textarea") {
-					el = doc.createElement("textarea");
-					el.rows = 2;
-					el.style.cssText = FIELD_CSS + "resize:vertical;min-height:38px;";
-				}
-				else if (f.type === "select") {
-					el = doc.createElement("select");
-					for (let o of [""].concat(f.options)) {
-						let opt = doc.createElement("option");
-						opt.value = o;
-						opt.textContent = o || "—";
-						el.appendChild(opt);
-					}
-					el.style.cssText = FIELD_CSS;
-				}
-				else {
-					el = doc.createElement("input");
-					el.type = "text";
-					el.style.cssText = FIELD_CSS;
-				}
-				if (prev[f.name] !== undefined) el.value = prev[f.name];
-				row.appendChild(lab);
-				row.appendChild(el);
-			}
-
-			this._shieldFromReaderShortcuts(el, f.type);
-			el.addEventListener("input", sync);
-			el.addEventListener("change", sync);
-			inputs[f.name] = { el, type: f.type };
-			wrap.appendChild(row);
-		}
-
+		let picker = doc.createElement("div");     // repli : nos propres pastilles
+		picker.style.cssText = "display:none;align-items:center;gap:4px;"
+			+ "flex-wrap:wrap;width:100%;";
+		let body = doc.createElement("div");       // groupe de champs courant
+		body.style.cssText = "display:flex;flex-direction:column;gap:6px;width:100%;";
 		let hint = doc.createElement("div");
-		hint.textContent = "↑ pick a color to save";
-		hint.style.cssText = "font-size:10px;opacity:.5;text-align:center;";
+		hint.style.cssText = "font-size:10px;opacity:.55;text-align:center;";
+		wrap.appendChild(picker);
+		wrap.appendChild(body);
 		wrap.appendChild(hint);
 
-		sync();                       // conserver même sans frappe
+		const colorName = (hex) => {
+			let c = this.COLORS.find(x => x.hex === hex);
+			return c ? c.name : hex;
+		};
+
+		// Mémorisé au fil de la frappe : la validation se fait ensuite en
+		// cliquant une couleur dans le popup de Zotero.
+		const sync = () => {
+			this._pendingFields = { text, values, ts: Date.now(), color: current };
+		};
+
+		const renderGroup = (hex) => {
+			current = hex;
+			body.textContent = "";
+			for (let f of this.visibleFieldsFor(hex)) {
+				let row = doc.createElement("div");
+				let lab = doc.createElement("label");
+				lab.textContent = f.label;
+				let el;
+
+				if (f.type === "check") {
+					// Case à cocher : libellé à droite, sur une seule ligne.
+					row.style.cssText = "display:flex;align-items:center;gap:6px;width:100%;";
+					el = doc.createElement("input");
+					el.type = "checkbox";
+					el.style.cssText = "margin:0;flex:none;";
+					if (values[f.name]) el.checked = true;
+					lab.style.cssText = "font-size:12px;opacity:.85;";
+					row.appendChild(el);
+					row.appendChild(lab);
+				}
+				else {
+					row.style.cssText = "display:flex;flex-direction:column;gap:2px;width:100%;";
+					lab.style.cssText = LABEL_CSS;
+					if (f.type === "textarea") {
+						el = doc.createElement("textarea");
+						el.rows = 2;
+						el.style.cssText = FIELD_CSS + "resize:vertical;min-height:38px;";
+					}
+					else if (f.type === "select") {
+						el = doc.createElement("select");
+						for (let o of [""].concat(f.options)) {
+							let opt = doc.createElement("option");
+							opt.value = o;
+							opt.textContent = o || "—";
+							el.appendChild(opt);
+						}
+						el.style.cssText = FIELD_CSS;
+					}
+					else {
+						el = doc.createElement("input");
+						el.type = "text";
+						el.style.cssText = FIELD_CSS;
+					}
+					if (values[f.name] !== undefined) el.value = values[f.name];
+					row.appendChild(lab);
+					row.appendChild(el);
+				}
+
+				this._shieldFromReaderShortcuts(el, f.type);
+				// Chaque champ écrit dans le tampon commun : ce qui est tapé pour
+				// une couleur n'est pas perdu si l'on regarde une autre.
+				let read = (f.type === "check")
+					? () => (el.checked ? "true" : "")
+					: () => String(el.value || "");
+				let onEdit = () => { values[f.name] = read(); sync(); };
+				el.addEventListener("input", onEdit);
+				el.addEventListener("change", onEdit);
+				body.appendChild(row);
+			}
+			hint.textContent = colorName(hex) + " — click a color to save";
+			sync();
+		};
+
 		append(wrap);
+
+		// Voie normale : le survol des pastilles de Zotero désigne la couleur.
+		// Aucun clic supplémentaire — le geste reste « je survole, je tape, je
+		// clique ». Le clic, lui, appartient à Zotero : il crée l'annotation.
+		let btns = this.readerColorButtons(wrap);
+		if (btns) {
+			this.COLORS.forEach((c, i) => {
+				let btn = btns[i];
+				if (!btn || !this.visibleFieldsFor(c.hex).length) return;
+				let show = () => { if (current !== c.hex) renderGroup(c.hex); };
+				btn.addEventListener("mouseenter", show);
+				btn.addEventListener("focus", show);   // navigation au clavier
+			});
+			log("groupes de champs pilotés par les pastilles du lecteur");
+		}
+		else {
+			// Repli : structure du popup non reconnue. Plutôt que de deviner,
+			// on affiche nos propres pastilles.
+			picker.style.display = "flex";
+			let lab = doc.createElement("span");
+			lab.textContent = "Fields:";
+			lab.style.cssText = "font-size:11px;opacity:.6;";
+			picker.appendChild(lab);
+			for (let c of colors) {
+				let sw = doc.createElement("button");
+				sw.type = "button";
+				sw.title = c.name;
+				sw.style.cssText = "width:14px;height:14px;padding:0;flex:none;"
+					+ "border-radius:50%;border:1px solid rgba(128,128,128,.5);"
+					+ "cursor:pointer;background:" + c.hex + ";";
+				sw.addEventListener("click", (e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					renderGroup(c.hex);
+				});
+				picker.appendChild(sw);
+			}
+			log("pastilles du lecteur non reconnues : sélecteur de repli affiché");
+		}
+
+		renderGroup(current);
 	},
 
 	// ---- Menu contextuel des annotations du lecteur ----

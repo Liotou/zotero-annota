@@ -174,10 +174,21 @@ are reserved and silently ignored if reused, so a field can never shadow
 A layout is only for departing from that default — putting two fields on one
 line, adding fixed text, or switching to a single free-form answer with `{{ai}}`.
 
-Because the color isn't known while you type, the popup shows the **union** of
-the fields declared across colors; only the fields of the color you finally pick
-are applied. Values are used once, for the annotation you just created — they are
-not stored afterwards.
+**Fields are grouped by color.** Clicking a color swatch *creates* the annotation
+outright — there is no "pick a color, then confirm" step — so the popup shows the
+fields of the color you are **about to** click: hover a swatch and its group
+replaces the previous one. No extra click; the gesture stays hover, type, click.
+
+Until you hover anything, the popup shows the **last color you used**, since one
+rarely highlights just once. A color with no fields is skipped. What you type is
+kept when you switch groups, so looking at another color costs you nothing.
+
+If the reader's popup structure isn't recognised (a Zotero version whose markup
+differs), Annota shows **its own row of swatches** instead of guessing which
+button is which color.
+
+Values are used once, for the annotation you just created — they are not stored
+afterwards. Only the fields of the color you finally pick are applied.
 
 #### Comment layout — mixing AI output with deterministic text
 
