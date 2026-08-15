@@ -256,9 +256,40 @@ Annota = {
 		return this.parseFieldSchema(entry && entry.fields).some(f => f.type === "ai");
 	},
 
+	// Le prompt de la couleur sert-il à RENSEIGNER LES CHAMPS ?
+	// C'est le cas dès qu'une couleur a des champs et un prompt sans que la
+	// disposition réclame {{ai}} : la réponse du modèle n'est alors pas un
+	// commentaire libre, elle est contrainte aux champs déclarés.
+	entryFillsFields(entry) {
+		if (!entry || !String(entry.prompt || "").trim()) return false;
+		if (this.entryNeedsAI(entry)) return false;   // la réponse EST le commentaire
+		return this.parseFieldSchema(entry.fields).some(f => f.type !== "ai");
+	},
+
+	// Champs que le modèle doit renseigner : ceux restés vides. Les champs
+	// « ai » ont leur propre consigne et sont traités à part.
+	fieldsToFill(schema, values) {
+		return schema.filter(f => f.type !== "ai"
+			&& !String((values && values[f.name]) || "").trim());
+	},
+
 	// Le fournisseur est-il sollicité, à un titre ou à un autre ?
 	entryUsesProvider(entry) {
-		return this.entryNeedsAI(entry) || this.entryHasAIFields(entry);
+		return this.entryNeedsAI(entry) || this.entryHasAIFields(entry)
+			|| this.entryFillsFields(entry);
+	},
+
+	// Sera-t-il sollicité POUR CETTE annotation ? entryUsesProvider décrit la
+	// couleur en général ; ici on tient compte de ce qui a déjà été saisi, car
+	// un formulaire entièrement rempli ne laisse rien à demander au modèle.
+	willCallProvider(entry, values) {
+		if (!entry) return false;
+		if (this.entryNeedsAI(entry)) return true;
+		let schema = this.parseFieldSchema(entry.fields);
+		if (schema.some(f => f.type === "ai" && f.prompt.trim()
+				&& !String((values && values[f.name]) || "").trim())) return true;
+		return this.entryFillsFields(entry)
+			&& this.fieldsToFill(schema, values).length > 0;
 	},
 
 	// Prompt configuré pour cette couleur, ou "" si la couleur n'en a pas.
@@ -406,9 +437,12 @@ Annota = {
 		let overwrite = getPref("overwrite", false);
 		if (existing && !overwrite) return;
 
-		// Un gabarit purement déterministe (sans {{ai}}) n'appelle aucun modèle :
-		// inutile d'exiger une clé API ou le CLI dans ce cas.
-		if (this.entryUsesProvider(entry)) {
+		// Un commentaire monté à la main n'appelle aucun modèle : inutile
+		// d'exiger une clé API ou le CLI dans ce cas. On raisonne sur CETTE
+		// annotation (willCallProvider), pas sur la couleur en général, car un
+		// formulaire entièrement rempli ne laisse rien à demander.
+		let callsProvider = this.willCallProvider(entry, pending);
+		if (callsProvider) {
 			let notReady = this.providerReadyError();
 			if (notReady) {
 				toast("Annota", notReady, "error");
@@ -419,18 +453,21 @@ Annota = {
 		this.inProgress.add(id);
 		let usedPlaceholder = false;
 		try {
-			if (getPref("showPlaceholder", true) && this.entryUsesProvider(entry)) {
+			if (getPref("showPlaceholder", true) && callsProvider) {
 				item.annotationComment = PLACEHOLDER;
 				await item.saveTx();
 				usedPlaceholder = true;
 			}
 
 			let ctx = this.getContext(item);
-			ctx.references = await this.getReferences(item, text);
 			// Valeurs saisies dans le popup de sélection juste avant validation.
 			let fields = this.takePendingFields(text);
+			// Résolution des références différée : buildComment ne l'appelle que
+			// si le commentaire ou le modèle s'en sert. Elle ouvre le PDF et en
+			// parcourt les liens, ce qui se paie en secondes.
 			let comment = await this.buildComment({
-				text, ctx, color: item.annotationColor, comment: existing, fields
+				text, ctx, color: item.annotationColor, comment: existing, fields,
+				getRefs: () => this.getReferences(item, text)
 			});
 			if (comment === null) return;
 			// Un commentaire vide signifie que rien n'a pu être produit (champs
@@ -972,6 +1009,78 @@ Annota = {
 		return { system: this.substitute(tpl, vars), user: parts.join("\n\n") };
 	},
 
+	// Consigne ajoutée au prompt de la couleur pour que la réponse épouse
+	// EXACTEMENT les champs déclarés : le modèle ne rédige pas un commentaire
+	// libre, il renseigne les champs restés vides, un par ligne. C'est ce qui
+	// rend le prompt dépendant des champs définis plus haut.
+	buildFieldInstruction(toFill, schema, values) {
+		let lines = [
+			"",
+			"Fill in the fields listed below, and nothing else. Answer with one"
+				+ " line per field, in the form `name: value`, using exactly these"
+				+ " names. No preamble, no bullet points, no extra field.",
+			""
+		];
+		for (let f of toFill) {
+			let d = "- " + f.name + " (" + f.label + ")";
+			if (f.type === "select" && f.options.length) {
+				d += " — choose exactly one of: " + f.options.join(", ");
+			}
+			else if (f.type === "check") d += " — answer true or false";
+			else if (f.type === "textarea") d += " — may span several lines";
+			lines.push(d);
+		}
+		// Ce que l'utilisateur a déjà écrit sert de contexte, jamais de cible :
+		// sa saisie ne doit pas être réécrite.
+		let given = schema.filter(f => !toFill.includes(f)
+			&& String((values && values[f.name]) || "").trim());
+		if (given.length) {
+			lines.push("", "The user already filled in these fields. Do not repeat"
+				+ " them and do not rewrite them — use them as context:");
+			for (let f of given) {
+				lines.push("- " + f.name + " (" + f.label + "): " + values[f.name]);
+			}
+		}
+		return lines.join("\n");
+	},
+
+	// Relit une réponse « nom: valeur ». Tolère les puces, le gras Markdown et
+	// les valeurs sur plusieurs lignes (une ligne sans marqueur prolonge le
+	// champ courant). Seuls les champs demandés sont retenus.
+	parseFieldReply(reply, toFill) {
+		let names = toFill.map(f => f.name);
+		let byName = {};
+		for (let f of toFill) byName[f.name] = f;
+
+		let out = {}, current = null;
+		for (let raw of String(reply || "").split("\n")) {
+			let m = raw.match(/^\s*(?:[-*]\s*)?\**\s*(\w+)\s*\**\s*:\s*(.*)$/);
+			if (m && names.includes(m[1])) {
+				current = m[1];
+				out[current] = m[2].trim();
+				continue;
+			}
+			if (current !== null && raw.trim()) {
+				out[current] += (out[current] ? "\n" : "") + raw.trim();
+			}
+		}
+
+		// Un seul champ demandé et aucun marqueur reconnu : toute la réponse
+		// lui revient, plutôt que de perdre une réponse parfaitement utilisable.
+		if (!Object.keys(out).length && names.length === 1) {
+			out[names[0]] = String(reply || "").trim();
+		}
+
+		for (let k of Object.keys(out)) {
+			let v = out[k].trim().replace(/^["«»\s]+|["«»\s]+$/g, "");
+			if (byName[k].type === "check") {
+				v = /^(true|yes|oui|1|x)$/i.test(v) ? "true" : "";
+			}
+			out[k] = v;
+		}
+		return out;
+	},
+
 	async generateComment({ text, ctx, color, comment, fields, promptOverride }) {
 		let prompt = this.buildPrompt({ text, ctx, color, comment, fields, promptOverride });
 		let p = this.provider();
@@ -1001,18 +1110,30 @@ Annota = {
 	// Produit le commentaire final d'une annotation : réponse de l'IA seule, ou
 	// gabarit mêlant cette réponse ({{ai}}) et des entrées déterministes.
 	// Renvoie null si la couleur n'a rien à produire.
-	async buildComment({ text, ctx, color, comment, fields }) {
+	async buildComment({ text, ctx, color, comment, fields, getRefs }) {
 		let entry = this.getColorEntry(color);
 		if (!entry) return null;
 
+		ctx = ctx || {};
 		let schema = this.parseFieldSchema(entry.fields);
 		let values = Object.assign({}, fields || {});
+
+		// 0. Références citées : leur résolution ouvre le PDF et parcourt ses
+		//    liens internes, soit plusieurs secondes sur un gros document. On ne
+		//    la déclenche donc que si quelque chose s'en sert réellement — un
+		//    commentaire monté à la main n'a rien à attendre.
+		if (getRefs && !ctx.references) {
+			let tplWantsRefs = /\{\{\s*references\s*\}\}/.test(this.effectiveTemplate(entry));
+			let promptWantsRefs = this.willCallProvider(entry, values);
+			if (tplWantsRefs || promptWantsRefs) ctx.references = await getRefs();
+		}
 
 		// 1. Champs de type « ai » : chacun a sa propre consigne et ne concerne
 		//    que lui. Les champs saisis à la main sont déjà disponibles pour
 		//    servir de contexte à ces consignes.
 		for (let f of schema) {
 			if (f.type !== "ai" || !f.prompt.trim()) continue;
+			if (String(values[f.name] || "").trim()) continue;
 			try {
 				values[f.name] = await this.generateComment({
 					text, ctx, color, comment, fields: values, promptOverride: f.prompt
@@ -1024,7 +1145,30 @@ Annota = {
 			}
 		}
 
-		// 2. Réponse d'IA pour le commentaire ENTIER : uniquement si la
+		// 2. Le prompt de la couleur renseigne les champs restés vides — et eux
+		//    seuls. C'est le lien entre les deux réglages : la réponse est
+		//    contrainte aux champs déclarés, pas un commentaire libre. Ce que
+		//    vous avez tapé à la main n'est jamais réécrit ; si vous avez tout
+		//    rempli, aucun appel n'est fait.
+		if (this.entryFillsFields(entry)) {
+			let toFill = this.fieldsToFill(schema, values);
+			if (toFill.length) {
+				try {
+					let reply = await this.generateComment({
+						text, ctx, color, comment, fields: values,
+						promptOverride: entry.prompt + "\n"
+							+ this.buildFieldInstruction(toFill, schema, values)
+					});
+					Object.assign(values, this.parseFieldReply(reply, toFill));
+				}
+				catch (e) {
+					log("remplissage des champs par l'IA : " + e);
+					throw e;
+				}
+			}
+		}
+
+		// 3. Réponse d'IA pour le commentaire ENTIER : uniquement si la
 		//    disposition la réclame ({{ai}}) ou s'il n'y a ni champs ni gabarit.
 		//    Une couleur dotée de champs se passe donc du modèle par défaut,
 		//    même si un prompt est encore renseigné.
@@ -1417,7 +1561,6 @@ Annota = {
 			try {
 				let annText = (ann.annotationText || "").trim();
 				let ctx = this.getContext(ann);
-				ctx.references = await this.getReferences(ann, annText);
 				// Le menu contextuel traite toutes les couleurs ayant un prompt,
 				// « auto » ou « manuel ». Le commentaire existant (paraphrase
 				// manuelle) est transmis via {{comment}}.
@@ -1426,7 +1569,8 @@ Annota = {
 					ctx,
 					color: ann.annotationColor,
 					comment: (ann.annotationComment || "").trim(),
-					fields: opts.fields
+					fields: opts.fields,
+					getRefs: () => this.getReferences(ann, annText)
 				});
 				if (comment === null) { failed++; continue; }
 				let fresh = await Zotero.Items.getAsync(ann.id);
@@ -1575,6 +1719,15 @@ Annota = {
 		let wrap = doc.createElement("div");
 		wrap.style.cssText = "display:flex;flex-direction:column;gap:6px;"
 			+ "width:100%;max-width:100%;box-sizing:border-box;padding:2px 0;";
+
+		// Le formulaire vit DANS le lecteur, qui écoute les touches au niveau du
+		// document pour ses propres raccourcis (une seule lettre suffit). Sans
+		// cloisonnement, chaque frappe dans un champ est aussi lue comme un
+		// raccourci — d'où des fonctions du lecteur déclenchées au hasard de la
+		// saisie. On garde donc les événements clavier à l'intérieur.
+		for (let type of ["keydown", "keypress", "keyup"]) {
+			wrap.addEventListener(type, e => e.stopPropagation());
+		}
 
 		// Style commun, aligné sur le thème du lecteur (couleurs héritées).
 		const FIELD_CSS = "width:100%;max-width:100%;box-sizing:border-box;"

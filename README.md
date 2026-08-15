@@ -132,10 +132,22 @@ text-selection popup** — the little window that shows up when you select text,
 highlight color as usual; the annotation is created with those values already
 applied. Each field becomes a variable usable in the prompt *and* in the layout.
 
-**Fields are independent of the AI.** As soon as a color has fields, the comment
-is built from what you typed — no model call at all, even if a prompt is still
-configured. The AI only steps in for a field of type `ai`, or if you put
-`{{ai}}` in the layout.
+**The prompt is bound to the fields.** Once a color declares fields, its prompt
+no longer writes a free-form comment: the model is asked to fill **the fields you
+declared, and only those** — one `name: value` line per field. Which means:
+
+- What you typed by hand is **never rewritten**. It is handed to the model as
+  context, and the model fills only what you left empty.
+- Fill the whole form and **no request is sent at all** — no API key, no
+  provider needed.
+- Leave the form empty (or don't open it) and the AI fills every field. That is
+  the *automatic* flow: highlight, and the structured comment appears.
+- The answer is parsed back field by field, so each value keeps **its own
+  formatting** (bold title, plain paraphrase, italic reference).
+
+A field of type `ai` keeps its own separate instruction. Put `{{ai}}` in the
+layout and you get the old behaviour instead: one free-form answer for the whole
+comment.
 
 One field per line — `name | Label | type | options | format`:
 
@@ -153,20 +165,14 @@ alone is written by the model, following the instruction in the options column).
 Formats: `bold`, `italic`, `bolditalic`, `underline`, `plain` (default) — the
 format may sit in the 4th column when the field has no options.
 
-With **no layout**, the comment is one line per field, in order, each wrapped in
-its format. That gives `{{titre}}`,
-`{{paraphrase}}`, `{{reference}}`, `{{verifie}}`, `{{nature}}`. Built-in variable
-names are reserved and silently ignored if reused, so a field can never shadow
+The comment is one line per field, in order, each wrapped in its format — **no
+layout needed**. Each field is also a variable (`{{titre}}`, `{{paraphrase}}`,
+`{{reference}}`…) usable in the prompt and in the layout. Built-in variable names
+are reserved and silently ignored if reused, so a field can never shadow
 `{{text}}` or `{{comment}}`.
 
-Combined with a layout that has no `{{ai}}`, this gives a **fully manual,
-structured annotation** with no AI call at all:
-
-```
-<b>{{titre}}</b>
-{{paraphrase}}
-<i>{{reference}}</i>
-```
+A layout is only for departing from that default — putting two fields on one
+line, adding fixed text, or switching to a single free-form answer with `{{ai}}`.
 
 Because the color isn't known while you type, the popup shows the **union** of
 the fields declared across colors; only the fields of the color you finally pick

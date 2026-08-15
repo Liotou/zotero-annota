@@ -53,8 +53,10 @@
 paraphrase | Paraphrase | textarea
 reference  | Référence  | text     | italic
 resume     | Résumé     | ai       | Résume le passage en une phrase. | italic</html:pre>
-        <html:p>Without a layout below, the comment is one line per field, in
-        order, each wrapped in its format.</html:p>
+        <html:p>The comment is one line per field, in order, each wrapped in its
+        format. Every field is also a variable — <html:code>{{titre}}</html:code>,
+        <html:code>{{paraphrase}}</html:code>… — usable in the prompt and in the
+        layout.</html:p>
       </html:div>
     </html:details>
 
@@ -69,20 +71,23 @@ resume     | Résumé     | ai       | Résume le passage en une phrase. | itali
     <!-- 3. IA (facultatif) -->
     <label class="annota-step"><html:b>3 · Use the AI (optional)</html:b></label>
     <description class="annota-help">
-      Leave empty for a fully manual comment. <html:b>Fields always win:</html:b>
-      if this color has fields, the comment is built from them and no request is
-      sent — unless you add <html:code>{{ai}}</html:code> to the layout.
+      Leave empty for a fully manual comment. With fields above, the prompt is
+      <html:b>bound to those fields:</html:b> the model fills the ones you left
+      empty, and nothing else — what you typed by hand is never rewritten. Fill
+      the whole form and no request is sent at all.
     </description>
     <html:textarea id="annota-prompt" rows="8" class="annota-code"
                    aria-label="AI prompt"/>
 
     <html:details class="annota-details">
-      <html:summary>Custom layout</html:summary>
+      <html:summary>Custom layout (rarely needed)</html:summary>
       <html:div class="annota-details-body">
-        <html:p>Empty = one line per field (or the AI's reply if there are no
-        fields). Fill it in to compose the comment yourself —
-        <html:code>{{ai}}</html:code> is the model's reply, everything else is
-        inserted as-is. A line whose variables are all empty disappears.</html:p>
+        <html:p>With fields declared above, you can ignore this: the comment is
+        one line per field, in order, each in its own format. Fill it in only to
+        depart from that — put fields on the same line, add fixed text, or use
+        <html:code>{{ai}}</html:code> to have the model write the whole comment
+        in one go instead of filling the fields one by one. A line whose
+        variables are all empty disappears.</html:p>
         <html:textarea id="annota-template" rows="5" class="annota-code"
                        aria-label="Comment layout"/>
       </html:div>
