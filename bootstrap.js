@@ -1742,6 +1742,30 @@ Annota = {
 		this._selectionListener = null;
 	},
 
+	// Le lecteur de Zotero réserve des touches SEULES à ses raccourcis : « r » et
+	// « l » lancent la lecture vocale, « h » et « u » annotent, l'espace met en
+	// pause. Il les écoute en PHASE DE CAPTURE sur la fenêtre
+	// (keyboard-manager.js : addEventListener('keydown', …, true)), donc bien
+	// avant que la frappe n'atteigne nos champs : aucun stopPropagation posé
+	// sur le formulaire ne peut arriver à temps.
+	//
+	// Sa seule échappatoire est le test isTextBox(event.target), qui vaut
+	// (lib/utilities.js) :
+	//     ['INPUT'].includes(node.nodeName) && node.type === 'text'
+	//         || node.getAttribute('contenteditable') === 'true'
+	//
+	// Autrement dit un <input type="text"> est épargné, mais PAS un
+	// <textarea>, ni un <select>, ni une case à cocher — d'où une lecture
+	// vocale déclenchée en tapant une paraphrase contenant un « r », et jamais
+	// en remplissant le titre. On coche donc la seconde condition : l'attribut
+	// contenteditable est inerte sur un contrôle de formulaire, mais il suffit
+	// à faire reconnaître le champ comme zone de saisie.
+	_shieldFromReaderShortcuts(el, type) {
+		if (type === "text") return;      // déjà reconnu tel quel
+		try { el.setAttribute("contenteditable", "true"); }
+		catch (e) { /* ignore */ }
+	},
+
 	_renderSelectionForm({ doc, params, append }) {
 		let schema = this.allFieldsSchema();
 		if (!schema.length || !doc || !append) return;
@@ -1759,11 +1783,9 @@ Annota = {
 		wrap.style.cssText = "display:flex;flex-direction:column;gap:6px;"
 			+ "width:100%;max-width:100%;box-sizing:border-box;padding:2px 0;";
 
-		// Le formulaire vit DANS le lecteur, qui écoute les touches au niveau du
-		// document pour ses propres raccourcis (une seule lettre suffit). Sans
-		// cloisonnement, chaque frappe dans un champ est aussi lue comme un
-		// raccourci — d'où des fonctions du lecteur déclenchées au hasard de la
-		// saisie. On garde donc les événements clavier à l'intérieur.
+		// Filet secondaire : arrête les écouteurs de PHASE REMONTANTE. Insuffisant
+		// à lui seul contre le lecteur (voir _shieldFromReaderShortcuts), mais
+		// utile face au reste de Zotero.
 		for (let type of ["keydown", "keypress", "keyup"]) {
 			wrap.addEventListener(type, e => e.stopPropagation());
 		}
@@ -1835,6 +1857,7 @@ Annota = {
 				row.appendChild(el);
 			}
 
+			this._shieldFromReaderShortcuts(el, f.type);
 			el.addEventListener("input", sync);
 			el.addEventListener("change", sync);
 			inputs[f.name] = { el, type: f.type };
