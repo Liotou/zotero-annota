@@ -1898,7 +1898,8 @@ Annota = {
 		let body = doc.createElement("div");       // groupe de champs courant
 		body.style.cssText = "display:flex;flex-direction:column;gap:6px;width:100%;";
 		let hint = doc.createElement("div");
-		hint.style.cssText = "font-size:10px;opacity:.55;text-align:center;";
+		hint.style.cssText = "display:flex;align-items:center;justify-content:center;"
+			+ "gap:5px;font-size:10px;line-height:1.3;text-align:center;";
 		wrap.appendChild(picker);
 		wrap.appendChild(body);
 		wrap.appendChild(hint);
@@ -1906,6 +1907,26 @@ Annota = {
 		const colorName = (hex) => {
 			let c = this.COLORS.find(x => x.hex === hex);
 			return c ? c.name : hex;
+		};
+
+		// Le pied du formulaire nomme la pastille à cliquer, et la montre : dans
+		// une rangée de huit ronds, une couleur se reconnaît plus vite qu'elle
+		// ne se lit. Il sert aussi à dire qu'une couleur n'a rien de configuré,
+		// plutôt que de laisser un formulaire vide sans explication.
+		const SWATCH_CSS = "width:9px;height:9px;flex:none;border-radius:2px;"
+			+ "display:inline-block;border:1px solid rgba(128,128,128,.55);";
+
+		const renderHint = (hex, configured) => {
+			hint.textContent = "";
+			let sw = doc.createElement("span");
+			sw.style.cssText = SWATCH_CSS + "background:" + hex + ";";
+			let msg = doc.createElement("span");
+			msg.textContent = configured
+				? "Click " + colorName(hex) + " above to save"
+				: colorName(hex) + " — no fields configured";
+			hint.style.opacity = configured ? "0.6" : "0.85";
+			hint.appendChild(sw);
+			hint.appendChild(msg);
 		};
 
 		// Mémorisé au fil de la frappe : la validation se fait ensuite en
@@ -1917,7 +1938,8 @@ Annota = {
 		const renderGroup = (hex) => {
 			current = hex;
 			body.textContent = "";
-			for (let f of this.visibleFieldsFor(hex)) {
+			let fields = this.visibleFieldsFor(hex);
+			for (let f of fields) {
 				let row = doc.createElement("div");
 				let lab = doc.createElement("label");
 				lab.textContent = f.label;
@@ -1973,7 +1995,7 @@ Annota = {
 				el.addEventListener("change", onEdit);
 				body.appendChild(row);
 			}
-			hint.textContent = colorName(hex) + " — click a color to save";
+			renderHint(hex, fields.length > 0);
 			sync();
 		};
 
@@ -1986,7 +2008,10 @@ Annota = {
 		if (btns) {
 			this.COLORS.forEach((c, i) => {
 				let btn = btns[i];
-				if (!btn || !this.visibleFieldsFor(c.hex).length) return;
+				if (!btn) return;
+				// Y compris les couleurs sans champ : le survol répond alors
+				// « rien de configuré » au lieu de laisser le groupe précédent,
+				// ce qui laissait croire que ces champs seraient enregistrés.
 				let show = () => { if (current !== c.hex) renderGroup(c.hex); };
 				btn.addEventListener("mouseenter", show);
 				btn.addEventListener("focus", show);   // navigation au clavier

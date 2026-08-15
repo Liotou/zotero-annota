@@ -15,6 +15,9 @@ zip -r -X "$OUT" \
     preferences.xhtml \
     preferences.js \
     preferences.css \
+    icon32.png \
+    icon48.png \
+    icon96.png \
     -x "*.DS_Store"
 
 echo "OK -> $(pwd)/$OUT"
