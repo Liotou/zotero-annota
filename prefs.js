@@ -38,6 +38,19 @@ pref("extensions.zotero.annota.maxAbstractChars", 1200);
 pref("extensions.zotero.annota.resolveCitations", true);
 pref("extensions.zotero.annota.maxRefs", 8);
 
+// ---- Échecs ----
+// Une génération ratée laissait un surlignage sans commentaire, silencieusement.
+// On réessaie, puis on marque l'annotation d'une étiquette pour pouvoir la
+// retrouver et la rejouer.
+pref("extensions.zotero.annota.retries", 1);
+pref("extensions.zotero.annota.markFailures", true);
+pref("extensions.zotero.annota.failedTag", "annota-failed");
+
+// Sortie structurée (JSON) pour le remplissage des champs, quand le
+// fournisseur la gère : Mistral/OpenAI et Ollama. Repli automatique sur la
+// lecture « nom: valeur » si la réponse n'est pas du JSON exploitable.
+pref("extensions.zotero.annota.structuredOutput", true);
+
 // ---- Déclenchement ----
 pref("extensions.zotero.annota.alsoUnderline", false);
 pref("extensions.zotero.annota.overwrite", false);

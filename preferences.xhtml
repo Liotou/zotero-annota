@@ -275,6 +275,17 @@ resume     | Résumé     | ai       | Résume le passage en une phrase. | itali
       ignored by the Claude CLI and Apple Intelligence.
     </description>
 
+    <hbox align="center">
+      <checkbox label="Ask for structured output when the provider supports it"
+                preference="extensions.zotero.annota.structuredOutput" native="true"/>
+    </hbox>
+    <description class="annota-help">
+      Field filling asks for a JSON object instead of <html:code>name: value</html:code>
+      lines — steadier with small local models. Mistral / OpenAI-compatible and
+      Ollama only; if the reply isn't valid JSON, Annota reads it the old way
+      rather than losing it.
+    </description>
+
     <label class="annota-step"><html:b>What is sent along</html:b></label>
     <hbox align="center">
       <checkbox label="The reference's details (title, authors, year, abstract…)"
@@ -330,6 +341,42 @@ resume     | Résumé     | ai       | Résume le passage en une phrase. | itali
       <checkbox label="Show ⏳ while the AI is working"
                 preference="extensions.zotero.annota.showPlaceholder" native="true"/>
     </hbox>
+
+    <label class="annota-step"><html:b>When generation fails</html:b></label>
+    <description class="annota-help">
+      A failed call leaves a highlight with no comment — indistinguishable from
+      one you left bare on purpose. Annota retries, then marks what still fails.
+    </description>
+    <grid>
+      <columns><column/><column flex="1"/></columns>
+      <rows>
+        <row align="center">
+          <label value="Extra attempts:" control="annota-retries"/>
+          <html:input id="annota-retries" type="number" min="0" max="5"
+                      style="width: 6em;"
+                      preference="extensions.zotero.annota.retries"/>
+        </row>
+      </rows>
+    </grid>
+    <hbox align="center">
+      <checkbox label="Tag annotations whose generation failed"
+                preference="extensions.zotero.annota.markFailures" native="true"/>
+    </hbox>
+    <grid>
+      <columns><column/><column flex="1"/></columns>
+      <rows>
+        <row align="center">
+          <label value="Tag name:" control="annota-failedtag"/>
+          <html:input id="annota-failedtag" type="text" style="width: 13em;"
+                      preference="extensions.zotero.annota.failedTag"/>
+        </row>
+      </rows>
+    </grid>
+    <description class="annota-help">
+      Right-click a reference → <html:b>Annota → Retry failed comments</html:b>
+      replays only the tagged ones. A refused key or a missing model is never
+      retried — the answer would be the same.
+    </description>
 
     <label class="annota-step"><html:b>Good to know</html:b></label>
     <description class="annota-help">

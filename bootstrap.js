@@ -481,6 +481,10 @@ Annota = {
 			// perdus, gabarit sans contenu) : ne pas écraser pour autant.
 			if (!String(comment).trim()) {
 				log("rien à écrire pour l'annotation " + id + " (résultat vide)");
+				// Un vide APRÈS un appel au modèle est un échec, pas un choix :
+				// on le signale. Un vide sans appel (couleur non configurée,
+				// formulaire laissé vierge) n'a rien d'anormal.
+				if (callsProvider) await this.markFailed(id, "résultat vide");
 				return;
 			}
 
@@ -488,6 +492,7 @@ Annota = {
 			let fresh = await Zotero.Items.getAsync(id);
 			if (!fresh) return;
 			fresh.annotationComment = comment;
+			this.setFailedTag(fresh, false);   // succès : l'échec précédent s'efface
 			let tSave = Date.now();
 			await fresh.saveTx();
 			tSave = Date.now() - tSave;
@@ -507,6 +512,7 @@ Annota = {
 		catch (e) {
 			log("Generation error: " + e);
 			toast("Annota", "Generation failed: " + (e.message || e), "error");
+			await this.markFailed(id, String(e.message || e));
 			// Nettoyer le placeholder en cas d'échec.
 			if (usedPlaceholder) {
 				try {
@@ -521,6 +527,54 @@ Annota = {
 		}
 		finally {
 			this.inProgress.delete(id);
+		}
+	},
+
+	// ---- Échecs visibles ----
+	//
+	// Un appel raté laissait un surlignage sans commentaire : rien ne le
+	// distinguait d'un surlignage volontairement nu, et on ne s'en apercevait
+	// qu'en relisant. On pose donc une étiquette sur l'annotation — visible
+	// dans le lecteur, cherchable dans la bibliothèque, et point d'entrée du
+	// « Retry failed comments » du menu contextuel.
+	failedTag() {
+		if (!getPref("markFailures", true)) return "";
+		return String(getPref("failedTag", "annota-failed") || "").trim();
+	},
+
+	hasFailedTag(item) {
+		let tag = this.failedTag();
+		try { return !!tag && typeof item.hasTag === "function" && item.hasTag(tag); }
+		catch (e) { return false; }
+	},
+
+	// Pose l'étiquette SANS enregistrer : l'appelant groupe avec sa propre
+	// écriture quand il en a une, pour ne pas provoquer deux rafraîchissements.
+	setFailedTag(item, on) {
+		let tag = this.failedTag();
+		if (!tag) return false;
+		try {
+			let has = this.hasFailedTag(item);
+			if (on && !has) { item.addTag(tag, 0); return true; }
+			if (!on && has) { item.removeTag(tag); return true; }
+		}
+		catch (e) {
+			log("setFailedTag: " + e);
+		}
+		return false;
+	},
+
+	async markFailed(id, why) {
+		if (!this.failedTag()) return;
+		try {
+			let fresh = await Zotero.Items.getAsync(id);
+			if (fresh && this.setFailedTag(fresh, true)) {
+				await fresh.saveTx();
+				log("annotation " + id + " marquée en échec : " + why);
+			}
+		}
+		catch (e) {
+			log("markFailed: " + e);
 		}
 	},
 
@@ -1072,6 +1126,71 @@ Annota = {
 		return lines.join("\n");
 	},
 
+	// Variante JSON de la consigne : mêmes règles, format imposé par le
+	// fournisseur plutôt que demandé en toutes lettres.
+	buildFieldInstructionJSON(toFill, schema, values) {
+		let lines = [
+			"",
+			"Answer with a single JSON object, and nothing else. One key per field"
+				+ " listed below, using exactly these names, with string values"
+				+ " (use \"\" for a field you cannot fill).",
+			""
+		];
+		for (let f of toFill) {
+			let d = "- " + f.name + " (" + f.label + ")";
+			if (f.type === "select" && f.options.length) {
+				d += " — one of: " + f.options.join(", ");
+			}
+			else if (f.type === "check") d += " — \"true\" or \"\"";
+			lines.push(d);
+		}
+		let given = schema.filter(f => !toFill.includes(f)
+			&& String((values && values[f.name]) || "").trim());
+		if (given.length) {
+			lines.push("", "Already filled in by the user. Do not include these keys,"
+				+ " do not rewrite them — use them as context:");
+			for (let f of given) {
+				lines.push("- " + f.name + " (" + f.label + "): " + values[f.name]);
+			}
+		}
+		return lines.join("\n");
+	},
+
+	// Relit une réponse JSON. Renvoie null si ce n'en est pas — l'appelant
+	// retombe alors sur parseFieldReply, qui n'exige aucun format.
+	parseJSONReply(reply, toFill) {
+		let raw = String(reply || "").trim();
+		// Les modèles enrobent volontiers leur JSON dans un bloc de code.
+		let fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+		if (fence) raw = fence[1].trim();
+		// … ou l'accompagnent d'une phrase : on isole le premier objet complet.
+		let first = raw.indexOf("{"), last = raw.lastIndexOf("}");
+		if (first === -1 || last <= first) return null;
+		raw = raw.slice(first, last + 1);
+
+		let obj;
+		try { obj = JSON.parse(raw); }
+		catch (e) { return null; }
+		if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
+
+		let byName = {};
+		for (let f of toFill) byName[f.name] = f;
+		let out = {}, seen = 0;
+		for (let k of Object.keys(obj)) {
+			if (!byName[k]) continue;              // clé inventée : ignorée
+			let v = obj[k];
+			if (v === null || v === undefined) v = "";
+			if (typeof v === "boolean") v = v ? "true" : "";
+			else if (Array.isArray(v)) v = v.filter(x => x != null).join(", ");
+			else if (typeof v === "object") continue;
+			v = String(v).trim();
+			if (byName[k].type === "check") v = /^(true|yes|oui|1|x)$/i.test(v) ? "true" : "";
+			out[k] = v;
+			seen++;
+		}
+		return seen ? out : null;
+	},
+
 	// Relit une réponse « nom: valeur ». Tolère les puces, le gras Markdown et
 	// les valeurs sur plusieurs lignes (une ligne sans marqueur prolonge le
 	// champ courant). Seuls les champs demandés sont retenus.
@@ -1109,12 +1228,48 @@ Annota = {
 		return out;
 	},
 
-	async generateComment({ text, ctx, color, comment, fields, promptOverride }) {
+	// Une clé absente ou refusée ne se répare pas en réessayant : inutile de
+	// faire attendre trois fois pour la même réponse.
+	_worthRetrying(e) {
+		// Clé absente ou refusée, modèle inexistant, requête invalide : la
+		// réponse sera identique au second essai.
+		let st = (e && typeof e.status === "number") ? e.status : 0;
+		if ([400, 401, 403, 404].includes(st)) return false;
+		// Fournisseurs sans statut (CLI, Apple) : il ne reste que le libellé.
+		let m = String((e && e.message) || e || "");
+		return !/api key|unauthorized|forbidden|not found|introuvable/i.test(m);
+	},
+
+	// Les fournisseurs HTTP acceptent response_format ; le CLI et Apple n'ont
+	// pas d'équivalent, on y reste sur la lecture « nom: valeur ».
+	supportsJSON() {
+		let p = this.provider();
+		return (p === "openai" || p === "ollama") && getPref("structuredOutput", true);
+	},
+
+	async generateComment({ text, ctx, color, comment, fields, promptOverride, json }) {
 		let prompt = this.buildPrompt({ text, ctx, color, comment, fields, promptOverride });
 		let p = this.provider();
-		if (p === "cli") return this.callCLI(prompt);
-		if (p === "apple") return this.callApple(prompt);
-		return this.callOpenAI(prompt);
+		let call = () => {
+			if (p === "cli") return this.callCLI(prompt);
+			if (p === "apple") return this.callApple(prompt);
+			return this.callOpenAI(prompt, { json: !!json });
+		};
+
+		// Une coupure réseau ou un modèle qui bafouille ne doivent pas coûter
+		// l'annotation : on retente avant de renoncer.
+		let tries = parseInt(getPref("retries", 1), 10);
+		if (isNaN(tries) || tries < 0) tries = 1;
+		let last;
+		for (let i = 0; i <= tries; i++) {
+			try { return await call(); }
+			catch (e) {
+				last = e;
+				if (i === tries || !this._worthRetrying(e)) break;
+				log("échec de génération, nouvel essai (" + (i + 1) + "/" + tries + ") : " + e);
+			}
+		}
+		throw last;
 	},
 
 	// Rend le gabarit de sortie. Une ligne dont TOUTES les variables sont vides
@@ -1190,13 +1345,23 @@ Annota = {
 			if (toFill.length) {
 				try {
 					let t = Date.now();
+					let json = this.supportsJSON();
 					let reply = await this.generateComment({
-						text, ctx, color, comment, fields: values,
-						promptOverride: entry.prompt + "\n"
-							+ this.buildFieldInstruction(toFill, schema, values)
+						text, ctx, color, comment, fields: values, json,
+						promptOverride: entry.prompt + "\n" + (json
+							? this.buildFieldInstructionJSON(toFill, schema, values)
+							: this.buildFieldInstruction(toFill, schema, values))
 					});
 					tAI += Date.now() - t;
-					Object.assign(values, this.parseFieldReply(reply, toFill));
+					// Le JSON demandé n'est pas garanti : un petit modèle local
+					// répond parfois en texte. On relit alors comme avant plutôt
+					// que de perdre la réponse.
+					let parsed = json ? this.parseJSONReply(reply, toFill) : null;
+					if (!parsed) {
+						if (json) log("réponse non-JSON : relecture « nom: valeur »");
+						parsed = this.parseFieldReply(reply, toFill);
+					}
+					Object.assign(values, parsed);
 				}
 				catch (e) {
 					log("remplissage des champs par l'IA : " + e);
@@ -1416,7 +1581,7 @@ Annota = {
 	},
 
 	// Fournisseur compatible OpenAI (Mistral par défaut).
-	async callOpenAI({ system, user }) {
+	async callOpenAI({ system, user }, opts = {}) {
 		let cfg = this.chatConfig();
 		if (cfg.requiresKey && !cfg.apiKey) throw new Error("API key missing");
 		if (!cfg.endpoint) throw new Error("Endpoint not set");
@@ -1432,8 +1597,12 @@ Annota = {
 		// Ollama ignore l'autorisation : on n'envoie l'en-tête que si une clé existe.
 		if (cfg.apiKey) headers["Authorization"] = "Bearer " + cfg.apiKey;
 
-		let resp = await this.httpJSON(cfg.endpoint, headers,
-			{ model: cfg.model, temperature: temp, messages, stream: false });
+		let payload = { model: cfg.model, temperature: temp, messages, stream: false };
+		// Sortie structurée : le modèle rend un objet JSON au lieu d'un texte
+		// libre qu'il faut relire à la regex. Mistral et Ollama l'acceptent.
+		if (opts.json) payload.response_format = { type: "json_object" };
+
+		let resp = await this.httpJSON(cfg.endpoint, headers, payload);
 
 		let data = resp.response;
 		let content = data && data.choices && data.choices[0]
@@ -1481,7 +1650,12 @@ Annota = {
 					msg = "Ollama unreachable — is it running? (" + msg + ")";
 				}
 			}
-			throw new Error("API (HTTP " + status + ") " + msg);
+			// Le statut est porté par l'erreur : décider de réessayer sur le
+			// libellé serait dépendre d'une chaîne de caractères, alors que
+			// « 401 » est une donnée.
+			let err = new Error("API (HTTP " + status + ") " + msg);
+			err.status = (typeof status === "number") ? status : 0;
+			throw err;
 		}
 	},
 
@@ -1523,11 +1697,14 @@ Annota = {
 	},
 
 	// Annotation traitable ? (type ciblé, texte non vide, bibliothèque modifiable)
-	isEligible(ann, overwrite) {
+	isEligible(ann, overwrite, failedOnly) {
 		if (!ann || !ann.isAnnotation || !ann.isAnnotation()) return false;
 		if (!this.targetTypes().includes(ann.annotationType)) return false;
 		if (ann.library && ann.library.editable === false) return false;
 		if (!(ann.annotationText || "").trim()) return false;
+		// « Rejouer les échecs » ne regarde que les annotations marquées, et les
+		// reprend quel que soit leur commentaire — c'est bien un remplacement.
+		if (failedOnly) return this.hasFailedTag(ann);
 		if ((ann.annotationComment || "").trim() && !overwrite) return false;
 		return true;
 	},
@@ -1560,8 +1737,8 @@ Annota = {
 	// Traitement commun : bibliothèque (menu contextuel) et lecteur (annotation
 	// ciblée). `all` = annotations candidates, déjà collectées.
 	async processAnnotations(all, opts = {}) {
-		let overwrite = !!opts.overwrite;
-		let eligible = all.filter(a => this.isEligible(a, overwrite));
+		let overwrite = !!opts.overwrite || !!opts.failedOnly;
+		let eligible = all.filter(a => this.isEligible(a, overwrite, opts.failedOnly));
 
 		// Les couleurs sans prompt sont ignorées : on les compte à part pour
 		// pouvoir l'expliquer, sinon l'absence de résultat serait incompréhensible.
@@ -1579,6 +1756,9 @@ Annota = {
 			if (noPrompt) {
 				why = noPrompt + " highlight" + (noPrompt > 1 ? "s" : "")
 					+ " skipped — their color has no prompt yet (Preferences → Annota).";
+			}
+			else if (opts.failedOnly) {
+				why = "Nothing to retry — no annotation is marked as failed.";
 			}
 			else if (all.length) {
 				why = "Nothing to do — all annotations already have comments.";
@@ -1615,10 +1795,15 @@ Annota = {
 					fields: opts.fields,
 					getRefs: () => this.getReferences(ann, annText)
 				});
-				if (comment === null) { failed++; continue; }
+				if (comment === null || !String(comment).trim()) {
+					failed++;
+					await this.markFailed(ann.id, "résultat vide");
+					continue;
+				}
 				let fresh = await Zotero.Items.getAsync(ann.id);
 				if (fresh) {
 					fresh.annotationComment = comment;
+					this.setFailedTag(fresh, false);
 					await fresh.saveTx();
 					ok++;
 				}
@@ -1626,6 +1811,7 @@ Annota = {
 			catch (e) {
 				failed++;
 				log("runBatch item " + ann.id + " : " + e);
+				await this.markFailed(ann.id, String(e.message || e));
 			}
 			bar.setProgress(Math.round(((i + 1) / targets.length) * 100));
 			bar.setText("Generating " + (i + 1) + "/" + targets.length + "…");
@@ -1633,7 +1819,11 @@ Annota = {
 
 		bar.setProgress(100);
 		let summary = ok + " comment" + (ok > 1 ? "s" : "") + " generated";
-		if (failed) summary += ", " + failed + " failed (see debug output)";
+		if (failed) {
+			let tag = this.failedTag();
+			summary += ", " + failed + " failed"
+				+ (tag ? " (tagged “" + tag + "”)" : " (see debug output)");
+		}
 		if (noPrompt) summary += ", " + noPrompt + " skipped (color has no prompt)";
 		bar.setText(summary);
 		pw.startCloseTimer(failed ? 8000 : 4000);
@@ -2172,6 +2362,17 @@ Annota = {
 					.catch(e => log("runBatch: " + e));
 			});
 			popup.appendChild(all);
+
+			// Reprise ciblée : ne touche que les annotations marquées en échec,
+			// pour rattraper une coupure réseau ou un modèle indisponible sans
+			// tout régénérer.
+			let retry = doc.createXULElement("menuitem");
+			retry.setAttribute("label", "Retry failed comments");
+			retry.addEventListener("command", () => {
+				Annota.runBatch(window, { failedOnly: true })
+					.catch(e => log("runBatch: " + e));
+			});
+			popup.appendChild(retry);
 
 			menu.appendChild(popup);
 			itemmenu.appendChild(menu);

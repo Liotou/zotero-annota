@@ -68,6 +68,32 @@ request*.
   annotations are never touched).
 - **⏳ while generating** — shows an indicator during the network call.
 
+### When generation fails
+A failed call used to leave a highlight with no comment — indistinguishable from
+one you left bare on purpose, and only noticed on re-reading.
+
+- **Retries** — a dropped connection or a model that stumbles gets another go
+  (default 1 extra attempt). A refused key or a missing model is *not* retried:
+  the HTTP status says the answer will be the same.
+- **Tag failures** — what still fails is tagged `annota-failed` on the
+  annotation: visible in the reader, searchable in the library. A later success
+  removes the tag in the same write.
+- **Retry failed comments** — the right-click Annota submenu gains an entry that
+  targets only the tagged annotations, whatever their comment. Use it to catch up
+  after your provider was down, without regenerating everything.
+
+Set the tag name, the retry count, or turn marking off entirely in the settings.
+
+### Structured output
+When the provider supports it (Mistral / OpenAI-compatible and Ollama), the
+field-filling request asks for a **JSON object** — `response_format:
+{"type": "json_object"}` — instead of `name: value` lines. Small local models
+are the ones that stumble on free-form formats; this removes the guesswork.
+
+The reply is not trusted blindly: if it isn't usable JSON, Annota falls back to
+the `name: value` reader rather than losing the answer. The Claude CLI and Apple
+Intelligence have no equivalent and keep the text path.
+
 ### AI provider
 Pick one in the dropdown; only that provider's settings are shown.
 
