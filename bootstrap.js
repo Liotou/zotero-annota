@@ -1813,6 +1813,41 @@ Annota = {
 	// en remplissant le titre. On coche donc la seconde condition : l'attribut
 	// contenteditable est inerte sur un contrôle de formulaire, mais il suffit
 	// à faire reconnaître le champ comme zone de saisie.
+	// Suppr / Retour arrière SUPPRIMENT l'annotation sélectionnée. Le garde-fou
+	// est ici différent de celui des lettres (keyboard-manager.js) :
+	//     if (event.target.closest('input, .label-popup') || …) return;
+	// « input » couvre nos champs texte et nos cases à cocher, mais PAS un
+	// <textarea> — donc corriger une faute dans une paraphrase effaçait le
+	// surlignage précédent, resté sélectionné.
+	//
+	// La seule accroche disponible est donc la classe .label-popup, portée par
+	// le conteneur du formulaire : closest() la trouve depuis n'importe quel
+	// champ. Elle vient avec sa mise en forme (position:absolute, left:-9999px,
+	// padding:16px, pointeur en pseudo-éléments) qui expédierait le formulaire
+	// hors écran : on la neutralise par une feuille de style à nous. Aucun
+	// effet de bord ailleurs — focus-manager.js teste .selection-popup, que
+	// notre conteneur satisfait déjà par son emplacement.
+	FORM_CLASS: "label-popup annota-fields",
+
+	_ensureFormStyles(doc) {
+		try {
+			if (!doc || typeof doc.getElementById !== "function") return;
+			if (doc.getElementById("annota-form-style")) return;
+			let st = doc.createElement("style");
+			st.id = "annota-form-style";
+			st.textContent = ".annota-fields{position:static !important;"
+				+ "left:auto !important;top:auto !important;right:auto !important;"
+				+ "bottom:auto !important;padding:0 !important;margin:0 !important;}"
+				+ ".annota-fields::before,.annota-fields::after{"
+				+ "content:none !important;display:none !important;}";
+			let host = doc.head || doc.documentElement;
+			if (host && host.appendChild) host.appendChild(st);
+		}
+		catch (e) {
+			log("_ensureFormStyles: " + e);
+		}
+	},
+
 	_shieldFromReaderShortcuts(el, type) {
 		if (type === "text") return;      // déjà reconnu tel quel
 		try { el.setAttribute("contenteditable", "true"); }
@@ -1836,7 +1871,10 @@ Annota = {
 
 		// Pas de largeur imposée : le formulaire épouse le popup. Un min-width
 		// débordait du cadre, les champs sortaient de la fenêtre.
+		this._ensureFormStyles(doc);
 		let wrap = doc.createElement("div");
+		// Voir FORM_CLASS : c'est ce qui empêche Suppr d'effacer l'annotation.
+		wrap.setAttribute("class", this.FORM_CLASS);
 		wrap.style.cssText = "display:flex;flex-direction:column;gap:6px;"
 			+ "width:100%;max-width:100%;box-sizing:border-box;padding:2px 0;";
 
