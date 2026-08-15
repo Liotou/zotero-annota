@@ -1,9 +1,14 @@
 {
   "manifest_version": 2,
   "name": "Annota",
-  "version": "2.18.0",
+  "version": "2.19.0",
   "description": "Runs a configurable AI prompt on every highlight you create in the PDF reader, and writes the reply into the annotation's comment. Works with Mistral or any OpenAI-compatible endpoint.",
   "author": "elliotquiriconi",
+  "icons": {
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "96": "icon96.png"
+  },
   "applications": {
     "zotero": {
       "id": "annota@equiriconi",
