@@ -121,9 +121,11 @@ write that color's prompt.
 
 #### Custom fields — what you fill in by hand
 
-Each color can define **fields you fill in yourself** for each annotation. They
-show up as a small form under **✎ Annota** in the reader's annotation sidebar,
-and each becomes a variable usable in the prompt *and* in the layout.
+Each color can define **fields you fill in yourself**. They appear **in the
+text-selection popup** — the little window that shows up when you select text,
+*before* the annotation exists. You type the values, then validate by picking a
+highlight color as usual; the annotation is created with those values already
+applied. Each field becomes a variable usable in the prompt *and* in the layout.
 
 One field per line — `name | Label | type | options`:
 
@@ -149,7 +151,10 @@ structured annotation** with no AI call at all:
 <i>{{reference}}</i>
 ```
 
-Fields are filled per run; they are not stored on the annotation afterwards.
+Because the color isn't known while you type, the popup shows the **union** of
+the fields declared across colors; only the fields of the color you finally pick
+are applied. Values are used once, for the annotation you just created — they are
+not stored afterwards.
 
 #### Comment layout — mixing AI output with deterministic text
 

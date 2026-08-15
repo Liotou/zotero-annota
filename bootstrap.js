@@ -338,8 +338,10 @@ Annota = {
 
 			let ctx = this.getContext(item);
 			ctx.references = await this.getReferences(item, text);
+			// Valeurs saisies dans le popup de sélection juste avant validation.
+			let fields = this.takePendingFields(text);
 			let comment = await this.buildComment({
-				text, ctx, color: item.annotationColor, comment: existing
+				text, ctx, color: item.annotationColor, comment: existing, fields
 			});
 			if (comment === null) return;
 
@@ -1332,63 +1334,100 @@ Annota = {
 			+ noPrompt + " sans prompt");
 	},
 
-	// ---- Formulaire de champs dans le panneau latéral du lecteur ----
+	// ---- Formulaire de champs dans le popup de sélection ----
 	//
-	// Hook officiel « renderSidebarAnnotationHeader » : Zotero appelle ce
-	// gestionnaire pour chaque annotation affichée dans la barre latérale et
-	// nous laisse y injecter du DOM. On y place un bouton qui déplie un
-	// formulaire construit d'après les champs définis pour LA COULEUR de
-	// l'annotation, puis lance la génération avec les valeurs saisies.
+	// Hook officiel « renderTextSelectionPopup » : la fenêtre qui apparaît quand
+	// on sélectionne du texte, AVANT que l'annotation existe. On y saisit les
+	// champs, puis on valide en choisissant une couleur de surlignage dans le
+	// popup de Zotero ; l'annotation créée récupère les valeurs.
+	//
+	// La couleur n'étant pas connue au moment de la saisie, on affiche l'union
+	// des champs déclarés par les couleurs, et seuls ceux de la couleur
+	// finalement retenue sont utilisés à la création.
 
-	_sidebarListener: null,
+	_selectionListener: null,
+	_pendingFields: null,          // { text, values, ts }
 
-	registerSidebarForm() {
+	// Union des champs de toutes les couleurs, dédoublonnée par nom.
+	allFieldsSchema() {
+		let seen = new Set(), out = [];
+		for (let c of this.COLORS) {
+			for (let f of this.fieldsForColor(c.hex)) {
+				if (seen.has(f.name)) continue;
+				seen.add(f.name);
+				out.push(f);
+			}
+		}
+		return out;
+	},
+
+	// Valeurs mises de côté pour un passage donné (validité : 10 minutes).
+	takePendingFields(text) {
+		let p = this._pendingFields;
+		if (!p) return null;
+		if (Date.now() - p.ts > 600000) { this._pendingFields = null; return null; }
+		if (p.text !== String(text || "").trim()) return null;
+		this._pendingFields = null;      // consommé une seule fois
+		return p.values;
+	},
+
+	registerSelectionForm() {
 		try {
 			if (!Zotero.Reader || !Zotero.Reader.registerEventListener) return;
-			this._sidebarListener = (event) => {
-				try { this._renderSidebarForm(event); }
-				catch (e) { log("renderSidebarAnnotationHeader: " + e); }
+			this._selectionListener = (event) => {
+				try { this._renderSelectionForm(event); }
+				catch (e) { log("renderTextSelectionPopup: " + e); }
 			};
 			Zotero.Reader.registerEventListener(
-				"renderSidebarAnnotationHeader", this._sidebarListener, "annota@equiriconi");
-			log("Formulaire latéral enregistré");
+				"renderTextSelectionPopup", this._selectionListener, "annota@equiriconi");
+			log("Formulaire de sélection enregistré");
 		}
 		catch (e) {
-			log("registerSidebarForm: " + e);
+			log("registerSelectionForm: " + e);
 		}
 	},
 
-	unregisterSidebarForm() {
+	unregisterSelectionForm() {
 		try {
-			if (this._sidebarListener && Zotero.Reader
+			if (this._selectionListener && Zotero.Reader
 					&& Zotero.Reader.unregisterEventListener) {
 				Zotero.Reader.unregisterEventListener(
-					"renderSidebarAnnotationHeader", this._sidebarListener);
+					"renderTextSelectionPopup", this._selectionListener);
 			}
 		}
 		catch (e) { /* ignore */ }
-		this._sidebarListener = null;
+		this._selectionListener = null;
 	},
 
-	_renderSidebarForm({ reader, doc, params, append }) {
-		let ann = params && params.annotation;
-		if (!ann || !doc || !append) return;
-		let schema = this.fieldsForColor(ann.color);
-		if (!schema.length) return;      // couleur sans champs : rien à afficher
+	_renderSelectionForm({ doc, params, append }) {
+		let schema = this.allFieldsSchema();
+		if (!schema.length || !doc || !append) return;
+		let text = String((params && params.annotation && params.annotation.text) || "").trim();
+		if (!text) return;
+
+		// Réafficher les valeurs déjà saisies pour ce passage (le popup peut
+		// être re-rendu pendant la sélection).
+		let prev = (this._pendingFields && this._pendingFields.text === text)
+			? this._pendingFields.values : {};
 
 		let wrap = doc.createElement("div");
-		wrap.style.cssText = "display:flex;flex-direction:column;gap:4px;margin-top:4px;";
-
-		let toggle = doc.createElement("button");
-		toggle.textContent = "✎ Annota";
-		toggle.title = "Fill the fields for this annotation";
-		toggle.style.cssText = "align-self:flex-start;font-size:11px;padding:1px 6px;cursor:pointer;";
-
-		let form = doc.createElement("div");
-		form.hidden = true;
-		form.style.cssText = "display:flex;flex-direction:column;gap:3px;";
+		wrap.style.cssText =
+			"display:flex;flex-direction:column;gap:3px;padding:4px 2px;min-width:220px;";
 
 		let inputs = {};
+		let sync = () => {
+			let values = {};
+			for (let name of Object.keys(inputs)) {
+				let { el, type } = inputs[name];
+				values[name] = (type === "check")
+					? (el.checked ? "true" : "")
+					: String(el.value || "");
+			}
+			// Mémorisé au fil de la frappe : la validation se fait ensuite en
+			// cliquant une couleur dans le popup de Zotero.
+			this._pendingFields = { text, values, ts: Date.now() };
+		};
+
 		for (let f of schema) {
 			let row = doc.createElement("div");
 			row.style.cssText = "display:flex;flex-direction:column;gap:1px;";
@@ -1398,11 +1437,12 @@ Annota = {
 			let el;
 			if (f.type === "textarea") {
 				el = doc.createElement("textarea");
-				el.rows = 3;
+				el.rows = 2;
 			}
 			else if (f.type === "check") {
 				el = doc.createElement("input");
 				el.type = "checkbox";
+				if (prev[f.name]) el.checked = true;
 			}
 			else if (f.type === "select") {
 				el = doc.createElement("select");
@@ -1417,43 +1457,22 @@ Annota = {
 				el = doc.createElement("input");
 				el.type = "text";
 			}
+			if (f.type !== "check" && prev[f.name] !== undefined) el.value = prev[f.name];
 			el.style.cssText = "font-size:11px;width:100%;box-sizing:border-box;";
+			el.addEventListener("input", sync);
+			el.addEventListener("change", sync);
 			inputs[f.name] = { el, type: f.type };
 			row.appendChild(lab);
 			row.appendChild(el);
-			form.appendChild(row);
+			wrap.appendChild(row);
 		}
 
-		let run = doc.createElement("button");
-		run.textContent = "Generate";
-		run.style.cssText = "align-self:flex-start;font-size:11px;padding:1px 6px;cursor:pointer;";
-		run.addEventListener("click", async () => {
-			run.disabled = true;
-			let before = run.textContent;
-			run.textContent = "…";
-			try {
-				let values = {};
-				for (let name of Object.keys(inputs)) {
-					let { el, type } = inputs[name];
-					values[name] = (type === "check")
-						? (el.checked ? "true" : "")
-						: String(el.value || "");
-				}
-				await this.runOnReaderAnnotations(reader, [ann.id], { fields: values });
-			}
-			catch (e) {
-				log("formulaire latéral : " + e);
-			}
-			finally {
-				run.disabled = false;
-				run.textContent = before;
-			}
-		});
+		let hint = doc.createElement("div");
+		hint.textContent = "Pick a highlight color to save";
+		hint.style.cssText = "font-size:10px;opacity:.6;margin-top:2px;";
+		wrap.appendChild(hint);
 
-		toggle.addEventListener("click", () => { form.hidden = !form.hidden; });
-		form.appendChild(run);
-		wrap.appendChild(toggle);
-		wrap.appendChild(form);
+		sync();                       // conserver même sans frappe
 		append(wrap);
 	},
 
@@ -1631,7 +1650,7 @@ async function startup({ id, version, rootURI }) {
 	Annota.init({ id, version, rootURI });
 	Annota.registerNotifier();
 	Annota.registerReaderMenu();
-	Annota.registerSidebarForm();
+	Annota.registerSelectionForm();
 
 	// Exposé pour le script du panneau de préférences (prompt par défaut, reset).
 	Zotero.Annota = Annota;
@@ -1665,7 +1684,7 @@ function shutdown() {
 	if (Annota) {
 		Annota.unregisterNotifier();
 		Annota.unregisterReaderMenu();
-		Annota.unregisterSidebarForm();
+		Annota.unregisterSelectionForm();
 		Annota.removeFromAllWindows();
 	}
 	try { delete Zotero.Annota; } catch (e) {}
