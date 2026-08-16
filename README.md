@@ -4,6 +4,14 @@
 PDF reader is sent to an LLM, and the response becomes the annotation's
 comment** — on the fly, as soon as the highlight is created.
 
+![Annota in the Zotero reader: selecting a passage opens a form named after the
+highlight colour, you fill in the fields you want, click that colour, and the
+structured comment appears in the annotation](demo.gif)
+
+*Select a passage, and the fields of the colour you are about to click appear —
+here “Definition”, on blue. Fill in what you want, leave the rest to the model,
+click the colour: the comment is written for you.*
+
 **You assign a prompt to each highlight color**, so a color can summarize,
 another critique, another translate — and a color with no prompt is simply left
 alone. Nothing is configured out of the box: Annota stays inert until you give
