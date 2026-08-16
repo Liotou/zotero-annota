@@ -84,6 +84,16 @@ one you left bare on purpose, and only noticed on re-reading.
 
 Set the tag name, the retry count, or turn marking off entirely in the settings.
 
+### Markdown
+Models write `**bold**` and `*italic*` whatever the prompt says, and a Zotero
+comment renders neither — the asterisks show up as-is. Annota converts them to
+`<b>` and `<i>`, strips heading marks and code fences, and turns list dashes into
+bullets. Real asterisks (`3 * 4`) and `snake_case` names are left alone.
+
+A field value the model wraps entirely in emphasis is **undressed**: formatting
+belongs to the field's declared format, not to the answer, so a `bold` field
+never comes back as `<b><b>…</b></b>`.
+
 ### Structured output
 When the provider supports it (Mistral / OpenAI-compatible and Ollama), the
 field-filling request asks for a **JSON object** — `response_format:

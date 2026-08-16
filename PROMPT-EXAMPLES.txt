@@ -164,6 +164,13 @@ Nothing at all: no fields, no prompt. You need at least one colour Annota never
 touches, to highlight without consequences.
 
 
+NO NEED TO FORBID MARKDOWN
+Models write **bold** and *italic* even when told not to. Annota converts them
+to <b> and <i> — the only tags a Zotero comment renders — so you can drop that
+instruction from your prompts. A value the model wraps entirely in emphasis is
+undressed: the format declared on the field wins.
+
+
 TWO TRAPS
 - Reserved names. text, comment, title, authors, year, abstract, publication,
   page, references, language, maxWords and ai are built-in variables; a field

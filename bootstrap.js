@@ -1332,7 +1332,8 @@ Annota = {
 			if (typeof v === "boolean") v = v ? "true" : "";
 			else if (Array.isArray(v)) v = v.filter(x => x != null).join(", ");
 			else if (typeof v === "object") continue;
-			v = String(v).trim();
+			// Le JSON n'est pas passé par sanitize : le Markdown y survit.
+			v = this.unwrapWholeTag(this.demarkdown(String(v)).trim());
 			if (byName[k].type === "check") v = /^(true|yes|oui|1|x)$/i.test(v) ? "true" : "";
 			out[k] = v;
 			seen++;
@@ -1368,7 +1369,8 @@ Annota = {
 		}
 
 		for (let k of Object.keys(out)) {
-			let v = out[k].trim().replace(/^["«»\s]+|["«»\s]+$/g, "");
+			let v = this.unwrapWholeTag(out[k].trim())
+				.replace(/^["«»\s]+|["«»\s]+$/g, "");
 			if (byName[k].type === "check") {
 				v = /^(true|yes|oui|1|x)$/i.test(v) ? "true" : "";
 			}
@@ -2575,9 +2577,41 @@ Annota = {
 	},
 
 	// Nettoie la sortie du modèle (retire d'éventuels blocs de code / espaces superflus).
+	// Les modèles écrivent en Markdown même quand on le leur interdit. Le
+	// commentaire d'une annotation Zotero n'en comprend rien : « **risque** »
+	// s'affiche avec ses astérisques. On convertit donc vers les seules balises
+	// que Zotero rend — <b>, <i>, <u> — plutôt que de compter sur la consigne.
+	demarkdown(s) {
+		// Code : les délimiteurs partent, le contenu reste.
+		s = s.replace(/`([^`\n]+)`/g, "$1");
+		// Gras avant italique : ** doit être consommé avant *.
+		s = s.replace(/\*\*(?=\S)([\s\S]*?\S)\*\*/g, "<b>$1</b>");
+		s = s.replace(/(^|[^\w])__(?=\S)([\s\S]*?\S)__(?![\w])/g, "$1<b>$2</b>");
+		s = s.replace(/(^|[^*\w])\*(?=\S)([^*\n]*?\S)\*(?!\*)/g, "$1<i>$2</i>");
+		// Souligné Markdown : bordé de non-mots, sinon « nom_de_champ » y passe.
+		s = s.replace(/(^|[^\w_])_(?=\S)([^_\n]*?\S)_(?![\w_])/g, "$1<i>$2</i>");
+		// Titres et puces : pas de balise équivalente, on garde le texte.
+		s = s.replace(/^#{1,6}\s+/gm, "");
+		s = s.replace(/^\s*[-*+]\s+/gm, "• ");
+		return s;
+	},
+
+	// Une valeur entièrement enveloppée dans une balise : le modèle a mis en
+	// forme un champ qui a déjà son propre format déclaré. On déshabille — la
+	// mise en forme appartient aux réglages, pas à la réponse.
+	unwrapWholeTag(v) {
+		for (let i = 0; i < 2; i++) {
+			let m = String(v).match(/^<(b|i|u)>([\s\S]*)<\/\1>$/);
+			if (!m || m[2].includes("</" + m[1] + ">")) break;
+			v = m[2].trim();
+		}
+		return v;
+	},
+
 	sanitize(raw) {
 		let s = String(raw).trim();
 		s = s.replace(/^```[a-zA-Z]*\s*/, "").replace(/\s*```$/, "");
+		s = this.demarkdown(s);
 		s = s.replace(/\n{3,}/g, "\n\n").trim();
 		return s;
 	}
