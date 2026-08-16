@@ -63,6 +63,11 @@ Start with three (yellow, red, magenta: read / contest / quote). Eight colours
 configured at once means hesitating in front of the palette instead of reading.
 
 
+Each colour also takes an optional NAME ("Call it:" in the settings), shown
+above the fields while you highlight. The headings below double as suggestions:
+Reading note, Objection, Finding, Definition, Method, Quote, To check.
+
+
 ### YELLOW — the everyday reading note
 Fields:
     heading    | Heading    | text     | bold

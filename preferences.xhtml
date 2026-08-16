@@ -24,6 +24,16 @@
       <label value="Editing:"/>
       <label id="annota-target-name" value="" class="annota-target"/>
     </hbox>
+    <hbox align="center" class="annota-editing">
+      <label value="Call it:" control="annota-label"/>
+      <html:input id="annota-label" type="text" style="width: 18em;"
+                  aria-label="Name for this color"/>
+    </hbox>
+    <description class="annota-help">
+      Optional. Shown above the fields when you highlight, so you know what
+      you're filling in — “Objection”, “Method”, “Quote”. A name alone doesn't
+      activate a color.
+    </description>
     <description id="annota-idle-warning" class="annota-warn" hidden="true">
       Nothing is configured yet — Annota will do nothing. Pick a color above and
       add at least one field or a prompt.

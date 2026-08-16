@@ -200,6 +200,12 @@ are reserved and silently ignored if reused, so a field can never shadow
 A layout is only for departing from that default — putting two fields on one
 line, adding fixed text, or switching to a single free-form answer with `{{ai}}`.
 
+**Give each color a name.** Optional, set in the settings next to the swatches:
+“Objection”, “Method”, “Quote”. It appears **above the fields** in the popup, so
+you know what you are filling in — while the footer keeps naming the swatch to
+click. Two different things: what you are doing, and where to click. A name alone
+does not activate a color.
+
 **Fields are grouped by color.** Clicking a color swatch *creates* the annotation
 outright — there is no "pick a color, then confirm" step — so the popup shows the
 fields of the color you are **about to** click: hover a swatch and its group

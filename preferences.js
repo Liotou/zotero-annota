@@ -43,17 +43,22 @@
 	function normalize(raw) {
 		if (!raw) return null;
 		if (typeof raw === "string") {
-			return raw.trim() ? { prompt: raw, trigger: "auto", template: "", fields: "" } : null;
+			return raw.trim()
+				? { prompt: raw, trigger: "auto", template: "", fields: "", label: "" }
+				: null;
 		}
 		if (typeof raw !== "object") return null;
 		let prompt = String(raw.prompt || "");
 		let template = String(raw.template || "");
 		let fields = String(raw.fields || "");
+		// Un libellé seul n'active pas une couleur (voir getColorEntry) : il la
+		// nomme, il ne la configure pas.
 		if (!prompt.trim() && !template.trim() && !fields.trim()) return null;
 		return {
 			prompt,
 			template,
 			fields,
+			label: String(raw.label || "").trim(),
 			trigger: raw.trigger === "manual" ? "manual" : "auto"
 		};
 	}
@@ -268,7 +273,9 @@
 		let templateArea = document.getElementById("annota-template");
 		let fieldsArea = document.getElementById("annota-fields");
 		let lintBox = document.getElementById("annota-lint");
-		if (!textarea || !swatchBox || !triggerGroup || !templateArea || !fieldsArea) {
+		let labelInput = document.getElementById("annota-label");
+		if (!textarea || !swatchBox || !triggerGroup || !templateArea || !fieldsArea
+				|| !labelInput) {
 			retry(setup, tries);
 			return;
 		}
@@ -303,7 +310,9 @@
 			// Actif si prompt OU gabarit OU champs.
 			if ((prompt && prompt.trim()) || (template && template.trim())
 					|| (fields && fields.trim())) {
-				map[current] = { prompt, template, fields, trigger: currentTrigger() };
+				map[current] = { prompt, template, fields,
+					label: String(labelInput.value || "").trim(),
+					trigger: currentTrigger() };
 			}
 			else {
 				delete map[current];
@@ -346,6 +355,7 @@
 			textarea.value = entry ? entry.prompt : "";
 			templateArea.value = entry ? (entry.template || "") : "";
 			fieldsArea.value = entry ? (entry.fields || "") : "";
+			labelInput.value = entry ? (entry.label || "") : "";
 			triggerGroup.value = entry ? entry.trigger : "auto";
 			lintNow();
 			if (targetName) {
@@ -367,7 +377,8 @@
 				el.setAttribute("data-selected", hex === current ? "true" : "false");
 				el.setAttribute("data-has-prompt", entry ? "true" : "false");
 				let tip = entry
-					? name + " — " + (entry.trigger === "manual" ? "on request" : "automatic")
+					? name + (entry.label ? " · " + entry.label : "") + " — "
+						+ (entry.trigger === "manual" ? "on request" : "automatic")
 					: name + " — inactive, no prompt";
 				el.setAttribute("title", tip);
 			}
@@ -402,6 +413,9 @@
 		fieldsArea.setAttribute("placeholder", "name | Label | type | options");
 		fieldsArea.addEventListener("input", scheduleSave);
 		fieldsArea.addEventListener("blur", saveNow);
+		labelInput.setAttribute("placeholder", "e.g. Objection");
+		labelInput.addEventListener("input", scheduleSave);
+		labelInput.addEventListener("blur", saveNow);
 
 		// --- Choix du mode (auto / manuel) ---
 		// Ne sauvegarde que si la couleur a déjà un prompt (sinon rien à régler).
@@ -420,6 +434,7 @@
 				textarea.value = "";
 				templateArea.value = "";
 				fieldsArea.value = "";
+				labelInput.value = "";
 				triggerGroup.value = "auto";
 				lintNow();
 				refreshSwatches();

@@ -120,17 +120,23 @@ Annota = {
 		let raw = this.getColorPrompts()[String(color).toLowerCase()];
 		if (!raw) return null;
 		if (typeof raw === "string") {
-			return raw.trim() ? { prompt: raw, trigger: "auto", template: "", fields: "" } : null;
+			return raw.trim()
+				? { prompt: raw, trigger: "auto", template: "", fields: "", label: "" }
+				: null;
 		}
 		if (typeof raw !== "object") return null;
 		let prompt = String(raw.prompt || "");
 		let template = String(raw.template || "");
 		let fields = String(raw.fields || "");
+		// Un libellé seul n'active pas une couleur : il nomme une configuration,
+		// il n'en tient pas lieu. Sinon une couleur sans champ ni prompt
+		// passerait pour configurée et ne produirait rien.
 		if (!prompt.trim() && !template.trim() && !fields.trim()) return null;
 		return {
 			prompt,
 			template,
 			fields,
+			label: String(raw.label || "").trim(),
 			trigger: raw.trigger === "manual" ? "manual" : "auto"
 		};
 	},
@@ -367,6 +373,15 @@ Annota = {
 		if (tpl) return tpl;
 		let schema = this.parseFieldSchema(entry && entry.fields);
 		return schema.length ? this.defaultLayoutFromFields(schema) : "";
+	},
+
+	// Nom que vous avez donné à cette couleur (« Objection », « Méthode »…).
+	// Le nom Zotero de la teinte reste utilisé partout ailleurs : il désigne la
+	// pastille à cliquer, alors que le libellé désigne ce qu'on est en train de
+	// faire.
+	labelForColor(color) {
+		let entry = this.getColorEntry(color);
+		return entry ? (entry.label || "") : "";
 	},
 
 	fieldsForColor(color) {
@@ -2216,6 +2231,9 @@ Annota = {
 			+ "background:rgba(128,128,128,.12);color:inherit;outline:none;";
 		const LABEL_CSS = "font-size:11px;opacity:.65;";
 
+		let header = doc.createElement("div");     // libellé de la couleur en cours
+		header.style.cssText = "display:none;align-items:center;gap:5px;width:100%;"
+			+ "font-size:11px;font-weight:600;letter-spacing:.01em;";
 		let picker = doc.createElement("div");     // repli : nos propres pastilles
 		picker.style.cssText = "display:none;align-items:center;gap:4px;"
 			+ "flex-wrap:wrap;width:100%;";
@@ -2225,6 +2243,7 @@ Annota = {
 		hint.style.cssText = "display:flex;align-items:center;justify-content:center;"
 			+ "gap:5px;font-size:10px;line-height:1.3;text-align:center;";
 		wrap.appendChild(picker);
+		wrap.appendChild(header);
 		wrap.appendChild(body);
 		wrap.appendChild(hint);
 
@@ -2239,6 +2258,22 @@ Annota = {
 		// plutôt que de laisser un formulaire vide sans explication.
 		const SWATCH_CSS = "width:9px;height:9px;flex:none;border-radius:2px;"
 			+ "display:inline-block;border:1px solid rgba(128,128,128,.55);";
+
+		// Le libellé nomme ce qu'on est en train de faire (« Objection »), quand
+		// le pied nomme la pastille à cliquer (« Red ») : deux informations
+		// différentes. Sans libellé, l'en-tête disparaît — le popup est étroit.
+		const renderHeader = (hex) => {
+			let label = this.labelForColor(hex);
+			header.textContent = "";
+			if (!label) { header.style.display = "none"; return; }
+			header.style.display = "flex";
+			let sw = doc.createElement("span");
+			sw.style.cssText = SWATCH_CSS + "background:" + hex + ";";
+			let txt = doc.createElement("span");
+			txt.textContent = label;
+			header.appendChild(sw);
+			header.appendChild(txt);
+		};
 
 		const renderHint = (hex, configured) => {
 			hint.textContent = "";
@@ -2319,6 +2354,7 @@ Annota = {
 				el.addEventListener("change", onEdit);
 				body.appendChild(row);
 			}
+			renderHeader(hex);
 			renderHint(hex, fields.length > 0);
 			sync();
 		};
