@@ -52,6 +52,125 @@ Two modes:
 
 
 --------------------------------------------------------------------------------
+A COMPLETE COLOR SCHEME — one reading gesture per color
+--------------------------------------------------------------------------------
+
+Each colour below does something different in KIND, not just in wording. Paste
+the field block into "1 · What goes in the comment" and the prompt into
+"3 · Use the AI".
+
+Start with three (yellow, red, magenta: read / contest / quote). Eight colours
+configured at once means hesitating in front of the palette instead of reading.
+
+
+### YELLOW — the everyday reading note
+Fields:
+    heading    | Heading    | text     | bold
+    paraphrase | Paraphrase | textarea
+    source     | Source     | text     | italic
+Prompt: the academic note (#0 above). Trigger: automatically.
+
+
+### RED — the objection
+What feeds a critical literature review: not what the author says, but what is
+wrong with it. The "select" forces you to qualify how far the objection reaches,
+so disagreements of unequal weight do not pile up looking alike.
+
+Fields:
+    claim     | Claim targeted | text     | bold
+    objection | Objection      | textarea
+    scope     | Scope          | select   | local, structural, fatal | italic
+Prompt:
+    The passage contests a position. Name the claim being targeted, then state
+    the objection in one or two sentences, without quoting it literally.
+    Answer in {{language}}.
+Trigger: automatically.
+
+
+### GREEN — the empirical finding
+A number is worthless without its conditions of production. These three fields
+stop you from keeping one adrift.
+
+Fields:
+    finding  | Finding           | textarea
+    measured | What is measured  | text     | italic
+    setting  | Setting / corpus  | text     | italic
+Prompt:
+    Extract the finding as stated, exactly what is measured, and on which
+    setting or corpus. Add nothing that is not in the passage; leave a field
+    empty rather than filling it from your own knowledge.
+Trigger: automatically.
+
+
+### BLUE — the definition
+Built the other way round: NO prompt at all, but one field of type "ai". Only
+the definition is generated; the rest stays your hand. This is the shape to
+remember when you want the model to do exactly one thing.
+
+Fields:
+    term       | Term               | text     | bold
+    definition | Definition         | ai       | Restate in one sentence the definition of the term as the passage gives it.
+    attributed | Attributed to      | text     | italic
+    use        | Use in my thesis   | textarea
+Prompt: leave empty.
+
+
+### PURPLE — the method
+For the methodology chapter: comparable designs, with the limits their own
+authors admit.
+
+Fields:
+    approach | Approach          | select   | qualitative, quantitative, mixed, modelling, review | italic
+    data     | Data used         | textarea
+    limit    | Acknowledged limit| textarea
+Prompt:
+    Describe the design in the passage: approach, data used, and the limit the
+    authors acknowledge themselves. If no limit is mentioned, leave that field
+    empty rather than inventing one.
+
+
+### MAGENTA — the quote to keep verbatim
+No AI here, on principle: a verbatim quote must not be paraphrased. The only
+case where the custom layout earns its place — it captures the highlighted text
+as-is through {{text}}.
+
+Fields:
+    pageref | Page          | text     | italic
+    why     | Why keep it   | textarea
+Layout:
+    « {{text}} »
+    <i>p. {{pageref}}</i>
+    {{why}}
+Prompt: leave empty. Nothing ever leaves the machine.
+
+
+### ORANGE — to check
+Your pile of reading debts. Fully manual: this is your judgement, not a model's.
+
+Fields:
+    todo   | To check      | textarea
+    where  | Where to look | text  | italic
+    urgent | Urgent        | check
+Prompt: leave empty.
+
+
+### GREY — ordinary highlighting
+Nothing at all: no fields, no prompt. You need at least one colour Annota never
+touches, to highlight without consequences.
+
+
+TWO TRAPS
+- Reserved names. text, comment, title, authors, year, abstract, publication,
+  page, references, language, maxWords and ai are built-in variables; a field
+  reusing one is IGNORED. That is why magenta uses "pageref", not "page", and
+  yellow uses "heading", not "title". The settings panel now flags this as you
+  type.
+- Checkboxes on a colour that has a prompt. An unticked box counts as an empty
+  field, so the AI will fill it — and decide for you. Keep judgement flags
+  (urgent, verified, worth quoting) on a colour with no prompt.
+
+
+--------------------------------------------------------------------------------
 0. ACADEMIC NOTE — FIELD VERSION (recommended)
 --------------------------------------------------------------------------------
 

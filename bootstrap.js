@@ -170,6 +170,140 @@ Annota = {
 		return Object.prototype.hasOwnProperty.call(this.FORMATS, k) ? k : null;
 	},
 
+	// À quoi sert chaque nom réservé : le dire vaut mieux que « nom réservé »,
+	// qui n'apprend rien à qui vient de perdre un champ.
+	RESERVED_HINTS: {
+		text: "the highlighted passage",
+		comment: "the comment already in the annotation",
+		title: "the document title",
+		authors: "the document authors",
+		year: "the document year",
+		abstract: "the document abstract",
+		publication: "the journal, book or proceedings",
+		page: "the page of the passage",
+		references: "works cited inside the passage",
+		maxWords: "your length setting",
+		language: "your language setting",
+		ai: "the model's reply"
+	},
+
+	// Un nom de repli toujours valide et prévisible : « page » → « myPage ».
+	suggestName(name) {
+		return "my" + String(name).replace(/^./, m => m.toUpperCase());
+	},
+
+	// Relit un schéma de champs et signale ce qui sera ignoré ou mal compris.
+	// parseFieldSchema, lui, se tait et continue : c'est le bon comportement à
+	// l'exécution, mais dans les réglages il faut le dire. Renvoie une liste de
+	// { line, level, message } — « error » = ce que vous écrivez ne sera pas
+	// appliqué, « warn » = appliqué autrement que prévu.
+	validateFieldSchema(raw) {
+		let out = [], seen = new Map();
+		let lines = String(raw || "").split("\n");
+		const TYPES = ["text", "textarea", "check", "select", "ai"];
+
+		for (let i = 0; i < lines.length; i++) {
+			let line = lines[i].trim();
+			if (!line || line.startsWith("#")) continue;
+			let n = i + 1;
+			let parts = line.split("|").map(x => x.trim());
+			let rawName = parts[0] || "";
+			let name = rawName.replace(/[^\w]/g, "");
+
+			if (!name) {
+				out.push({ line: n, level: "error",
+					message: "no field name before the first “|” — this line is ignored" });
+				continue;
+			}
+			if (name !== rawName) {
+				out.push({ line: n, level: "warn",
+					message: "“" + rawName + "” becomes “" + name
+						+ "” — only letters, digits and _ are kept" });
+			}
+			if (this.RESERVED_VARS.includes(name)) {
+				out.push({ line: n, level: "error",
+					message: "“" + name + "” is a built-in variable ("
+						+ (this.RESERVED_HINTS[name] || "reserved")
+						+ ") — this field is IGNORED. Rename it, e.g. “"
+						+ this.suggestName(name) + "”." });
+				continue;
+			}
+			if (seen.has(name)) {
+				out.push({ line: n, level: "error",
+					message: "“" + name + "” is already declared on line " + seen.get(name)
+						+ " — both fields would write to the same value" });
+			}
+			else seen.set(name, n);
+
+			let type = (parts[2] || "").toLowerCase();
+			if (parts[2] && !TYPES.includes(type)) {
+				out.push({ line: n, level: "warn",
+					message: "unknown type “" + parts[2] + "” — “text” used instead" });
+			}
+
+			// Reproduit la lecture des colonnes 4 et 5 de parseFieldSchema.
+			let col4 = parts[3] || "", col5 = parts[4] || "";
+			let format = this._normFormat(col5);
+			let extra = col4;
+			if (!format) {
+				let asFormat = this._normFormat(col4);
+				if (asFormat && type !== "ai" && !(type === "select" && col4.includes(","))) {
+					extra = "";
+				}
+			}
+			if (col5 && !format) {
+				out.push({ line: n, level: "warn",
+					message: "unknown format “" + col5 + "” — plain text used. "
+						+ "Known: bold, italic, bolditalic, underline, plain" });
+			}
+			if (type === "select" && !extra.split(",").map(x => x.trim()).filter(Boolean).length) {
+				out.push({ line: n, level: "warn",
+					message: "“select” with no options — nothing to choose from" });
+			}
+			if (type === "ai" && !extra.trim()) {
+				out.push({ line: n, level: "error",
+					message: "an “ai” field with no instruction is never filled — "
+						+ "put its instruction in the 4th column" });
+			}
+		}
+		return out;
+	},
+
+	// Variables employées dans un prompt ou une disposition qui ne correspondent
+	// ni à un champ déclaré ni à une variable intégrée : presque toujours une
+	// faute de frappe, et elles se substituent en silence par du vide.
+	validateVariables(where, tpl, schema) {
+		let known = this.RESERVED_VARS.concat(schema.map(f => f.name));
+		let seen = new Set(), out = [];
+		String(tpl || "").replace(/\{\{\s*(\w+)\s*\}\}/g, (m, name) => {
+			if (!known.includes(name) && !seen.has(name)) {
+				seen.add(name);
+				out.push({ line: 0, level: "warn",
+					message: where + ": “{{" + name + "}}” matches no field and no "
+						+ "built-in variable — it will be replaced by nothing" });
+			}
+			return m;
+		});
+		return out;
+	},
+
+	// Contrôle complet d'une couleur, pour le panneau de réglages.
+	lintColorEntry(entry) {
+		entry = entry || {};
+		let out = this.validateFieldSchema(entry.fields);
+		let schema = this.parseFieldSchema(entry.fields);
+		out = out.concat(this.validateVariables("Prompt", entry.prompt, schema));
+		out = out.concat(this.validateVariables("Layout", entry.template, schema));
+
+		// {{ai}} n'a de sens que dans la disposition.
+		if (/\{\{\s*ai\s*\}\}/.test(String(entry.prompt || ""))) {
+			out.push({ line: 0, level: "warn",
+				message: "Prompt: “{{ai}}” is the model's own reply — it only means "
+					+ "something in the layout, not in the prompt" });
+		}
+		return out;
+	},
+
 	// Syntaxe :  nom | Libellé | type | options | format
 	// Le format peut occuper la 4e OU la 5e colonne : s'il est reconnu en 4e,
 	// c'est un format, sinon ce sont les options (choix d'un « select », ou

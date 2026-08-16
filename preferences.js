@@ -224,6 +224,39 @@
 		refresh();       // puis interroger Ollama
 	}
 
+	// Diagnostic du schéma : parseFieldSchema se tait et continue à l'exécution
+	// — c'est le bon comportement là-bas. Ici, il faut dire ce qui sera ignoré,
+	// sinon un champ nommé « page » disparaît sans que rien ne l'annonce.
+	function renderLint(box, entry) {
+		if (!box) return;
+		let a = api();
+		let problems = (a && typeof a.lintColorEntry === "function")
+			? a.lintColorEntry(entry) : [];
+		box.textContent = "";
+		if (!problems.length) {
+			box.hidden = true;
+			box.removeAttribute("data-worst");
+			return;
+		}
+		box.hidden = false;
+		box.setAttribute("data-worst",
+			problems.some(p => p.level === "error") ? "error" : "warn");
+		for (let p of problems) {
+			let row = document.createElementNS(XHTML_NS, "p");
+			if (p.line) {
+				let where = document.createElementNS(XHTML_NS, "span");
+				where.setAttribute("class", "annota-lint-line");
+				where.textContent = "line " + p.line + " — ";
+				row.appendChild(where);
+			}
+			let icon = document.createElementNS(XHTML_NS, "span");
+			icon.textContent = (p.level === "error" ? "⚠️ " : "· ");
+			row.appendChild(icon);
+			row.appendChild(document.createTextNode(p.message));
+			box.appendChild(row);
+		}
+	}
+
 	function setup(tries) {
 		let textarea = document.getElementById("annota-prompt");
 		let clearBtn = document.getElementById("annota-prompt-clear");
@@ -234,6 +267,7 @@
 		let triggerGroup = document.getElementById("annota-trigger");
 		let templateArea = document.getElementById("annota-template");
 		let fieldsArea = document.getElementById("annota-fields");
+		let lintBox = document.getElementById("annota-lint");
 		if (!textarea || !swatchBox || !triggerGroup || !templateArea || !fieldsArea) {
 			retry(setup, tries);
 			return;
@@ -285,8 +319,19 @@
 		// s'en plaint dans la console). On attend donc une vraie pause de frappe,
 		// la sortie du champ ou le changement de couleur, qui eux forcent
 		// l'enregistrement immédiat.
+		function lintNow() {
+			renderLint(lintBox, {
+				fields: fieldsArea.value,
+				prompt: textarea.value,
+				template: templateArea.value
+			});
+		}
+
 		let saveTimer = null;
 		function scheduleSave() {
+			// Le diagnostic est immédiat, l'enregistrement non : on veut voir
+			// « page est réservé » en tapant, pas 2,5 s plus tard.
+			lintNow();
 			if (saveTimer) clearTimeout(saveTimer);
 			saveTimer = setTimeout(save, 2500);
 		}
@@ -302,6 +347,7 @@
 			templateArea.value = entry ? (entry.template || "") : "";
 			fieldsArea.value = entry ? (entry.fields || "") : "";
 			triggerGroup.value = entry ? entry.trigger : "auto";
+			lintNow();
 			if (targetName) {
 				let c = palette.find(x => x.hex === hex);
 				targetName.setAttribute("value", c ? c.name : hex);
@@ -375,6 +421,7 @@
 				templateArea.value = "";
 				fieldsArea.value = "";
 				triggerGroup.value = "auto";
+				lintNow();
 				refreshSwatches();
 				flashStatus("Cleared ✓");
 			};

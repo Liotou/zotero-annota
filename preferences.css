@@ -149,6 +149,44 @@
   font-size: 0.92em;
 }
 
+/* ---- Diagnostic du schéma de champs ---- */
+
+.annota-lint {
+  margin: 4px 0 2px;
+  padding: 6px 9px;
+  border-radius: 6px;
+  font-size: 0.9em;
+  line-height: 1.4;
+  background: rgba(128, 128, 128, 0.1);
+  border: 1px solid rgba(128, 128, 128, 0.3);
+}
+
+.annota-lint p {
+  margin: 0 0 3px;
+}
+
+.annota-lint p:last-child {
+  margin-bottom: 0;
+}
+
+.annota-lint .annota-lint-line {
+  opacity: 0.65;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+
+/* Une erreur veut dire « ce que vous écrivez ne sera pas appliqué » : elle
+   mérite plus qu'une nuance de gris. */
+.annota-lint[data-worst="error"] {
+  background: rgba(220, 70, 70, 0.13);
+  border-color: rgba(200, 60, 60, 0.45);
+}
+
+.annota-lint[data-worst="warn"] {
+  background: rgba(255, 190, 60, 0.14);
+  border-color: rgba(200, 140, 0, 0.4);
+}
+
 /* ---- Pastilles de couleur ---- */
 
 #annota-swatches {
