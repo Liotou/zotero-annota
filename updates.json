@@ -3,13 +3,13 @@
     "annota@equiriconi": {
       "updates": [
         {
-          "version": "2.24.0",
-          "update_link": "https://github.com/Liotou/zotero-annota/releases/download/v2.24.0/annota.xpi",
-          "update_hash": "sha256:36f4637a1baa4dba64a4b1ef663664a24d32f7ef64d1fe4b88f7908c11c86848",
+          "version": "2.25.0",
+          "update_link": "https://github.com/Liotou/zotero-annota/releases/download/v2.25.0/annota.xpi",
+          "update_hash": "sha256:1305c6314ba477734ee0e737f01defa6c015ffdb6403102dc07b4b96a45d810b",
           "applications": {
             "zotero": {
               "strict_min_version": "7.0",
-              "strict_max_version": "9.*"
+              "strict_max_version": "10.*"
             }
           }
         }
