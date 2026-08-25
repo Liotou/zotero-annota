@@ -388,10 +388,8 @@ Thanks to **[Zotero](https://www.zotero.org/)** itself, for a reader whose
 enough that a plugin like this one can exist without touching a line of core
 code.
 
-Thanks to **[Mistral AI](https://mistral.ai/)**, **[Ollama](https://ollama.com/)**
-and **[Anthropic](https://www.anthropic.com/)**, whose models — remote, local,
-or run through the Claude Code CLI — are what actually reads the highlighted
-passage and writes the note.
+Thanks to **[Mistral AI](https://mistral.ai/)**, whose models are what
+actually reads the highlighted passage and writes the note by default.
 
 And thanks to whoever reads this far: if you configure a color, tell me what
 broke. Six of the last releases came from exactly that.
