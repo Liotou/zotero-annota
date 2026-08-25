@@ -1,5 +1,11 @@
 # Annota (Zotero 7 / 8 / 9)
 
+> 🤖 **Written by vibe coding with Claude.** This plugin was designed and
+> written in conversation with Claude (Anthropic), from the real needs of a
+> doctoral student. I am not a developer. I describe what I need, I test, I
+> correct, and the code takes shape through the exchange. I say this up front,
+> out of honesty, so you know what you are installing.
+
 **Annota automates a prompt on every highlight: the text you highlight in the
 PDF reader is sent to an LLM, and the response becomes the annotation's
 comment** — on the fly, as soon as the highlight is created.
@@ -12,6 +18,13 @@ structured comment appears in the annotation](demo.gif)
 here “Definition”, on blue. Fill in what you want, leave the rest to the model,
 click the colour: the comment is written for you.*
 
+📥 **Downstream, [Ariane](https://github.com/Liotou/obsidian-ariane) picks up
+what Annota writes.** It is my Obsidian plugin: it turns Zotero annotations
+into atomised, linked, citable notes, and the title/paraphrase/references shape
+that Annota's academic prompt produces is exactly what Ariane expects to name
+those notes. Annota stays entirely optional and useful on its own — Ariane is
+just what happens next if you use both.
+
 **You assign a prompt to each highlight color**, so a color can summarize,
 another critique, another translate — and a color with no prompt is simply left
 alone. Nothing is configured out of the box: Annota stays inert until you give
@@ -21,7 +34,23 @@ Ready-made prompts are collected in
 [PROMPT-EXAMPLES.txt](PROMPT-EXAMPLES.txt), and Annota works with Mistral
 (default) or any OpenAI-compatible endpoint.
 
-### Example output (from the academic prompt in PROMPT-EXAMPLES.txt)
+## 🧭 Table of contents
+
+- [🧪 Example output](#-example-output-from-the-academic-prompt-in-prompt-examplestxt)
+- [📦 Installation](#-installation)
+- [⚙️ Configuration](#-configuration)
+- [🖱️ Running a prompt on one annotation](#-running-a-prompt-on-one-annotation)
+- [⏳ Generating comments after the fact](#-generating-comments-after-the-fact)
+- [🔧 How it works](#-how-it-works)
+- [🔒 Security](#-security)
+- [🧑‍💻 Development](#-development)
+- [🙏 Thanks](#-thanks)
+- [☕ Buy me a coffee](#-buy-me-a-coffee)
+- [⚖️ Licence](#-licence)
+
+---
+
+### 🧪 Example output (from the academic prompt in PROMPT-EXAMPLES.txt)
 
 ```
 <b>Title.</b>
@@ -34,7 +63,7 @@ sources; a page number present in the passage ("Moulin, 1999, p.93") is kept
 as-is. That behaviour comes from the prompt, not from Annota — write your own
 and you get something else entirely.
 
-## Installation
+## 📦 Installation
 
 1. Build the package:
    ```bash
@@ -49,13 +78,13 @@ and you get something else entirely.
 You can also download the `.xpi` directly from the
 [Releases](../../releases) page.
 
-### Automatic updates
+### 🔄 Automatic updates
 
 Annota checks GitHub for new versions and updates itself — no manual
 reinstall. Zotero polls periodically; you can also force a check via
 **Tools → Add-ons → gear ⚙️ → Check for Updates**.
 
-## Configuration
+## ⚙️ Configuration
 
 **Add-ons → Annota**, or **Preferences → Annota**. The panel has three tabs:
 **🎨 Colors** (what each highlight color does — the only tab you need for a
@@ -64,7 +93,7 @@ call the model) and **⚙️ General** (behaviour). Reference material — field
 the variable list, advanced paths — sits in collapsible blocks so the everyday
 view stays short.
 
-### General
+### 🎛️ General
 There is no global on/off switch: each color decides whether it runs
 automatically or only on request (see **Prompt**), and a color with no prompt is
 never touched. To stop all automatic generation, set your colors to *Only on
@@ -76,7 +105,7 @@ request*.
   annotations are never touched).
 - **⏳ while generating** — shows an indicator during the network call.
 
-### When generation fails
+### 🩹 When generation fails
 A failed call used to leave a highlight with no comment — indistinguishable from
 one you left bare on purpose, and only noticed on re-reading.
 
@@ -92,7 +121,7 @@ one you left bare on purpose, and only noticed on re-reading.
 
 Set the tag name, the retry count, or turn marking off entirely in the settings.
 
-### Markdown
+### 🔤 Markdown
 Models write `**bold**` and `*italic*` whatever the prompt says, and a Zotero
 comment renders neither — the asterisks show up as-is. Annota converts them to
 `<b>` and `<i>`, strips heading marks and code fences, and turns list dashes into
@@ -102,7 +131,7 @@ A field value the model wraps entirely in emphasis is **undressed**: formatting
 belongs to the field's declared format, not to the answer, so a `bold` field
 never comes back as `<b><b>…</b></b>`.
 
-### Structured output
+### 🧩 Structured output
 When the provider supports it (Mistral / OpenAI-compatible and Ollama), the
 field-filling request asks for a **JSON object** — `response_format:
 {"type": "json_object"}` — instead of `name: value` lines. Small local models
@@ -112,7 +141,7 @@ The reply is not trusted blindly: if it isn't usable JSON, Annota falls back to
 the `name: value` reader rather than losing the answer. The Claude CLI and Apple
 Intelligence have no equivalent and keep the text path.
 
-### AI provider
+### 🤖 AI provider
 Pick one in the dropdown; only that provider's settings are shown.
 
 | Provider | What it is |
@@ -125,11 +154,11 @@ Pick one in the dropdown; only that provider's settings are shown.
 **Temperature** (0–2, lower = steadier) applies to the two HTTP providers; the
 Claude CLI ignores it.
 
-### Text generation
+### 💬 Text generation
 - **Output language** — available in the prompt via `{{language}}`.
 - **Max length** — available via `{{maxWords}}`.
 
-### Document context
+### 🧾 Document context
 - **Send document context to the AI** — when enabled (default), the title,
   authors, year, publication, page and **abstract** of the source reference are
   sent along with the highlighted text. This helps the model situate the
@@ -155,7 +184,7 @@ Claude CLI ignores it.
 
   If neither resolves, nothing is sent and the rest works exactly as before.
 
-### Prompt
+### 🎨 Prompt
 Above the prompt box is a row of **color swatches** — the same colors you use to
 highlight in the reader, read straight from Zotero's own palette. Click one to
 write that color's prompt.
@@ -290,7 +319,7 @@ Two modes depending on the prompt:
 - **Advanced** (the prompt contains `{{text}}` or `{{comment}}`) — the prompt is
   sent as-is; you fully control the structure of the request.
 
-## Running a prompt on one annotation
+## 🖱️ Running a prompt on one annotation
 
 **In the PDF reader, right-click an annotation in the sidebar → Annota —
 generate comment.** This targets exactly that annotation (or the several you
@@ -300,7 +329,7 @@ It always overwrites the existing comment, because that is the point of the
 *Only on request* workflow: you write your paraphrase by hand, then ask the AI
 to format or title it (`{{comment}}`). Colors with no prompt stay untouched.
 
-## Generating comments after the fact
+## ⏳ Generating comments after the fact
 
 Highlights you made before installing Annota — or before changing your prompt —
 can be processed in bulk. **Right-click a reference, an attachment, or a
@@ -314,7 +343,7 @@ explicit action, so it runs colors set to *Only on request* as well as automatic
 ones, and each annotation uses the prompt of its own color. Highlights whose
 color has no prompt are skipped and reported as such.
 
-## How it works
+## 🔧 How it works
 
 - Listens to the `add` event of Zotero's notifier on annotation items.
 - Processes only `annotationType` = `highlight` (+ `underline` if enabled), with
@@ -325,12 +354,12 @@ color has no prompt are skipped and reported as such.
   loop. An already-commented annotation (including one synced from another
   device) is not regenerated.
 
-## Security
+## 🔒 Security
 
 The API key is stored **in plain text** in the Zotero profile's preferences
 (`extensions.zotero.annota.apiKey`). Do not share your profile.
 
-## Development
+## 🧑‍💻 Development
 
 - Per-color prompt resolution: `bootstrap.js` → `getPromptForColor()`
   (returns `""` when the color has no prompt, which means "skip").
@@ -338,7 +367,7 @@ The API key is stored **in plain text** in the Zotero profile's preferences
 - Source metadata lookup: `bootstrap.js` → `getContext()`.
 - Request building (variables, modes): `bootstrap.js` → `buildMessages()`.
 
-### Releasing
+### 🚀 Releasing
 
 Bump `"version"` in `manifest.json`, then run:
 
@@ -349,3 +378,41 @@ Bump `"version"` in `manifest.json`, then run:
 It builds the `.xpi`, computes its SHA-256, regenerates `updates.json`, pushes,
 and creates the GitHub release. The hash in `updates.json` **must** match the
 released `.xpi` or Zotero will refuse the update — hence the script.
+
+---
+
+## 🙏 Thanks
+
+Thanks to **[Zotero](https://www.zotero.org/)** itself, for a reader whose
+`renderTextSelectionPopup` and `createAnnotationContextMenu` hooks are open
+enough that a plugin like this one can exist without touching a line of core
+code.
+
+Thanks to **[Mistral AI](https://mistral.ai/)**, **[Ollama](https://ollama.com/)**
+and **[Anthropic](https://www.anthropic.com/)**, whose models — remote, local,
+or run through the Claude Code CLI — are what actually reads the highlighted
+passage and writes the note.
+
+And thanks to whoever reads this far: if you configure a color, tell me what
+broke. Six of the last releases came from exactly that.
+
+---
+
+## ☕ Buy me a coffee
+
+If Annota saves you time, you can buy me a coffee.
+
+[![Buy me a coffee](https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=&slug=liotou&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff)](https://buymeacoffee.com/liotou)
+
+I said at the top that this plugin was written by vibe coding with Claude, and
+I stand by it. But a model does not know what a highlight comment should look
+like, nor that a `<textarea>` slips past the reader's own keyboard guard, nor
+that a `page` field is silently swallowed by a reserved name. All of that came
+from using the plugin myself, on my own thesis, and saying what was wrong,
+release after release. The code is not mine. The plugin is. ☕
+
+---
+
+## ⚖️ Licence
+
+MIT, see [LICENSE](LICENSE).
