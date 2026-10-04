@@ -39,6 +39,7 @@ function toast(title, body, type = "default") {
 
 Annota = {
 	id: null,
+	prefPaneID: null,
 	version: null,
 	rootURI: null,
 	notifierID: null,
@@ -2650,10 +2651,6 @@ Annota = {
 			let onShowing = () => { menu.hidden = !Annota.selectionIsRelevant(window); };
 			itemmenu.addEventListener("popupshowing", onShowing);
 
-			// Libellés du panneau de discussion (locale/en-US/annota-chat.ftl).
-			try { window.MozXULElement.insertFTLIfNeeded("annota-chat.ftl"); }
-			catch (e) { log("insertFTLIfNeeded: " + e); }
-
 			this._windows.set(window, { menu, itemmenu, onShowing });
 			log("Menu ajouté à la fenêtre");
 		}
@@ -2667,14 +2664,6 @@ Annota = {
 		if (!rec) return;
 		try { rec.itemmenu.removeEventListener("popupshowing", rec.onShowing); } catch (e) {}
 		try { rec.menu.remove(); } catch (e) {}
-		try {
-			let doc = window.document;
-			let ftl = doc.querySelector('[href="annota-chat.ftl"]');
-			if (ftl) ftl.remove();
-			let st = doc.getElementById("annota-chat-style");
-			if (st) st.remove();
-		}
-		catch (e) {}
 		this._windows.delete(window);
 	},
 
@@ -2752,17 +2741,23 @@ async function startup({ id, version, rootURI }) {
 	// Exposé pour le script du panneau de préférences (prompt par défaut, reset).
 	Zotero.Annota = Annota;
 
-	Zotero.PreferencePanes.register({
+	// L'identifiant du panneau sert au bouton « réglages » de la discussion.
+	Promise.resolve(Zotero.PreferencePanes.register({
 		pluginID: "annota@equiriconi",
 		src: rootURI + "preferences.xhtml",
 		scripts: [rootURI + "preferences.js"],
 		stylesheets: [rootURI + "preferences.css"],
 		label: "Annota"
-	});
+	})).then(id => { if (Annota) Annota.prefPaneID = id; })
+		.catch(e => log("PreferencePanes.register: " + e));
 
 	// Fenêtres déjà ouvertes au moment de l'activation du plugin.
 	for (let window of Zotero.getMainWindows()) {
 		Annota.addToWindow(window);
+		if (AnnotaChat) {
+			try { AnnotaChat.addToWindow(window); }
+			catch (e) { log("discussion, fenêtre : " + e); }
+		}
 	}
 
 	log("Started (v" + version + ")");
@@ -2770,11 +2765,18 @@ async function startup({ id, version, rootURI }) {
 
 function onMainWindowLoad({ window }) {
 	if (Annota) Annota.addToWindow(window);
+	if (AnnotaChat) {
+		try { AnnotaChat.addToWindow(window); }
+		catch (e) { log("discussion, fenêtre : " + e); }
+	}
 }
 
 function onMainWindowUnload({ window }) {
 	// Indispensable : conserver une référence à une fenêtre fermée fuirait.
 	if (Annota) Annota.removeFromWindow(window);
+	if (AnnotaChat) {
+		try { AnnotaChat.removeFromWindow(window); } catch (e) {}
+	}
 }
 
 function shutdown() {

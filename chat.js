@@ -2,37 +2,43 @@
 // Annota — discussion avec le document ouvert ou avec la bibliothèque.
 //
 // Chargé par bootstrap.js dans sa propre portée globale : Annota, getPref, log
-// et toast y sont visibles. Le panneau est une section du volet de l'item
-// (API officielle Zotero.ItemPaneManager) : il apparaît à droite dans la
-// bibliothèque comme dans le lecteur, sans toucher au code de Zotero.
+// et toast y sont visibles.
+//
+// Présentation calquée sur Beaver : un panneau latéral pleine hauteur qui
+// prend la place du volet de droite, dans la bibliothèque (#zotero-item-pane)
+// comme dans le lecteur (#zotero-context-pane). Un bouton de la barre des
+// onglets et ⌘/Ctrl+J l'ouvrent et le ferment ; le volet de Zotero revient tel
+// qu'il était à la fermeture.
 //
 // Aucun fournisseur nouveau : la discussion emploie ceux déjà réglés pour les
 // annotations (API, Ollama, Claude CLI, Apple). Elle peut en choisir un autre,
 // et un autre modèle, sans rien changer aux annotations.
 //
 // Deux portées :
-//   document    texte intégral page par page, annotations, notes et notice de
-//               l'item ; le modèle cite les pages [p. 12], cliquables.
+//   document     texte intégral page par page, annotations, notes et notice ;
+//                le modèle cite les pages [p. 12], rendues en pastilles qui
+//                ouvrent la page.
 //   bibliothèque recherche Zotero sur les mots de la question ; le modèle cite
-//               les items [1], [2], cliquables.
+//                les items [1], [2], pastilles qui sélectionnent l'item.
 
 var AnnotaChat = {
 	HTML_NS: "http://www.w3.org/1999/xhtml",
+	SVG_NS: "http://www.w3.org/2000/svg",
 	PLUGIN_ID: "annota@equiriconi",
 
-	paneID: null,
-	_conversations: new Map(),   // clé (id de l'item principal) → conversation
-	_instances: new Map(),       // body de la section → panneau affiché
-	_pendingQuotes: new Map(),   // clé → citations en attente d'un panneau
+	_windows: new Map(),         // fenêtre principale → { button, panes, visible… }
+	_conversations: new Map(),   // clé (référence ou bibliothèque) → conversation
 	_pageCache: new Map(),       // id de pièce jointe → { pages, paged, source }
+	_notifierID: null,
+	_hidden: new WeakMap(),      // élément masqué → display d'origine
 
 	// Au-delà, l'extraction page par page coûte plus qu'elle ne rapporte.
 	MAX_PAGES: 600,
 
 	PROVIDER_LABELS: {
 		openai: "Mistral / API",
-		ollama: "Ollama (local)",
-		cli: "Claude Code CLI",
+		ollama: "Ollama",
+		cli: "Claude Code",
 		apple: "Apple Intelligence"
 	},
 
@@ -91,68 +97,263 @@ var AnnotaChat = {
 		return this.AUTO_BUDGET[p] || 40000;
 	},
 
-	// ---- Enregistrement de la section ----
+	// ---- Panneau latéral : installation par fenêtre ----
 
 	register() {
-		let mgr = Zotero.ItemPaneManager;
-		if (!mgr || typeof mgr.registerSection !== "function") {
-			log("discussion : ItemPaneManager indisponible, panneau non enregistré");
-			return;
+		// Changement d'onglet : le volet de Zotero peut se réafficher, et le
+		// contexte (quel PDF ?) change.
+		try {
+			this._notifierID = Zotero.Notifier.registerObserver({
+				notify: (event, type) => {
+					if (type !== "tab") return;
+					for (let rec of this._windows.values()) {
+						rec.win.setTimeout(() => {
+							try { this.apply(rec); this.refreshContexts(rec); }
+							catch (e) { log("discussion, onglet : " + e); }
+						}, 60);
+					}
+				}
+			}, ["tab"], "annota-chat");
 		}
-		let icon = Annota.rootURI + "chat.svg";
-		let id = mgr.registerSection({
-			paneID: "annota-chat",
-			pluginID: this.PLUGIN_ID,
-			header: { l10nID: "annota-chat-header", icon },
-			sidenav: { l10nID: "annota-chat-sidenav", icon },
-			onInit: ({ body }) => {
-				try { this.mount(body); }
-				catch (e) { log("discussion onInit: " + e); }
-			},
-			onDestroy: ({ body }) => this.unmount(body),
-			onItemChange: ({ item, setEnabled }) => {
-				setEnabled(this.isSupported(item));
-				return true;
-			},
-			onRender: ({ body, item }) => {
-				try { this.show(body, item); }
-				catch (e) { log("discussion onRender: " + e); }
-			},
-			onAsyncRender: async ({ body, item }) => {
-				try { await this.describeSource(body, item); }
-				catch (e) { log("discussion onAsyncRender: " + e); }
-			}
-		});
-		this.paneID = id || null;
-		log("Discussion enregistrée (" + this.paneID + ")");
+		catch (e) { log("discussion : observateur d'onglets : " + e); }
 	},
 
 	unregister() {
 		for (let conv of this._conversations.values()) {
 			if (conv.cancel) conv.cancel.cancel();
 		}
-		try {
-			if (this.paneID && Zotero.ItemPaneManager) {
-				Zotero.ItemPaneManager.unregisterSection(this.paneID);
-			}
+		if (this._notifierID) {
+			try { Zotero.Notifier.unregisterObserver(this._notifierID); } catch (e) {}
+			this._notifierID = null;
 		}
-		catch (e) { log("discussion unregister: " + e); }
-		for (let inst of this._instances.values()) {
-			try {
-				let st = inst.doc.getElementById("annota-chat-style");
-				if (st) st.remove();
-			}
-			catch (e) {}
-		}
-		this.paneID = null;
-		this._instances.clear();
+		for (let win of Array.from(this._windows.keys())) this.removeFromWindow(win);
 		this._conversations.clear();
-		this._pendingQuotes.clear();
 		this._pageCache.clear();
 	},
 
-	isSupported(item) {
-		return !!item && typeof item.isRegularItem === "function";
+	shortcutKey() {
+		let k = String(getPref("chatShortcut", "J") || "").trim();
+		return k ? k.slice(0, 1).toLowerCase() : "";
+	},
+
+	shortcutLabel() {
+		let k = this.shortcutKey().toUpperCase();
+		if (!k) return "";
+		return Zotero.isMac ? "⌘" + k : "Ctrl+" + k;
+	},
+
+	addToWindow(win) {
+		if (this._windows.has(win)) return;
+		let doc = win.document;
+		this.ensureStyles(doc);
+		let rec = { win, visible: false, timer: null, panes: {}, uncollapsed: {} };
+
+		// Bouton de la barre des onglets, avant la synchronisation (comme Beaver).
+		let toolbar = doc.getElementById("zotero-tabs-toolbar");
+		if (toolbar) {
+			let btn = doc.createXULElement("toolbarbutton");
+			btn.id = "annota-tb-chat";
+			let sc = this.shortcutLabel();
+			btn.setAttribute("tooltiptext", "Annota Chat" + (sc ? " (" + sc + ")" : ""));
+			btn.setAttribute("aria-label", "Annota Chat");
+			btn.addEventListener("command", () => this.toggle(win));
+			let sync = toolbar.querySelector("#zotero-tb-sync");
+			if (sync) toolbar.insertBefore(btn, sync);
+			else toolbar.appendChild(btn);
+			rec.button = btn;
+		}
+
+		let mount = (id, location, parent) => {
+			if (!parent) return;
+			let box = doc.createXULElement("vbox");
+			box.id = id;
+			box.setAttribute("class", "annota-pane");
+			box.style.display = "none";
+			parent.appendChild(box);
+			rec.panes[location] = { box, inst: this.mount(box, location, win) };
+		};
+		mount("annota-pane-library", "library", doc.getElementById("zotero-item-pane"));
+		mount("annota-pane-reader", "reader", doc.getElementById("zotero-context-pane"));
+
+		// ⌘/Ctrl+J, comme Beaver. Inopérant quand le PDF a le focus : le
+		// lecteur est un document à part, dont les touches ne remontent pas.
+		rec.onKey = (e) => {
+			let key = this.shortcutKey();
+			if (!key || e.defaultPrevented || e.shiftKey || e.altKey) return;
+			let accel = Zotero.isMac ? e.metaKey : e.ctrlKey;
+			if (!accel || String(e.key).toLowerCase() !== key) return;
+			e.preventDefault();
+			this.toggle(win);
+		};
+		win.addEventListener("keydown", rec.onKey);
+
+		this._windows.set(win, rec);
+	},
+
+	removeFromWindow(win) {
+		let rec = this._windows.get(win);
+		if (!rec) return;
+		try { if (rec.visible) { rec.visible = false; this.apply(rec); } } catch (e) {}
+		if (rec.timer) { try { win.clearInterval(rec.timer); } catch (e) {} }
+		try { win.removeEventListener("keydown", rec.onKey); } catch (e) {}
+		try { if (rec.button) rec.button.remove(); } catch (e) {}
+		for (let p of Object.values(rec.panes)) { try { p.box.remove(); } catch (e) {} }
+		try {
+			let st = win.document.getElementById("annota-chat-style");
+			if (st) st.remove();
+		}
+		catch (e) {}
+		this._windows.delete(win);
+	},
+
+	tabType(win) {
+		try {
+			let t = win.Zotero_Tabs && win.Zotero_Tabs.selectedType;
+			if (t) return String(t).startsWith("reader") ? "reader" : "library";
+			return win.Zotero_Tabs.selectedID === "zotero-pane" ? "library" : "reader";
+		}
+		catch (e) { return "library"; }
+	},
+
+	toggle(win, force) {
+		let rec = this._windows.get(win);
+		if (!rec) return;
+		rec.visible = (force === undefined) ? !rec.visible : !!force;
+		this.apply(rec);
+		if (rec.visible) {
+			this.refreshContexts(rec);
+			// Le contexte suit la sélection : un relevé léger, seulement tant
+			// que le panneau est ouvert (Zotero n'expose pas d'événement de
+			// sélection stable aux modules).
+			if (!rec.timer) rec.timer = win.setInterval(() => this.refreshContexts(rec), 700);
+			let inst = this.activeInstance(rec);
+			if (inst) win.setTimeout(() => { try { inst.input.focus(); } catch (e) {} }, 50);
+		}
+		else if (rec.timer) {
+			win.clearInterval(rec.timer);
+			rec.timer = null;
+		}
+	},
+
+	activeInstance(rec) {
+		let p = rec.panes[this.tabType(rec.win)];
+		return p ? p.inst : null;
+	},
+
+	hideEl(el) {
+		if (!el || !el.style) return;
+		if (!this._hidden.has(el)) this._hidden.set(el, el.style.display || "");
+		el.style.display = "none";
+	},
+
+	restoreEl(el) {
+		if (!el || !el.style || !this._hidden.has(el)) return;
+		let d = this._hidden.get(el);
+		this._hidden.delete(el);
+		if (d) el.style.display = d;
+		else el.style.removeProperty("display");
+	},
+
+	// Affiche le panneau à la place du volet de Zotero, ou rend le volet.
+	apply(rec) {
+		let { win } = rec, doc = win.document;
+		let show = rec.visible;
+		let tab = this.tabType(win);
+		if (rec.button) {
+			rec.button.toggleAttribute("selected", show);
+			rec.button.setAttribute("aria-pressed", show ? "true" : "false");
+		}
+
+		// Bibliothèque.
+		let lib = rec.panes.library;
+		let itemPane = doc.getElementById("zotero-item-pane");
+		if (lib && itemPane) {
+			let zp = win.ZoteroPane && win.ZoteroPane.itemPane;
+			if (show) {
+				if (tab === "library" && zp && zp.collapsed) {
+					zp.collapsed = false;
+					rec.uncollapsed.library = true;
+				}
+				for (let c of Array.from(itemPane.children)) if (c !== lib.box) this.hideEl(c);
+				lib.box.style.display = "flex";
+			}
+			else {
+				for (let c of Array.from(itemPane.children)) if (c !== lib.box) this.restoreEl(c);
+				lib.box.style.display = "none";
+				if (rec.uncollapsed.library && zp) zp.collapsed = true;
+				rec.uncollapsed.library = false;
+			}
+		}
+
+		// Lecteur. En disposition empilée, le volet de contexte occupe tout
+		// le lecteur : le panneau se loge alors dans sa bande inférieure.
+		let rd = rec.panes.reader;
+		let ctxPane = doc.getElementById("zotero-context-pane");
+		if (rd && ctxPane) {
+			let ctxInner = doc.getElementById("zotero-context-pane-inner");
+			let stacked = Zotero.Prefs.get("layout") === "stacked";
+			let target = stacked && ctxInner ? ctxInner : ctxPane;
+			for (let parent of [ctxPane, ctxInner]) {
+				if (!parent) continue;
+				for (let c of Array.from(parent.children)) if (c !== rd.box) this.restoreEl(c);
+			}
+			if (rd.box.parentNode !== target) target.appendChild(rd.box);
+			let cp = win.ZoteroContextPane;
+			if (show) {
+				if (tab === "reader" && cp && cp.collapsed && typeof cp.togglePane === "function") {
+					cp.togglePane();
+					rec.uncollapsed.reader = true;
+				}
+				for (let c of Array.from(target.children)) if (c !== rd.box) this.hideEl(c);
+				rd.box.style.display = "flex";
+			}
+			else {
+				rd.box.style.display = "none";
+				if (rec.uncollapsed.reader && cp && !cp.collapsed
+						&& typeof cp.togglePane === "function") {
+					cp.togglePane();
+				}
+				rec.uncollapsed.reader = false;
+			}
+		}
+	},
+
+	// ---- Contexte courant ----
+
+	// Référence dont on parle : le PDF de l'onglet de lecture, ou l'item
+	// sélectionné dans la bibliothèque. Sans sélection unique, la bibliothèque.
+	contextFor(inst) {
+		let win = inst.win;
+		if (inst.location === "reader") {
+			try {
+				let tabID = win.Zotero_Tabs.selectedID;
+				let reader = typeof Zotero.Reader.getByTabID === "function"
+					? Zotero.Reader.getByTabID(tabID)
+					: (Zotero.Reader._readers || []).find(r => r.tabID === tabID);
+				let att = reader ? Zotero.Items.get(reader.itemID) : null;
+				if (att) return { item: att, libraryID: att.libraryID };
+			}
+			catch (e) {}
+			return null;
+		}
+		let items = [], libraryID = Zotero.Libraries.userLibraryID;
+		try {
+			items = win.ZoteroPane.getSelectedItems() || [];
+			libraryID = win.ZoteroPane.getSelectedLibraryID() || libraryID;
+		}
+		catch (e) {}
+		if (items.length === 1) return { item: items[0], libraryID: items[0].libraryID };
+		return { item: null, libraryID };
+	},
+
+	refreshContexts(rec) {
+		if (!rec.visible) return;
+		let inst = this.activeInstance(rec);
+		if (!inst) return;
+		let ctx = this.contextFor(inst);
+		if (!ctx) return;
+		let key = ctx.item ? this.keyFor(ctx.item) : "lib:" + ctx.libraryID;
+		if (key && key !== inst.key) this.show(inst, ctx, key);
 	},
 
 	// ---- Items ----
@@ -168,22 +369,6 @@ var AnnotaChat = {
 	keyFor(item) {
 		let top = this.topItem(item);
 		return top ? String(top.id) : null;
-	},
-
-	conversation(item) {
-		let key = this.keyFor(item);
-		if (!key) return null;
-		let conv = this._conversations.get(key);
-		if (!conv) {
-			conv = { key, itemID: item.id, messages: [], scope: "document",
-				busy: false, cancel: null, error: null, status: "" };
-			this._conversations.set(key, conv);
-		}
-		return conv;
-	},
-
-	convItem(conv) {
-		return conv ? Zotero.Items.get(conv.itemID) : null;
 	},
 
 	// PDF lu dans l'onglet courant, s'il appartient à cette référence : c'est
@@ -217,6 +402,21 @@ var AnnotaChat = {
 		catch (e) { log("resolveDocument: " + e); }
 		if (att && !(att.isFileAttachment && att.isFileAttachment())) att = null;
 		return { top, att: att || null };
+	},
+
+	conversation(ctx, key) {
+		let conv = this._conversations.get(key);
+		if (!conv) {
+			conv = { key, itemID: ctx.item ? ctx.item.id : null, libraryID: ctx.libraryID,
+				messages: [], scope: ctx.item ? "document" : "library",
+				busy: false, cancel: null, error: null, status: "" };
+			this._conversations.set(key, conv);
+		}
+		return conv;
+	},
+
+	convItem(conv) {
+		return conv && conv.itemID ? Zotero.Items.get(conv.itemID) : null;
 	},
 
 	// ---- Texte du document ----
@@ -628,8 +828,8 @@ var AnnotaChat = {
 		}
 	},
 
-	async buildLibraryContext(item, terms, budget) {
-		let libraryID = (item && item.libraryID) || Zotero.Libraries.userLibraryID;
+	async buildLibraryContext(libraryID, terms, budget) {
+		libraryID = libraryID || Zotero.Libraries.userLibraryID;
 		let head = "LIBRARY SEARCH\nSearched the researcher's Zotero library for: "
 			+ (terms.length ? terms.join(", ") : "(no usable keyword)");
 		if (!terms.length) {
@@ -719,18 +919,22 @@ var AnnotaChat = {
 		let p = this.provider();
 		let notReady = Annota.providerReadyError(p);
 		if (notReady) {
-			conv.error = { message: notReady + " — or pick another provider above." };
+			conv.error = { message: notReady + " Pick another model below, or set it up in"
+				+ " Settings → Annota → ✨ AI." };
 			this.refresh(conv);
 			return;
 		}
 		conv.messages.push({ role: "user", content: text });
 		inst.input.value = "";
+		this.autoGrow(inst);
 		await this.answer(conv);
 	},
 
 	async answer(conv) {
 		let p = this.provider();
 		let item = this.convItem(conv);
+		// Sans référence sélectionnée, seule la bibliothèque a un sens.
+		if (!item) conv.scope = "library";
 		let question = conv.messages[conv.messages.length - 1].content;
 		conv.busy = true;
 		conv.error = null;
@@ -752,7 +956,7 @@ var AnnotaChat = {
 
 			let ctx, extra = { scope: conv.scope };
 			if (conv.scope === "library") {
-				ctx = await this.buildLibraryContext(item, terms, Math.floor(budget * 0.8));
+				ctx = await this.buildLibraryContext(conv.libraryID, terms, Math.floor(budget * 0.8));
 				extra.sources = ctx.sources;
 				extra.note = ctx.sources.length
 					? ctx.sources.length + " items found" : "no matching item";
@@ -825,90 +1029,180 @@ var AnnotaChat = {
 		return e;
 	},
 
+	// Icônes au trait (16 px), dessinées en currentColor : elles suivent le
+	// thème clair ou sombre de Zotero.
+	ICONS: {
+		close: ["M4 4l8 8", "M12 4l-8 8"],
+		plus: ["M8 3v10", "M3 8h10"],
+		note: ["M3.5 2.5h9v11h-9z", "M5.75 6h4.5", "M5.75 8.5h4.5", "M5.75 11h2.5"],
+		settings: ["M2.5 5h11", "M2.5 11h11", "#c6 5 1.6", "#c10 11 1.6"],
+		copy: ["M5.5 5.5h8v8h-8z", "M10.5 5.5v-3h-8v8h3"],
+		up: ["M8 13V3.5", "M4 7.5l4-4 4 4"],
+		stop: ["#r4.5 4.5 7 7"],
+		doc: ["M4 1.75h5.25l2.75 2.75v9.75H4z", "M9.25 1.75V4.5H12"],
+		library: ["M3 2.5v11", "M6 2.5v11", "M8.75 3.1l3.25 10.4"],
+		chat: ["M3 2.5h10a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 13 11.5H8.5L5 14v-2.5H3A1.5 1.5 0 0 1 1.5 10V4A1.5 1.5 0 0 1 3 2.5z"],
+		retry: ["M13 8a5 5 0 1 1-1.46-3.54", "M13 2.5v3h-3"],
+		check: ["M3.5 8.5l3 3 6-7"]
+	},
+
+	icon(doc, name, size = 16) {
+		let svg = doc.createElementNS(this.SVG_NS, "svg");
+		svg.setAttribute("viewBox", "0 0 16 16");
+		svg.setAttribute("width", String(size));
+		svg.setAttribute("height", String(size));
+		svg.setAttribute("fill", "none");
+		svg.setAttribute("stroke", "currentColor");
+		svg.setAttribute("stroke-width", "1.4");
+		svg.setAttribute("stroke-linecap", "round");
+		svg.setAttribute("stroke-linejoin", "round");
+		svg.setAttribute("aria-hidden", "true");
+		for (let d of this.ICONS[name] || []) {
+			let shape;
+			if (d.startsWith("#c")) {
+				let [cx, cy, r] = d.slice(2).split(" ");
+				shape = doc.createElementNS(this.SVG_NS, "circle");
+				shape.setAttribute("cx", cx);
+				shape.setAttribute("cy", cy);
+				shape.setAttribute("r", r);
+				shape.setAttribute("fill", "var(--annota-surface, Field)");
+			}
+			else if (d.startsWith("#r")) {
+				let [x, y, w, h] = d.slice(2).split(" ");
+				shape = doc.createElementNS(this.SVG_NS, "rect");
+				shape.setAttribute("x", x);
+				shape.setAttribute("y", y);
+				shape.setAttribute("width", w);
+				shape.setAttribute("height", h);
+				shape.setAttribute("rx", "1.5");
+				shape.setAttribute("fill", "currentColor");
+				shape.setAttribute("stroke", "none");
+			}
+			else {
+				shape = doc.createElementNS(this.SVG_NS, "path");
+				shape.setAttribute("d", d);
+			}
+			svg.appendChild(shape);
+		}
+		return svg;
+	},
+
 	button(doc, label, cls, onClick, title) {
-		let b = this.el(doc, "button", cls || "annota-chat-btn", label);
+		let b = this.el(doc, "button", cls || "annota-btn", label);
 		b.setAttribute("type", "button");
-		if (title) b.setAttribute("title", title);
+		if (title) {
+			b.setAttribute("title", title);
+			b.setAttribute("aria-label", title);
+		}
 		b.addEventListener("click", (e) => {
 			e.preventDefault();
 			e.stopPropagation();
-			onClick(e);
+			if (!b.disabled) onClick(e);
 		});
 		return b;
 	},
 
-	mount(body) {
-		let existing = this._instances.get(body);
-		if (existing) return existing;
-		let doc = body.ownerDocument;
-		this.ensureStyles(doc);
+	iconButton(doc, name, title, onClick, cls) {
+		let b = this.button(doc, null, "annota-icon-btn" + (cls ? " " + cls : ""), onClick, title);
+		b.appendChild(this.icon(doc, name));
+		return b;
+	},
 
+	mount(box, location, win) {
+		let doc = box.ownerDocument;
+		this.ensureStyles(doc);
 		let root = this.el(doc, "div", "annota-chat");
 
-		let bar = this.el(doc, "div", "annota-chat-bar");
-		let scopeSel = this.el(doc, "select", "annota-chat-select");
-		scopeSel.setAttribute("title", "What the model reads");
-		for (let [v, l] of [["document", "📄 This document"], ["library", "📚 My library"]]) {
-			let o = this.el(doc, "option", null, l);
-			o.setAttribute("value", v);
-			scopeSel.appendChild(o);
-		}
-		let provSel = this.el(doc, "select", "annota-chat-select");
-		provSel.setAttribute("title", "AI provider for the chat");
-		bar.appendChild(scopeSel);
-		bar.appendChild(provSel);
-
-		let sub = this.el(doc, "div", "annota-chat-sub");
-		let subText = this.el(doc, "span", "annota-chat-sub-text");
-		sub.appendChild(subText);
-
-		let logBox = this.el(doc, "div", "annota-chat-log");
-		let status = this.el(doc, "div", "annota-chat-status");
-
-		let form = this.el(doc, "div", "annota-chat-form");
-		let input = this.el(doc, "textarea", "annota-chat-input");
-		input.setAttribute("rows", "3");
-		let send = this.button(doc, "Send", "annota-chat-send", () => {
-			let conv = this.conversationOf(inst);
-			if (conv && conv.busy) this.stop(conv);
-			else this.submit(inst, input.value);
-		});
-		form.appendChild(input);
-		form.appendChild(send);
-
-		let tools = this.el(doc, "div", "annota-chat-tools");
-
-		root.appendChild(bar);
-		root.appendChild(sub);
-		root.appendChild(logBox);
-		root.appendChild(status);
-		root.appendChild(form);
-		root.appendChild(tools);
-		body.textContent = "";
-		body.appendChild(root);
-
-		let inst = { body, doc, root, scopeSel, provSel, subText, log: logBox, status,
-			input, send, tools, key: null, item: null, docLabel: "" };
-
-		tools.appendChild(this.button(doc, "New chat", "annota-chat-link", () => {
+		// En-tête : fermer et nouvelle discussion à gauche, actions à droite.
+		let header = this.el(doc, "div", "annota-chat-header");
+		let left = this.el(doc, "div", "annota-chat-header-group");
+		let right = this.el(doc, "div", "annota-chat-header-group");
+		let sc = this.shortcutLabel();
+		left.appendChild(this.iconButton(doc, "close", "Close" + (sc ? " (" + sc + ")" : ""),
+			() => this.toggle(win, false)));
+		let newBtn = this.iconButton(doc, "plus", "New chat", () => {
 			let conv = this.conversationOf(inst);
 			if (!conv || conv.busy) return;
 			conv.messages = [];
 			conv.error = null;
 			this.refresh(conv);
-			input.focus();
-		}, "Start over — the current exchange is forgotten"));
-		tools.appendChild(this.button(doc, "Save chat as note", "annota-chat-link", () => {
+			inst.input.focus();
+		});
+		left.appendChild(newBtn);
+		let title = this.el(doc, "div", "annota-chat-title", "Annota");
+		let saveBtn = this.iconButton(doc, "note", "Save chat as note", () => {
 			let conv = this.conversationOf(inst);
 			if (conv && conv.messages.length) {
 				this.saveNote(conv, conv.messages).catch(e => log("saveNote: " + e));
 			}
-		}, "Save the whole exchange as a child note of this reference"));
+		});
+		right.appendChild(saveBtn);
+		right.appendChild(this.iconButton(doc, "settings", "Chat settings", () => this.openSettings()));
+		header.appendChild(left);
+		header.appendChild(title);
+		header.appendChild(right);
 
-		// Le lecteur et la fenêtre principale ont leurs raccourcis clavier : la
-		// frappe s'arrête au panneau.
+		// Fil de la discussion.
+		let scroller = this.el(doc, "div", "annota-chat-scroll");
+		let thread = this.el(doc, "div", "annota-chat-thread");
+		scroller.appendChild(thread);
+
+		// Zone de saisie : une carte, comme celle de Beaver.
+		let dock = this.el(doc, "div", "annota-chat-dock");
+		let card = this.el(doc, "div", "annota-composer");
+		let chips = this.el(doc, "div", "annota-composer-chips");
+		let docChip = this.button(doc, null, "annota-chip", () => this.setScope(inst, "document"));
+		docChip.appendChild(this.icon(doc, "doc", 13));
+		let docLabel = this.el(doc, "span", "annota-chip-label", "This document");
+		docChip.appendChild(docLabel);
+		let libChip = this.button(doc, null, "annota-chip", () => this.setScope(inst, "library"));
+		libChip.appendChild(this.icon(doc, "library", 13));
+		let libLabel = this.el(doc, "span", "annota-chip-label", "My library");
+		libChip.appendChild(libLabel);
+		chips.appendChild(docChip);
+		chips.appendChild(libChip);
+
+		let input = this.el(doc, "textarea", "annota-composer-input");
+		input.setAttribute("rows", "1");
+		input.setAttribute("aria-label", "Message Annota");
+
+		let controls = this.el(doc, "div", "annota-composer-controls");
+		let modelSel = this.el(doc, "select", "annota-model-select");
+		modelSel.setAttribute("title", "AI used for the chat — set up in Settings → Annota → ✨ AI");
+		let spacer = this.el(doc, "div", "annota-flex");
+		let send = this.button(doc, null, "annota-send", () => {
+			let conv = this.conversationOf(inst);
+			if (conv && conv.busy) this.stop(conv);
+			else this.submit(inst, input.value);
+		}, "Send");
+		controls.appendChild(modelSel);
+		controls.appendChild(spacer);
+		controls.appendChild(send);
+
+		card.appendChild(chips);
+		card.appendChild(input);
+		card.appendChild(controls);
+		dock.appendChild(card);
+
+		root.appendChild(header);
+		root.appendChild(scroller);
+		root.appendChild(dock);
+		box.appendChild(root);
+
+		let inst = { win, doc, box, root, location, thread, scroller, input, send, modelSel,
+			docChip, docLabel, libChip, libLabel, newBtn, saveBtn, key: null, ctx: null };
+
+		// Le lecteur et la fenêtre principale ont leurs raccourcis : la frappe
+		// s'arrête au panneau (sauf le raccourci qui le ferme).
 		for (let type of ["keydown", "keypress", "keyup"]) {
-			root.addEventListener(type, e => e.stopPropagation());
+			root.addEventListener(type, (e) => {
+				let accel = Zotero.isMac ? e.metaKey : e.ctrlKey;
+				if (type === "keydown" && accel && String(e.key).toLowerCase() === this.shortcutKey()) return;
+				if (type === "keydown" && e.key === "Escape" && !inst.input.value) {
+					this.toggle(win, false);
+				}
+				e.stopPropagation();
+			});
 		}
 		input.addEventListener("keydown", (e) => {
 			if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
@@ -917,98 +1211,141 @@ var AnnotaChat = {
 				if (conv && !conv.busy) this.submit(inst, input.value);
 			}
 		});
-		scopeSel.addEventListener("change", () => {
-			let conv = this.conversationOf(inst);
-			if (conv) conv.scope = scopeSel.value === "library" ? "library" : "document";
-			this.refresh(conv);
-			this.updateSubtitle(inst);
+		input.addEventListener("input", () => {
+			this.autoGrow(inst);
+			this.updateSend(inst);
 		});
-		provSel.addEventListener("change", () => {
-			Zotero.Prefs.set("annota.chatProvider", provSel.value || "");
-			for (let other of this._instances.values()) {
-				this.fillProviders(other);
-				this.updateSubtitle(other);
+		modelSel.addEventListener("change", () => {
+			Zotero.Prefs.set("annota.chatProvider", modelSel.value || "");
+			for (let rec of this._windows.values()) {
+				for (let p of Object.values(rec.panes)) this.fillModels(p.inst);
 			}
 		});
 
-		this.fillProviders(inst);
-		this._instances.set(body, inst);
+		this.fillModels(inst);
 		return inst;
 	},
 
-	unmount(body) {
-		this._instances.delete(body);
+	openSettings() {
+		try {
+			Zotero.Utilities.Internal.openPreferences(Annota.prefPaneID || undefined);
+		}
+		catch (e) { log("openSettings: " + e); }
+	},
+
+	autoGrow(inst) {
+		let t = inst.input;
+		t.style.height = "auto";
+		t.style.height = Math.min(t.scrollHeight, 180) + "px";
+	},
+
+	updateSend(inst) {
+		let conv = this.conversationOf(inst);
+		let busy = !!(conv && conv.busy);
+		inst.send.textContent = "";
+		inst.send.appendChild(this.icon(inst.doc, busy ? "stop" : "up", busy ? 12 : 15));
+		inst.send.setAttribute("data-busy", busy ? "true" : "false");
+		inst.send.setAttribute("title", busy ? "Stop" : "Send (Enter)");
+		inst.send.disabled = !busy && !inst.input.value.trim();
 	},
 
 	conversationOf(inst) {
 		return inst && inst.key ? this._conversations.get(inst.key) || null : null;
 	},
 
-	fillProviders(inst) {
-		let sel = inst.provSel;
+	setScope(inst, scope) {
+		let conv = this.conversationOf(inst);
+		if (!conv || conv.busy) return;
+		if (scope === "document" && !conv.itemID) return;
+		conv.scope = scope;
+		this.refresh(conv);
+		inst.input.focus();
+	},
+
+	// Menu des IA : celles déjà réglées dans l'onglet ✨ AI, avec le modèle
+	// que la discussion emploiera.
+	fillModels(inst) {
+		let sel = inst.modelSel;
 		let stored = String(getPref("chatProvider", "") || "").trim();
 		if (!Annota.PROVIDERS.includes(stored)) stored = "";
 		sel.textContent = "";
 		let def = Annota.provider();
-		let opts = [["", "Default — " + this.PROVIDER_LABELS[def]]]
-			.concat(Annota.PROVIDERS.map(p => [p, this.PROVIDER_LABELS[p]]));
+		let label = p => this.PROVIDER_LABELS[p] + " · " + this.modelLabel(p);
+		let opts = [["", label(def) + " (default)"]]
+			.concat(Annota.PROVIDERS.map(p => [p, label(p)]));
 		for (let [v, l] of opts) {
-			let o = this.el(inst.doc, "option", null, l);
+			let o = this.el(inst.doc, "option", null,
+				l + (v && Annota.providerReadyError(v) ? " — not set up" : ""));
 			o.setAttribute("value", v);
-			// Fournisseur non configuré : visible mais signalé, l'envoi dira pourquoi.
-			if (v && Annota.providerReadyError(v)) o.textContent = l + " (not set up)";
 			sel.appendChild(o);
 		}
 		sel.value = stored;
 	},
 
-	updateSubtitle(inst) {
-		let conv = this.conversationOf(inst);
-		let p = this.provider();
-		let where = conv && conv.scope === "library" ? "📚 Library search" : (inst.docLabel || "📄 …");
-		inst.subText.textContent = where + " · " + this.PROVIDER_LABELS[p] + " · " + this.modelLabel(p);
-		inst.subText.setAttribute("title", inst.subText.textContent);
-	},
-
-	show(body, item) {
-		let inst = this._instances.get(body) || this.mount(body);
-		if (!item) return;
-		inst.item = item;
-		let key = this.keyFor(item);
-		if (!key) return;
-		if (inst.key !== key) {
-			inst.key = key;
-			inst.docLabel = "";
-			this.conversation(item);
-		}
-		this.fillProviders(inst);
+	show(inst, ctx, key) {
+		inst.key = key;
+		inst.ctx = ctx;
+		let conv = this.conversation(ctx, key);
 		this.renderInstance(inst);
-		this.updateSubtitle(inst);
-		this.takeQuotes(inst);
+		this.updateChips(inst);
+		this.describeSource(inst, ctx).catch(e => log("describeSource: " + e));
+		if (inst.pendingQuote) {
+			let q = inst.pendingQuote;
+			inst.pendingQuote = null;
+			this.insertQuote(inst, q);
+		}
+		return conv;
 	},
 
-	async describeSource(body, item) {
-		let inst = this._instances.get(body);
-		if (!inst || !item) return;
-		let key = this.keyFor(item);
-		let { att } = await this.resolveDocument(item);
-		if (inst.key !== key) return;
-		if (att) {
-			let name = "";
-			try { name = att.attachmentFilename || att.getDisplayTitle(); }
-			catch (e) { name = "attachment"; }
-			inst.docLabel = "📄 " + name;
+	shortTitle(item) {
+		let t = "";
+		try { t = item.getDisplayTitle ? item.getDisplayTitle() : ""; } catch (e) {}
+		return t.length > 40 ? t.slice(0, 38).trim() + "…" : t;
+	},
+
+	async describeSource(inst, ctx) {
+		let key = inst.key;
+		let name = "";
+		try {
+			let lib = Zotero.Libraries.get(ctx.libraryID);
+			name = lib ? lib.name : "";
 		}
-		else inst.docLabel = "📄 No attachment — reference, notes only";
-		this.updateSubtitle(inst);
+		catch (e) {}
+		inst.libLabel.textContent = name || "My library";
+		inst.libChip.setAttribute("title", "Search " + (name || "your library")
+			+ " — references, notes, annotations, full text");
+		if (!ctx.item) return;
+		let top = this.topItem(ctx.item);
+		inst.docLabel.textContent = this.shortTitle(top) || "This document";
+		let { att } = await this.resolveDocument(ctx.item);
+		if (inst.key !== key) return;
+		let file = "";
+		try { file = att ? (att.attachmentFilename || att.getDisplayTitle()) : ""; } catch (e) {}
+		inst.docChip.setAttribute("title", (top ? top.getDisplayTitle() : "")
+			+ (file ? "\n" + file : "\nNo PDF or EPUB — reference, notes and annotations only"));
+	},
+
+	updateChips(inst) {
+		let conv = this.conversationOf(inst);
+		if (!conv) return;
+		inst.docChip.hidden = !conv.itemID;
+		inst.docChip.setAttribute("data-active", conv.scope === "document" ? "true" : "false");
+		inst.libChip.setAttribute("data-active", conv.scope === "library" ? "true" : "false");
+		inst.input.setAttribute("placeholder", conv.scope === "library"
+			? "Ask your library…"
+			: "Ask about this document…");
+		inst.newBtn.disabled = !conv.messages.length || conv.busy;
+		inst.saveBtn.disabled = !conv.messages.length;
 	},
 
 	// Toutes les vues ouvertes sur cette conversation (bibliothèque et lecteur
 	// peuvent montrer la même référence).
 	refresh(conv) {
 		if (!conv) return;
-		for (let inst of this._instances.values()) {
-			if (inst.key === conv.key) this.renderInstance(inst);
+		for (let rec of this._windows.values()) {
+			for (let p of Object.values(rec.panes)) {
+				if (p.inst.key === conv.key) this.renderInstance(p.inst);
+			}
 		}
 	},
 
@@ -1016,93 +1353,123 @@ var AnnotaChat = {
 		let conv = this.conversationOf(inst);
 		if (!conv) return;
 		let doc = inst.doc;
-		inst.scopeSel.value = conv.scope;
-		inst.input.setAttribute("placeholder", conv.scope === "library"
-			? "Ask your library… (Enter to send, Shift+Enter for a new line)"
-			: "Ask about this document… (Enter to send, Shift+Enter for a new line)");
-		inst.send.textContent = conv.busy ? "Stop" : "Send";
-		inst.send.setAttribute("data-busy", conv.busy ? "true" : "false");
-		inst.status.textContent = conv.busy ? "⏳ " + (conv.status || "Working…") : "";
-
-		let box = inst.log;
+		let box = inst.thread;
 		box.textContent = "";
+		inst.root.setAttribute("data-empty",
+			!conv.messages.length && !conv.busy && !conv.error ? "true" : "false");
 		if (!conv.messages.length && !conv.busy && !conv.error) {
 			box.appendChild(this.renderEmpty(inst, conv));
 		}
 		conv.messages.forEach((m, i) => box.appendChild(this.renderMessage(inst, conv, m, i)));
+		if (conv.busy) {
+			let t = this.el(doc, "div", "annota-thinking");
+			let dots = this.el(doc, "span", "annota-dots");
+			for (let k = 0; k < 3; k++) dots.appendChild(this.el(doc, "span"));
+			t.appendChild(dots);
+			t.appendChild(this.el(doc, "span", null, conv.status || "Working…"));
+			box.appendChild(t);
+		}
 		if (conv.error) {
-			let err = this.el(doc, "div", "annota-chat-msg annota-chat-error");
+			let err = this.el(doc, "div", "annota-error" + (conv.error.stopped ? " annota-stopped" : ""));
 			err.appendChild(this.el(doc, "div", null, conv.error.message));
 			let last = conv.messages[conv.messages.length - 1];
 			if (last && last.role === "user" && !conv.busy) {
-				let actions = this.el(doc, "div", "annota-chat-actions");
-				actions.appendChild(this.button(doc, "Retry", "annota-chat-link", () => {
+				let retry = this.button(doc, null, "annota-link-btn", () => {
 					this.answer(conv).catch(e => log("answer: " + e));
-				}));
-				err.appendChild(actions);
+				});
+				retry.appendChild(this.icon(doc, "retry", 12));
+				retry.appendChild(this.el(doc, "span", null, "Retry"));
+				err.appendChild(retry);
 			}
 			box.appendChild(err);
 		}
-		box.scrollTop = box.scrollHeight;
+		this.updateChips(inst);
+		this.updateSend(inst);
+		inst.scroller.scrollTop = inst.scroller.scrollHeight;
 	},
 
 	SUGGESTIONS: {
 		document: [
 			["Summarize", "Summarize this document: question, method, main findings."],
-			["Main argument", "What is the main argument, and how is it supported?"],
-			["Methods & data", "Which methods and data does it use?"],
+			["Key argument", "What is the main argument, and how is it supported?"],
+			["Methods", "Which methods and data does it use?"],
 			["Limitations", "What are its limitations, stated or not?"],
-			["My annotations", "Summarize my annotations on this document."]
+			["My highlights", "Summarize my annotations on this document."]
 		],
 		library: [
 			["What do I have on…", "What does my library say about "],
-			["Compare", "Compare how the items in my library address "]
+			["Compare", "Compare how the references in my library address "],
+			["Find a source", "Which reference in my library would support the claim that "]
 		]
 	},
 
 	renderEmpty(inst, conv) {
 		let doc = inst.doc;
-		let wrap = this.el(doc, "div", "annota-chat-empty");
-		wrap.appendChild(this.el(doc, "div", null, conv.scope === "library"
-			? "Ask a question: Annota searches your library for matching references,"
-				+ " notes and annotations, and the answer cites them."
-			: "Ask anything about this document. Answers cite pages — click one to jump"
-				+ " there. Select text in the PDF and use “💬 Ask Annota” to quote it."));
-		let chips = this.el(doc, "div", "annota-chat-suggest");
+		let wrap = this.el(doc, "div", "annota-home");
+		let badge = this.el(doc, "div", "annota-home-icon");
+		badge.appendChild(this.icon(doc, "chat", 26));
+		wrap.appendChild(badge);
+		let item = this.convItem(conv);
+		let lib = conv.scope === "library";
+		wrap.appendChild(this.el(doc, "div", "annota-home-title",
+			lib ? "Ask your library" : "Ask about this document"));
+		wrap.appendChild(this.el(doc, "div", "annota-home-sub", lib
+			? "Annota searches your references, notes and annotations, and cites them."
+			: (this.shortTitle(this.topItem(item)) || "")
+				+ " — answers cite pages; click one to jump there."));
+		let actions = this.el(doc, "div", "annota-home-actions");
 		for (let [label, prompt] of this.SUGGESTIONS[conv.scope] || []) {
-			chips.appendChild(this.button(doc, label, "annota-chat-chip", () => {
+			actions.appendChild(this.button(doc, label, "annota-launch", () => {
 				// Une suggestion ouverte (« … about ») attend la fin de la phrase.
 				if (/\s$/.test(prompt)) {
 					inst.input.value = prompt;
+					this.autoGrow(inst);
+					this.updateSend(inst);
 					inst.input.focus();
 				}
 				else this.submit(inst, prompt);
 			}));
 		}
-		wrap.appendChild(chips);
+		wrap.appendChild(actions);
+		if (!lib) {
+			wrap.appendChild(this.el(doc, "div", "annota-home-hint",
+				"Tip: select text in the PDF and click “💬 Ask Annota” to quote it here."));
+		}
 		return wrap;
 	},
 
 	renderMessage(inst, conv, m, i) {
 		let doc = inst.doc;
-		let wrap = this.el(doc, "div", "annota-chat-msg annota-chat-" + m.role);
-		wrap.appendChild(this.renderMarkdown(doc, m.content, m.role === "assistant" ? m : null));
-		if (m.role !== "assistant") return wrap;
-
-		let actions = this.el(doc, "div", "annota-chat-actions");
-		actions.appendChild(this.button(doc, "Copy", "annota-chat-link", () => {
-			try { Zotero.Utilities.Internal.copyTextToClipboard(m.content); }
+		if (m.role === "user") {
+			let card = this.el(doc, "div", "annota-user");
+			card.appendChild(this.renderMarkdown(doc, m.content, null));
+			return card;
+		}
+		let wrap = this.el(doc, "div", "annota-answer");
+		wrap.appendChild(this.renderMarkdown(doc, m.content, m));
+		let foot = this.el(doc, "div", "annota-answer-foot");
+		let copy = this.iconButton(doc, "copy", "Copy", () => {
+			try {
+				Zotero.Utilities.Internal.copyTextToClipboard(m.content);
+				copy.textContent = "";
+				copy.appendChild(this.icon(doc, "check"));
+				inst.win.setTimeout(() => {
+					copy.textContent = "";
+					copy.appendChild(this.icon(doc, "copy"));
+				}, 1200);
+			}
 			catch (e) { log("copy: " + e); }
-		}));
-		actions.appendChild(this.button(doc, "Save as note", "annota-chat-link", () => {
+		}, "annota-icon-sm");
+		foot.appendChild(copy);
+		foot.appendChild(this.iconButton(doc, "note", "Save as note (with its question)", () => {
 			let q = conv.messages[i - 1];
 			let pair = q && q.role === "user" ? [q, m] : [m];
 			this.saveNote(conv, pair).catch(e => log("saveNote: " + e));
-		}, "Save this answer, with its question, as a child note"));
+		}, "annota-icon-sm"));
 		let meta = [this.PROVIDER_LABELS[m.provider] || m.provider, m.model,
 			m.seconds != null ? m.seconds + " s" : "", m.note].filter(Boolean).join(" · ");
-		actions.appendChild(this.el(doc, "span", "annota-chat-meta", meta));
-		wrap.appendChild(actions);
+		foot.appendChild(this.el(doc, "span", "annota-answer-meta", meta));
+		wrap.appendChild(foot);
 		return wrap;
 	},
 
@@ -1236,8 +1603,10 @@ var AnnotaChat = {
 		catch (e) { log("selectItem: " + e); }
 	},
 
-	citeLink(doc, text, title, onClick) {
-		let a = this.el(doc, "span", "annota-chat-cite", text);
+	// Pastille de citation : verte pour une page (elle ouvre le PDF à cet
+	// endroit), grise pour une référence de la bibliothèque.
+	pill(doc, text, title, kind, onClick) {
+		let a = this.el(doc, "span", "annota-cite annota-cite-" + kind, text);
 		a.setAttribute("role", "link");
 		a.setAttribute("tabindex", "0");
 		a.setAttribute("title", title);
@@ -1250,28 +1619,25 @@ var AnnotaChat = {
 		let sources = (msg && msg.sources) || [];
 		let linkable = isPage ? !!(msg && msg.attachmentID) : sources.length > 0;
 		if (!linkable) { parent.appendChild(doc.createTextNode(v)); return; }
-		let { prefix, parts } = this.splitCitation(v, isPage);
-		let span = this.el(doc, "span", "annota-chat-citegroup");
-		span.appendChild(doc.createTextNode("[" + prefix));
+		let { parts } = this.splitCitation(v, isPage);
+		let pills = [];
 		for (let part of parts) {
-			if (part.sep !== undefined) { span.appendChild(doc.createTextNode(part.sep)); continue; }
-			if (isPage && part.target && this.pageIndexFor(msg, part.target) !== null) {
-				span.appendChild(this.citeLink(doc, part.text, "Open page " + part.target,
-					() => this.openPage(msg, part.target)));
+			if (part.sep !== undefined || !part.target) continue;
+			if (isPage) {
+				if (this.pageIndexFor(msg, part.target) === null) continue;
+				pills.push(this.pill(doc, "p. " + part.text.trim(), "Open page " + part.target,
+					"page", () => this.openPage(msg, part.target)));
 				continue;
 			}
-			let src = !isPage && sources.find(s => String(s.n) === part.target);
-			if (src) {
-				let it = Zotero.Items.get(src.id);
-				let title = it ? (it.getDisplayTitle ? it.getDisplayTitle() : "") : "";
-				span.appendChild(this.citeLink(doc, part.text, title || "Show in library",
-					() => this.selectItem(src.id)));
-				continue;
-			}
-			span.appendChild(doc.createTextNode(part.text));
+			let src = sources.find(s => String(s.n) === part.target);
+			if (!src) continue;
+			let it = Zotero.Items.get(src.id);
+			let title = it && it.getDisplayTitle ? it.getDisplayTitle() : "";
+			pills.push(this.pill(doc, part.target, title || "Show in library", "source",
+				() => this.selectItem(src.id)));
 		}
-		span.appendChild(doc.createTextNode("]"));
-		parent.appendChild(span);
+		if (!pills.length) { parent.appendChild(doc.createTextNode(v)); return; }
+		for (let p of pills) parent.appendChild(p);
 	},
 
 	appendInline(doc, parent, tokens, msg) {
@@ -1411,15 +1777,14 @@ var AnnotaChat = {
 	},
 
 	async saveNote(conv, messages) {
-		let item = this.convItem(conv);
-		let top = this.topItem(item);
-		if (!top) return;
-		let lib = Zotero.Libraries.get(top.libraryID);
+		let top = this.topItem(this.convItem(conv));
+		let libraryID = top ? top.libraryID : conv.libraryID;
+		let lib = Zotero.Libraries.get(libraryID);
 		if (lib && lib.editable === false) {
 			toast("Annota", "This library is read-only — the note can't be saved.", "error");
 			return;
 		}
-		let title = top.getDisplayTitle ? top.getDisplayTitle() : "";
+		let title = top && top.getDisplayTitle ? top.getDisplayTitle() : "";
 		let html = ["<h1>" + this.esc("💬 " + (title || "Annota chat")) + "</h1>"];
 		for (let m of messages) {
 			if (m.role === "user") {
@@ -1433,8 +1798,8 @@ var AnnotaChat = {
 			}
 		}
 		let note = new Zotero.Item("note");
-		note.libraryID = top.libraryID;
-		if (top.isRegularItem && top.isRegularItem()) note.parentID = top.id;
+		note.libraryID = libraryID;
+		if (top && top.isRegularItem && top.isRegularItem()) note.parentID = top.id;
 		note.setNote(html.join("\n"));
 		await note.saveTx();
 		toast("Annota", note.parentID ? "Saved as a note under this reference."
@@ -1449,76 +1814,40 @@ var AnnotaChat = {
 		return "> " + t + (pageLabel ? " [p. " + pageLabel + "]" : "") + "\n\n";
 	},
 
-	// Panneau où déposer une citation : de préférence celui qui est visible.
-	instanceFor(key) {
-		let all = Array.from(this._instances.values()).filter(i => i.key === key);
-		return all.find(i => {
-			try { return i.body.getClientRects().length > 0; }
-			catch (e) { return false; }
-		}) || all[0] || null;
-	},
-
+	// Ouvre le panneau et dépose la citation dans la zone de saisie.
 	addQuote(attachmentID, quote) {
 		if (!quote) return;
+		let win = Zotero.getMainWindow();
+		let rec = win && this._windows.get(win);
+		if (!rec) return;
+		this.toggle(win, true);
+		let inst = this.activeInstance(rec);
+		if (!inst) return;
 		let att = Zotero.Items.get(attachmentID);
 		let key = att ? this.keyFor(att) : null;
-		if (!key) return;
-		let conv = this.conversation(att);
-		if (conv) conv.scope = "document";
-		let inst = this.instanceFor(key);
-		if (inst) {
-			this.insertQuote(inst, quote);
-			this.renderInstance(inst);
-			this.reveal(inst);
+		if (key && inst.key !== key) {
+			inst.pendingQuote = quote;
 			return;
 		}
-		let list = this._pendingQuotes.get(key) || [];
-		list.push(quote);
-		this._pendingQuotes.set(key, list);
-		toast("Annota", "Quote added — open “Annota Chat” in the item pane to ask about it.");
-	},
-
-	takeQuotes(inst) {
-		let list = this._pendingQuotes.get(inst.key);
-		if (!list || !list.length) return;
-		this._pendingQuotes.delete(inst.key);
-		for (let q of list) this.insertQuote(inst, q);
+		let conv = this.conversationOf(inst);
+		if (conv && conv.itemID && !conv.busy && conv.scope !== "document") {
+			conv.scope = "document";
+			this.renderInstance(inst);
+		}
+		this.insertQuote(inst, quote);
 	},
 
 	insertQuote(inst, quote) {
 		let cur = inst.input.value;
 		inst.input.value = cur && !/\n\s*$/.test(cur) ? cur + "\n\n" + quote : cur + quote;
+		this.autoGrow(inst);
+		this.updateSend(inst);
 		try {
 			inst.input.focus();
 			let n = inst.input.value.length;
 			inst.input.setSelectionRange(n, n);
 		}
 		catch (e) {}
-	},
-
-	// Montre le panneau : volet de droite déplié, section ouverte et visible.
-	// Toutes ces accroches sont internes à Zotero, d'où les vérifications.
-	reveal(inst) {
-		try {
-			let win = inst.doc.defaultView;
-			let cp = win && win.ZoteroContextPane;
-			if (cp && cp.collapsed === true && typeof cp.togglePane === "function") cp.togglePane();
-		}
-		catch (e) {}
-		try {
-			let section = inst.body.closest("collapsible-section");
-			if (section && section.open === false) section.open = true;
-		}
-		catch (e) {}
-		try {
-			let details = inst.body.closest("item-details");
-			if (details && typeof details.scrollToPane === "function" && this.paneID) {
-				details.scrollToPane(this.paneID);
-			}
-			else inst.body.scrollIntoView({ block: "start" });
-		}
-		catch (e) {}
-		try { inst.input.focus(); } catch (e) {}
 	},
 
 	// Bouton du popup de sélection du lecteur.
@@ -1563,61 +1892,157 @@ var AnnotaChat = {
 	},
 
 	// ---- Styles ----
+	//
+	// Couleurs tirées du thème de Zotero (--material-*, --fill-*, --accent-*) :
+	// le panneau suit les thèmes clair, sombre et contraste élevé, comme
+	// Beaver qui s'appuie sur les mêmes jetons.
 
 	ensureStyles(doc) {
 		if (!doc || doc.getElementById("annota-chat-style")) return;
 		let st = doc.createElementNS(this.HTML_NS, "style");
 		st.id = "annota-chat-style";
 		st.textContent = `
-.annota-chat { display:flex; flex-direction:column; gap:6px; font-size:12.5px; min-width:0; }
-.annota-chat-bar { display:flex; gap:6px; flex-wrap:wrap; }
-.annota-chat-select { flex:1 1 9em; min-width:0; font:inherit; font-size:12px; }
-.annota-chat-sub { font-size:11px; opacity:.65; min-width:0; }
-.annota-chat-sub-text { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.annota-chat-log { display:flex; flex-direction:column; gap:8px; max-height:60vh; overflow-y:auto;
-  padding:2px 1px; user-select:text; -moz-user-select:text; }
-.annota-chat-msg { padding:6px 9px; border-radius:8px; line-height:1.45; overflow-wrap:anywhere; }
-.annota-chat-user { align-self:flex-end; max-width:92%;
-  background:color-mix(in srgb, var(--accent-blue, #4072e5) 16%, transparent); }
-.annota-chat-assistant { background:var(--fill-quinary, rgba(128,128,128,.10)); }
-.annota-chat-error { background:rgba(220,60,60,.10); border:1px solid rgba(220,60,60,.35); }
-.annota-chat-md > :first-child { margin-top:0; }
-.annota-chat-md > :last-child { margin-bottom:0; }
-.annota-chat-md p { margin:0 0 6px; }
-.annota-chat-md .annota-chat-h { font-weight:600; margin:8px 0 4px; }
-.annota-chat-md ul, .annota-chat-md ol { margin:0 0 6px; padding-inline-start:18px; }
-.annota-chat-md li { margin:1px 0; }
-.annota-chat-md blockquote { margin:0 0 6px; padding-inline-start:8px;
-  border-inline-start:3px solid rgba(128,128,128,.5); opacity:.85; }
-.annota-chat-md pre { white-space:pre-wrap; margin:0 0 6px; padding:6px; border-radius:4px;
-  background:rgba(128,128,128,.12); font-size:11.5px; }
-.annota-chat-md code { font-family:monospace; font-size:.95em; }
-.annota-chat-md table { border-collapse:collapse; margin:0 0 6px; font-size:11.5px; }
-.annota-chat-md th, .annota-chat-md td { border:1px solid rgba(128,128,128,.35); padding:2px 5px;
-  text-align:start; vertical-align:top; }
-.annota-chat-md hr { border:none; border-top:1px solid rgba(128,128,128,.35); margin:6px 0; }
-.annota-chat-cite { color:var(--accent-blue, #4072e5); cursor:pointer; }
-.annota-chat-cite:hover, .annota-chat-cite:focus { text-decoration:underline; }
-.annota-chat-actions { display:flex; flex-wrap:wrap; gap:4px 10px; align-items:center;
-  margin-top:5px; font-size:11px; }
-.annota-chat-meta { opacity:.55; }
-.annota-chat-link { appearance:none; background:none; border:none; padding:0; font:inherit;
-  font-size:11px; color:inherit; opacity:.7; cursor:pointer; text-decoration:underline; }
-.annota-chat-link:hover { opacity:1; }
-.annota-chat-tools { display:flex; gap:12px; justify-content:flex-end; }
-.annota-chat-status { font-size:11px; opacity:.7; }
-.annota-chat-status:empty { display:none; }
-.annota-chat-form { display:flex; gap:6px; align-items:flex-end; }
-.annota-chat-input { flex:1; min-width:0; min-height:3.4em; resize:vertical; box-sizing:border-box;
-  font:inherit; font-size:12.5px; padding:5px 7px; border-radius:6px; color:inherit;
-  border:1px solid rgba(128,128,128,.45); background:var(--material-background, Field); }
-.annota-chat-send { font:inherit; font-size:12px; padding:5px 12px; border-radius:6px; cursor:pointer; }
-.annota-chat-send[data-busy="true"] { color:rgb(200,50,50); }
-.annota-chat-empty { display:flex; flex-direction:column; gap:6px; font-size:12px; opacity:.85; }
-.annota-chat-suggest { display:flex; flex-wrap:wrap; gap:4px; }
-.annota-chat-chip { appearance:none; font:inherit; font-size:11px; padding:2px 9px; cursor:pointer;
-  border:1px solid rgba(128,128,128,.4); border-radius:10px; background:none; color:inherit; }
-.annota-chat-chip:hover { background:rgba(128,128,128,.14); }
+#annota-tb-chat {
+  list-style-image: url("${Annota.rootURI}chat.svg");
+  -moz-context-properties: fill, fill-opacity;
+  fill: var(--fill-secondary);
+  width: 28px; height: 28px; padding: 6px; border-radius: 5px;
+}
+#annota-tb-chat:hover { background-color: var(--fill-quinary); }
+#annota-tb-chat:active, #annota-tb-chat[selected] { background-color: var(--fill-quarternary); }
+
+.annota-pane { flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; height: 100%;
+  background: var(--material-sidepane, Field); }
+.annota-chat { --annota-surface: var(--material-sidepane, Field);
+  display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; min-height: 0; height: 100%;
+  font-size: 13px; color: var(--fill-primary, inherit); }
+.annota-chat button { margin: 0; font: inherit; }
+
+.annota-chat-header { flex: none; display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  border-bottom: 1px solid var(--fill-quinary, rgba(128,128,128,.2)); }
+.annota-chat-header-group { flex: 1 1 0; display: flex; align-items: center; gap: 2px; }
+.annota-chat-header-group:last-child { justify-content: flex-end; }
+.annota-chat-title { font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--fill-secondary); }
+
+.annota-icon-btn { appearance: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0; border: none; border-radius: 6px; background: transparent;
+  color: var(--fill-secondary); cursor: pointer; }
+.annota-icon-btn:hover:not(:disabled) { background: var(--fill-quinary); color: var(--fill-primary); }
+.annota-icon-btn:disabled { opacity: .35; cursor: default; }
+.annota-icon-btn.annota-icon-sm { width: 22px; height: 22px; border-radius: 5px; }
+.annota-icon-btn.annota-icon-sm svg { width: 14px; height: 14px; }
+
+.annota-chat-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.annota-chat-thread { display: flex; flex-direction: column; gap: 14px; padding: 14px 14px 8px;
+  box-sizing: border-box; user-select: text; -moz-user-select: text; }
+.annota-chat[data-empty="true"] .annota-chat-thread { min-height: 100%; justify-content: center; }
+
+.annota-user { padding: 8px 11px; border: 1px solid var(--fill-quarternary, rgba(128,128,128,.3));
+  border-radius: 10px; background: var(--material-mix-quarternary, rgba(128,128,128,.07));
+  line-height: 1.5; overflow-wrap: anywhere; }
+.annota-answer { line-height: 1.55; padding: 0 2px; overflow-wrap: anywhere; }
+.annota-answer-foot { display: flex; align-items: center; gap: 1px; margin: 5px 0 0 -4px;
+  opacity: .5; transition: opacity .15s ease; }
+.annota-answer:hover .annota-answer-foot, .annota-answer:focus-within .annota-answer-foot { opacity: 1; }
+.annota-answer-meta { margin-left: 6px; min-width: 0; font-size: 11px; color: var(--fill-secondary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.annota-chat-md > :first-child { margin-top: 0; }
+.annota-chat-md > :last-child { margin-bottom: 0; }
+.annota-chat-md p { margin: 0 0 .65em; }
+.annota-chat-md .annota-chat-h { font-weight: 600; margin: .9em 0 .35em; }
+.annota-chat-md ul, .annota-chat-md ol { margin: 0 0 .65em; padding-inline-start: 1.35em; }
+.annota-chat-md li { margin: .2em 0; }
+.annota-chat-md blockquote { margin: 0 0 .65em; padding-inline-start: .7em;
+  border-inline-start: 3px solid var(--fill-quarternary, rgba(128,128,128,.4)); color: var(--fill-secondary); }
+.annota-chat-md pre { white-space: pre-wrap; margin: 0 0 .65em; padding: 7px 9px; border-radius: 6px;
+  background: var(--fill-quinary, rgba(128,128,128,.12)); font-size: 12px; }
+.annota-chat-md code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .92em;
+  padding: 0 .25em; border-radius: 3px; background: var(--fill-quinary, rgba(128,128,128,.12)); }
+.annota-chat-md pre code { padding: 0; background: none; }
+.annota-chat-md table { border-collapse: collapse; margin: 0 0 .65em; font-size: 12px; line-height: 1.45; }
+.annota-chat-md th, .annota-chat-md td { border: 1px solid var(--fill-quarternary, rgba(128,128,128,.35));
+  padding: 3px 6px; text-align: start; vertical-align: top; }
+.annota-chat-md th { background: var(--fill-quinary, rgba(128,128,128,.1)); font-weight: 600; }
+.annota-chat-md hr { border: none; border-top: 1px solid var(--fill-quinary, rgba(128,128,128,.3)); margin: .8em 0; }
+.annota-chat-md strong { font-weight: 600; }
+
+.annota-cite { display: inline-block; cursor: pointer; margin-left: .2em; padding: 0 .4em;
+  font-size: .78em; line-height: 1.4; vertical-align: .08em; border-radius: .3em; white-space: nowrap;
+  border: 1px solid var(--fill-quinary, rgba(128,128,128,.2));
+  background: var(--fill-quinary, rgba(128,128,128,.12)); color: var(--fill-secondary);
+  transition: background-color .15s ease, color .15s ease; }
+.annota-cite-source:hover, .annota-cite-source:focus { color: var(--fill-primary); }
+.annota-cite-page { border-color: #22c55e4d; background: #22c55e0f; color: #22c55ee5; }
+.annota-cite-page:hover, .annota-cite-page:focus { background: #22c55e1f; }
+
+.annota-thinking { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fill-secondary); }
+.annota-dots { display: inline-flex; gap: 3px; }
+.annota-dots span { width: 5px; height: 5px; border-radius: 50%; background: currentColor;
+  animation: annota-blink 1.2s infinite ease-in-out both; }
+.annota-dots span:nth-child(2) { animation-delay: .15s; }
+.annota-dots span:nth-child(3) { animation-delay: .3s; }
+@keyframes annota-blink { 0%, 80%, 100% { opacity: .2; } 40% { opacity: 1; } }
+
+.annota-error { display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  padding: 8px 11px; border-radius: 10px; font-size: 12.5px; line-height: 1.45;
+  border: 1px solid #ff66664d; background: #ff66660f; }
+.annota-error.annota-stopped { border-color: var(--fill-quarternary, rgba(128,128,128,.3));
+  background: transparent; color: var(--fill-secondary); }
+.annota-link-btn { appearance: none; display: inline-flex; align-items: center; gap: 4px; padding: 0;
+  border: none; background: none; font-size: 12px; color: var(--accent-blue, #4072e5); cursor: pointer; }
+.annota-link-btn:hover { text-decoration: underline; }
+
+.annota-chat-dock { flex: none; padding: 6px 10px 10px; }
+.annota-composer { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px 6px;
+  border: 1px solid var(--fill-quarternary, rgba(128,128,128,.3)); border-radius: 10px;
+  background: var(--material-mix-quarternary, rgba(128,128,128,.06));
+  transition: border-color .15s ease; }
+.annota-composer:focus-within { border-color: color-mix(in srgb, var(--accent-blue, #4072e5) 55%, transparent); }
+.annota-composer-chips { display: flex; flex-wrap: nowrap; gap: 5px; min-width: 0; }
+.annota-chip { appearance: none; display: inline-flex; align-items: center; gap: 4px; max-width: 100%;
+  padding: 2px 7px; border-radius: 6px; border: 1px solid var(--fill-quarternary, rgba(128,128,128,.3));
+  background: transparent; color: var(--fill-secondary); font-size: 11.5px; cursor: pointer;
+  flex: 0 1 auto; min-width: 0; }
+.annota-chip svg { flex: none; }
+.annota-chip:last-child { flex: 0 0 auto; max-width: 45%; }
+.annota-chip:hover { background: var(--fill-quinary); }
+.annota-chip[data-active="true"] { background: var(--material-background, Field); color: var(--fill-primary);
+  border-color: var(--fill-tertiary, rgba(128,128,128,.5)); }
+.annota-chip[hidden] { display: none; }
+.annota-chip-label { min-width: 0; max-width: 18em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.annota-composer-input { appearance: none; display: block; width: 100%; box-sizing: border-box;
+  min-height: 1.5em; max-height: 180px; padding: 2px 0; resize: none; overflow-y: auto;
+  border: none; outline: none; background: transparent; color: inherit;
+  font: inherit; font-size: 13px; line-height: 1.45; }
+.annota-composer-input::placeholder { color: var(--fill-tertiary); }
+.annota-composer-controls { display: flex; align-items: center; gap: 4px; margin: 0 -3px; }
+.annota-model-select { appearance: none; -moz-appearance: none; min-width: 0; max-width: 80%;
+  padding: 3px 6px; border: none; border-radius: 6px; background: transparent;
+  color: var(--fill-secondary); font: inherit; font-size: 11.5px; text-overflow: ellipsis; cursor: pointer; }
+.annota-model-select:hover, .annota-model-select:focus { background: var(--fill-quinary); color: var(--fill-primary); }
+.annota-flex { flex: 1 1 auto; }
+.annota-send { appearance: none; flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; padding: 0; border: none; border-radius: 999px;
+  background: var(--accent-blue, #4072e5); color: #fff; cursor: pointer; }
+.annota-send:disabled { background: var(--fill-quarternary, rgba(128,128,128,.3)); color: var(--fill-tertiary); cursor: default; }
+.annota-send[data-busy="true"] { background: var(--material-background, Field); color: var(--fill-primary);
+  border: 1px solid var(--fill-quarternary, rgba(128,128,128,.3)); }
+.annota-send svg { stroke-width: 2; }
+
+.annota-home { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 4px;
+  text-align: center; }
+.annota-home-icon { display: flex; align-items: center; justify-content: center; width: 46px; height: 46px;
+  margin-bottom: 4px; border-radius: 12px; background: var(--fill-quinary, rgba(128,128,128,.12));
+  color: var(--fill-secondary); }
+.annota-home-title { font-size: 15px; font-weight: 600; }
+.annota-home-sub { max-width: 26em; font-size: 12px; line-height: 1.45; color: var(--fill-secondary); }
+.annota-home-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 10px; }
+.annota-launch { appearance: none; padding: 4px 9px; border-radius: 6px;
+  border: 1px solid var(--fill-quarternary, rgba(128,128,128,.3)); background: transparent;
+  color: var(--fill-primary, inherit); font-size: 12px; font-weight: 500; cursor: pointer; }
+.annota-launch:hover { background: var(--fill-quinary); }
+.annota-home-hint { margin-top: 12px; font-size: 11px; color: var(--fill-tertiary, rgba(128,128,128,.8)); }
 `;
 		let host = doc.head || doc.documentElement;
 		if (host) host.appendChild(st);

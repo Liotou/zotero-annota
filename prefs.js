@@ -79,3 +79,6 @@ pref("extensions.zotero.annota.chatLibraryItems", 8);
 pref("extensions.zotero.annota.chatInstructions", "");
 // Bouton « Ask Annota » dans le popup de sélection du lecteur.
 pref("extensions.zotero.annota.chatSelectionButton", true);
+// Raccourci d'ouverture du panneau de discussion : ⌘ (Mac) ou Ctrl + cette
+// lettre. Vide = aucun raccourci (le bouton de la barre des onglets reste).
+pref("extensions.zotero.annota.chatShortcut", "J");

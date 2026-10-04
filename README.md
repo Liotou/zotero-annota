@@ -35,7 +35,7 @@ Ready-made prompts are collected in
 (default) or any OpenAI-compatible endpoint.
 
 💬 **Annota also lets you chat with what you read** — the open PDF or your
-whole library — in a panel of the item pane, with the AI you already set up
+whole library — in a side panel, with the AI you already set up
 (remote API, Ollama, Claude Code CLI or Apple Intelligence). Answers cite pages
 and references, and a click takes you there. See
 [Chat with your documents](#-chat-with-your-documents).
@@ -76,7 +76,7 @@ and you get something else entirely.
    ```bash
    ./build.sh
    ```
-   (or zip `manifest.json`, `bootstrap.js`, `chat.js`, `chat.svg`, `locale/`,
+   (or zip `manifest.json`, `bootstrap.js`, `chat.js`, `chat.svg`,
    `prefs.js`, `preferences.xhtml`, `preferences.js`, `preferences.css` and the
    icons at the root of a `.zip`, then rename it to `.xpi`).
 2. In Zotero → **Tools → Add-ons** → gear ⚙️ →
@@ -354,12 +354,20 @@ color has no prompt are skipped and reported as such.
 
 ## 💬 Chat with your documents
 
-A section named **Annota Chat** sits in the item pane, on the right: next to a
-reference in the library, and in the side pane of the PDF reader (click the
-💬 icon in the side navigation to jump to it). Ask a question, get an answer
-grounded in the source.
+Click the **💬 button** in the tab bar (next to sync), or press **⌘J / Ctrl+J**:
+a full-height chat panel takes the place of the right-hand pane, in the
+library as in the PDF reader, much like Beaver's. Close it (✕, the same
+shortcut, or Esc in an empty box) and Zotero's pane comes back as it was.
+Ask a question, get an answer grounded in the source.
 
-**Two scopes**, picked in the panel:
+The panel follows what you look at: the PDF of the current reader tab, or the
+reference selected in the library. With no single reference selected, it
+talks to the whole library. The box at the bottom shows what the model reads —
+**📄 the document** or **📚 the library**, one click to switch — and, below
+it, **the AI it will use**: pick another one there in a click. Answers cite
+pages as green tags and references as grey numbers; click one to go there.
+
+**Two scopes**, picked above the text box:
 
 - **📄 This document** — the model reads the reference's details, the full
   text, **your annotations** (highlights and comments) and **your notes**.
@@ -371,7 +379,7 @@ grounded in the source.
   annotations that mention them. Answers cite `[1]`, `[2]`; clicking a number
   selects that reference in the library.
 
-**Your AI, your choice.** The panel's menu lists the providers already
+**Your AI, your choice.** The menu under the text box lists the providers already
 configured in the **✨ AI** tab — remote API (Mistral or any OpenAI-compatible
 endpoint), Ollama, Claude Code CLI, Apple Intelligence — and switches on the
 fly. *Default* follows the provider of your annotations. The **💬 Chat** tab
@@ -383,8 +391,8 @@ instructions** (field, tone, format), added to Annota's.
 the selection popup, or right-click an annotation → **Annota — ask in chat**:
 the passage is quoted in the chat box, with its page, ready for your question.
 
-**Keep what matters.** Each answer can be copied or **saved as a note** under
-the reference (with its question); **Save chat as note** keeps the whole
+**Keep what matters.** Under each answer, copy it or **save it as a note** under
+the reference (with its question); the note button at the top keeps the whole
 exchange. Page and reference citations stay clickable in the note. A
 conversation lives as long as Zotero is open, one per reference — the PDF in
 the reader and its entry in the library share it.
@@ -430,8 +438,10 @@ The API key is stored **in plain text** in the Zotero profile's preferences
 - Provider call shared by annotations and chat (retries, model, history,
   cancel): `bootstrap.js` → `complete()`.
 - Chat panel, context building and citation rendering: `chat.js`
-  (`AnnotaChat`), loaded at startup; its labels live in
-  `locale/en-US/annota-chat.ftl`.
+  (`AnnotaChat`), loaded at startup. The panel is mounted in
+  `#zotero-item-pane` and `#zotero-context-pane` and hides their other
+  children while open, as Beaver does; the shortcut letter is the
+  `extensions.zotero.annota.chatShortcut` preference (empty = none).
 
 ### 🚀 Releasing
 
