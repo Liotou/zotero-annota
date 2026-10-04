@@ -110,13 +110,28 @@
 				let on = t.getAttribute("data-pane") === name;
 				t.setAttribute("data-active", on ? "true" : "false");
 				t.setAttribute("aria-selected", on ? "true" : "false");
+				t.setAttribute("tabindex", on ? "0" : "-1");
 			}
+			let a = api();
+			if (a) a._prefsTab = name;
 		}
 
 		for (let t of tabs) {
 			t.addEventListener("click", () => apply(t.getAttribute("data-pane")));
+			// Flèches gauche/droite : d'un onglet à l'autre, comme un tablist.
+			t.addEventListener("keydown", (e) => {
+				if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+				e.preventDefault();
+				let i = tabs.indexOf(t) + (e.key === "ArrowRight" ? 1 : -1);
+				let next = tabs[(i + tabs.length) % tabs.length];
+				next.focus();
+				apply(next.getAttribute("data-pane"));
+			});
 		}
-		apply("colors");
+		// Rouvrir les réglages ramène au dernier onglet consulté.
+		let a = api();
+		let last = a && a._prefsTab;
+		apply(panes[last] ? last : "colors");
 	}
 
 	// Sélecteur de fournisseur : n'affiche que les réglages du fournisseur actif.
@@ -179,7 +194,7 @@
 		}
 
 		function setStatus(msg) {
-			if (status) status.setAttribute("value", msg || "");
+			if (status) status.textContent = msg || "";
 		}
 
 		function fill(names) {
@@ -223,7 +238,6 @@
 			Zotero.Prefs.set(PREF_MODEL, sel.value);
 			setStatus("Saved ✓");
 		});
-		btn.addEventListener("command", refresh);
 		btn.addEventListener("click", refresh);
 
 		fill([]);        // afficher au moins la valeur enregistrée
@@ -270,12 +284,13 @@
 		let swatchBox = document.getElementById("annota-swatches");
 		let targetName = document.getElementById("annota-target-name");
 		let idleWarning = document.getElementById("annota-idle-warning");
-		let triggerGroup = document.getElementById("annota-trigger");
+		let triggerRadios = Array.from(
+			document.querySelectorAll('input[name="annota-trigger"]'));
 		let templateArea = document.getElementById("annota-template");
 		let fieldsArea = document.getElementById("annota-fields");
 		let lintBox = document.getElementById("annota-lint");
 		let labelInput = document.getElementById("annota-label");
-		if (!textarea || !swatchBox || !triggerGroup || !templateArea || !fieldsArea
+		if (!textarea || !swatchBox || triggerRadios.length < 2 || !templateArea || !fieldsArea
 				|| !labelInput) {
 			retry(setup, tries);
 			return;
@@ -293,14 +308,18 @@
 		let flashTimer = null;
 		function flashStatus(msg) {
 			if (!status) return;
-			status.setAttribute("value", msg);
+			status.textContent = msg;
 			if (flashTimer) clearTimeout(flashTimer);
-			flashTimer = setTimeout(() => status.setAttribute("value", ""), 2000);
+			flashTimer = setTimeout(() => { status.textContent = ""; }, 2000);
 		}
 
 		function currentTrigger() {
-			let v = triggerGroup.value || triggerGroup.getAttribute("value");
-			return v === "manual" ? "manual" : "auto";
+			let on = triggerRadios.find(r => r.checked);
+			return on && on.value === "manual" ? "manual" : "auto";
+		}
+
+		function setTrigger(v) {
+			for (let r of triggerRadios) r.checked = (r.value === (v === "manual" ? "manual" : "auto"));
 		}
 
 		function save() {
@@ -357,11 +376,11 @@
 			templateArea.value = entry ? (entry.template || "") : "";
 			fieldsArea.value = entry ? (entry.fields || "") : "";
 			labelInput.value = entry ? (entry.label || "") : "";
-			triggerGroup.value = entry ? entry.trigger : "auto";
+			setTrigger(entry ? entry.trigger : "auto");
 			lintNow();
 			if (targetName) {
 				let c = palette.find(x => x.hex === hex);
-				targetName.setAttribute("value", c ? c.name : hex);
+				targetName.textContent = c ? c.name : hex;
 			}
 			refreshSwatches();
 		}
@@ -420,11 +439,13 @@
 
 		// --- Choix du mode (auto / manuel) ---
 		// Ne sauvegarde que si la couleur a déjà un prompt (sinon rien à régler).
-		triggerGroup.addEventListener("command", () => {
-			if ((textarea.value && textarea.value.trim())
-					|| (templateArea.value && templateArea.value.trim())
-					|| (fieldsArea.value && fieldsArea.value.trim())) saveNow();
-		});
+		for (let r of triggerRadios) {
+			r.addEventListener("change", () => {
+				if ((textarea.value && textarea.value.trim())
+						|| (templateArea.value && templateArea.value.trim())
+						|| (fieldsArea.value && fieldsArea.value.trim())) saveNow();
+			});
+		}
 
 		// --- Bouton d'effacement ---
 		if (clearBtn) {
@@ -436,12 +457,11 @@
 				templateArea.value = "";
 				fieldsArea.value = "";
 				labelInput.value = "";
-				triggerGroup.value = "auto";
+				setTrigger("auto");
 				lintNow();
 				refreshSwatches();
 				flashStatus("Cleared ✓");
 			};
-			clearBtn.addEventListener("command", clearColor);
 			clearBtn.addEventListener("click", clearColor);
 		}
 
@@ -464,6 +484,8 @@
 		const PREF = "annota.chatProvider";
 		const PREF_INSTR = "annota.chatInstructions";
 		const KNOWN = ["openai", "ollama", "cli", "apple"];
+		const NAMES = { openai: "Mistral / API", ollama: "Ollama", cli: "Claude Code CLI",
+			apple: "Apple Intelligence" };
 
 		function describe() {
 			if (!state) return;
@@ -473,7 +495,21 @@
 			let err = a.providerReadyError(p);
 			state.textContent = err
 				? "⚠️ Not set up yet: " + err
-				: "✓ Ready" + (sel.value ? "" : " — currently " + p);
+				: "✓ Ready" + (sel.value ? "" : " — currently " + (NAMES[p] || p));
+		}
+
+		// Champs « modèle » vides : on montre celui qui s'appliquera.
+		let hints = {
+			"annota-chat-model": ["annota.model", "mistral-large-latest"],
+			"annota-chat-ollama-model": ["annota.ollamaModel", "llama3.1"],
+			"annota-chat-cli-model": ["annota.cliModel", "CLI default"]
+		};
+		for (let id of Object.keys(hints)) {
+			let el = document.getElementById(id);
+			if (!el) continue;
+			let [pref, fallback] = hints[id];
+			let m = String(Zotero.Prefs.get(pref) || "").trim() || fallback;
+			el.setAttribute("placeholder", "Same as AI tab: " + m);
 		}
 
 		let stored = String(Zotero.Prefs.get(PREF) || "").trim();
@@ -492,8 +528,8 @@
 			if (timer) { clearTimeout(timer); timer = null; }
 			Zotero.Prefs.set(PREF_INSTR, area.value);
 			if (status) {
-				status.setAttribute("value", "Saved ✓");
-				setTimeout(() => status.setAttribute("value", ""), 2000);
+				status.textContent = "Saved ✓";
+				setTimeout(() => { status.textContent = ""; }, 2000);
 			}
 		}
 		area.addEventListener("input", () => {
@@ -503,6 +539,58 @@
 		area.addEventListener("blur", save);
 	}
 
+	// ---- Liaison data-pref ----
+	// Chaque champ porteur de data-pref affiche sa préférence et l'écrit à la
+	// modification. Le type d'origine est conservé : un entier reste un
+	// entier, la température (chaîne historique) reste une chaîne, une case
+	// à cocher écrit un booléen. Une saisie numérique invalide n'est pas
+	// enregistrée plutôt que d'écrire NaN.
+	function bindPrefs(tries) {
+		let els = Array.from(document.querySelectorAll("[data-pref]"));
+		if (!els.length) {
+			retry(bindPrefs, tries);
+			return;
+		}
+		for (let el of els) {
+			let key = el.getAttribute("data-pref");
+			let cur = Zotero.Prefs.get(key);
+			let isBox = el.type === "checkbox";
+			if (isBox) el.checked = !!cur;
+			else el.value = (cur === undefined || cur === null) ? "" : String(cur);
+
+			let write = () => {
+				let v;
+				if (isBox) v = !!el.checked;
+				else if (typeof cur === "number") {
+					v = el.step && /\./.test(el.step) ? parseFloat(el.value) : parseInt(el.value, 10);
+					if (isNaN(v)) return;
+				}
+				else v = String(el.value);
+				Zotero.Prefs.set(key, v);
+				cur = v;
+			};
+			el.addEventListener(isBox ? "change" : "input", write);
+			if (!isBox) el.addEventListener("change", write);
+		}
+	}
+
+	// Clé d'API masquée par défaut, révélable le temps de la vérifier.
+	function setupKeyToggle(tries) {
+		let input = document.getElementById("annota-apikey");
+		let btn = document.getElementById("annota-apikey-show");
+		if (!input || !btn) {
+			retry(setupKeyToggle, tries);
+			return;
+		}
+		btn.addEventListener("click", () => {
+			let show = input.type === "password";
+			input.type = show ? "text" : "password";
+			btn.textContent = show ? "Hide" : "Show";
+		});
+	}
+
+	bindPrefs();
+	setupKeyToggle();
 	setupTabs();
 	setup();
 	setupProvider();

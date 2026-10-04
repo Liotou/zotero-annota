@@ -1,102 +1,331 @@
-/* Panneau de préférences Annota : onglets, sections, pastilles de couleur. */
+/* Panneau de préférences Annota.
+ *
+ * S'adapte à la largeur de la fenêtre : les formulaires sont des grilles
+ * « libellé | champ » qui passent sur une colonne quand la place manque
+ * (requête de conteneur, plus fiable que la largeur de la fenêtre : le
+ * panneau partage celle-ci avec la navigation des réglages), et aucun champ
+ * n'a de largeur fixe. Couleurs tirées des jetons du thème de Zotero, avec
+ * repli neutre. */
 
-/* ---- Onglets ---- */
+.annota-prefs {
+  container-type: inline-size;
+  container-name: annota;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  max-width: 860px;
+  box-sizing: border-box;
+  line-height: 1.4;
+}
+
+.annota-prefs *,
+.annota-prefs *::before,
+.annota-prefs *::after {
+  box-sizing: border-box;
+}
+
+.annota-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.annota-pane[hidden],
+.annota-prefs [hidden] {
+  display: none !important;
+}
+
+/* ---- Onglets : fixés en haut pendant le défilement ---- */
 
 #annota-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   display: flex;
-  gap: 4px;
-  margin: 0 0 14px;
-  border-bottom: 1px solid rgba(128, 128, 128, 0.35);
-  padding-bottom: 0;
+  gap: 2px;
+  margin: 0;
+  padding: 4px 0 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--fill-quarternary, rgba(128, 128, 128, 0.35));
+  background: var(--material-background, Field);
 }
 
 .annota-tab {
   appearance: none;
   -moz-appearance: none;
-  background: transparent;
+  flex: 0 0 auto;
+  margin: 0 0 -1px;
+  padding: 7px 14px;
   border: 1px solid transparent;
   border-bottom: none;
-  border-radius: 6px 6px 0 0;
-  padding: 6px 14px;
-  margin-bottom: -1px;
-  font: inherit;
-  cursor: pointer;
+  border-radius: 7px 7px 0 0;
+  background: transparent;
   color: inherit;
-  opacity: 0.7;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0.72;
 }
 
 .annota-tab:hover {
-  background: rgba(128, 128, 128, 0.14);
+  background: var(--fill-quinary, rgba(128, 128, 128, 0.14));
   opacity: 1;
+}
+
+.annota-tab:focus-visible {
+  outline: 2px solid var(--accent-blue, #4072e5);
+  outline-offset: -2px;
 }
 
 .annota-tab[data-active="true"] {
-  background: Field;
-  border-color: rgba(128, 128, 128, 0.35);
+  border-color: var(--fill-quarternary, rgba(128, 128, 128, 0.35));
+  background: var(--material-sidepane, Field);
+  font-weight: 600;
   opacity: 1;
+}
+
+/* ---- Cartes ---- */
+
+.annota-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--fill-quarternary, rgba(128, 128, 128, 0.28));
+  border-radius: 10px;
+  background: var(--material-sidepane, rgba(128, 128, 128, 0.05));
+}
+
+.annota-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 1.05em;
   font-weight: 600;
 }
 
-/* ---- Sections ---- */
+.annota-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent-blue, #4072e5);
+  color: #fff;
+  font-size: 0.8em;
+  font-weight: 700;
+}
+
+.annota-optional {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--fill-quinary, rgba(128, 128, 128, 0.14));
+  color: var(--fill-secondary, inherit);
+  font-size: 0.78em;
+  font-weight: 500;
+}
 
 .annota-lead {
-  margin: 0 0 10px;
+  margin: 4px 0 0;
   opacity: 0.85;
 }
 
-.annota-step {
-  margin: 16px 0 4px;
-}
-
-.annota-pane > .annota-step:first-of-type {
-  margin-top: 4px;
-}
-
 .annota-help {
-  margin: 0 0 6px;
-  opacity: 0.7;
+  margin: 0;
+  color: var(--fill-secondary, inherit);
   font-size: 0.92em;
 }
 
-.annota-editing {
-  margin: 4px 0 0;
+small.annota-help {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.86em;
+}
+
+.annota-warn {
+  padding: 8px 11px;
+  border-radius: 8px;
+  background: rgba(255, 190, 60, 0.16);
+  border: 1px solid rgba(200, 140, 0, 0.4);
+}
+
+.annota-state {
+  margin: 0;
+  font-size: 0.92em;
+}
+
+/* ---- Formulaires : libellé | champ, puis une seule colonne ---- */
+
+.annota-form {
+  display: grid;
+  grid-template-columns: minmax(7em, max-content) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 14px;
+  min-width: 0;
+}
+
+.annota-field-label {
+  color: var(--fill-secondary, inherit);
+  text-align: end;
+}
+
+.annota-field-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.annota-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
+  min-width: 0;
+}
+
+.annota-inline > .annota-input {
+  flex: 1 1 12em;
 }
 
 .annota-target {
   font-weight: 600;
 }
 
-.annota-warn {
-  margin: 6px 0;
-  padding: 6px 9px;
+/* Champs : jamais plus larges que leur colonne. */
+.annota-input {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--fill-quarternary, rgba(128, 128, 128, 0.45));
   border-radius: 6px;
-  background: rgba(255, 190, 60, 0.16);
-  border: 1px solid rgba(200, 140, 0, 0.4);
+  background: var(--material-background, Field);
+  color: inherit;
+  font: inherit;
+}
+
+.annota-input:focus {
+  outline: none;
+  border-color: var(--accent-blue, #4072e5);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-blue, #4072e5) 22%, transparent);
+}
+
+.annota-w-lg  { max-width: 34em; }
+.annota-w-md  { max-width: 22em; }
+.annota-w-sm  { max-width: 14em; }
+.annota-w-num { max-width: 8em; }
+.annota-w-key { max-width: 3.5em; text-align: center; text-transform: uppercase; }
+
+textarea.annota-input {
+  max-width: none;
+  resize: vertical;
+  line-height: 1.45;
 }
 
 .annota-code {
-  width: 100%;
-  box-sizing: border-box;
   font-family: ui-monospace, Menlo, Consolas, monospace;
   font-size: 0.92em;
 }
 
-.annota-provider-cfg {
-  margin: 6px 0 4px;
-  padding: 8px 10px;
+/* Cases à cocher et boutons radio : le texte se replie sous lui-même. */
+.annota-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.annota-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.annota-check > input {
+  flex: none;
+  margin: 2px 0 0;
+}
+
+.annota-check > span {
+  min-width: 0;
+}
+
+.annota-button {
+  appearance: none;
+  -moz-appearance: none;
+  flex: none;
+  padding: 5px 12px;
+  border: 1px solid var(--fill-quarternary, rgba(128, 128, 128, 0.45));
   border-radius: 6px;
-  background: rgba(128, 128, 128, 0.09);
+  background: var(--material-background, Field);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.annota-button:hover {
+  background: var(--fill-quinary, rgba(128, 128, 128, 0.14));
+}
+
+.annota-provider-cfg {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--fill-senary, rgba(128, 128, 128, 0.06));
+  border: 1px dashed var(--fill-quarternary, rgba(128, 128, 128, 0.3));
 }
 
 .annota-actions {
-  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+}
+
+.annota-actions-end {
+  justify-content: flex-end;
 }
 
 .annota-status {
-  opacity: 0.75;
+  color: var(--fill-secondary, inherit);
+  font-size: 0.92em;
+}
+
+/* ---- Fenêtre étroite ---- */
+
+@container annota (max-width: 520px) {
+  .annota-form {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+  }
+  .annota-field-label {
+    margin-top: 6px;
+    text-align: start;
+    font-size: 0.92em;
+  }
+  .annota-form > .annota-field-label:first-child {
+    margin-top: 0;
+  }
+  .annota-card {
+    padding: 10px 11px;
+  }
+  .annota-tab {
+    padding: 6px 10px;
+  }
 }
 
 /* ---- Blocs repliables ---- */
