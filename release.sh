@@ -28,6 +28,11 @@ echo "→ SHA-256 : ${HASH}"
 python3 - "$VERSION" "$HASH" "$REPO" <<'PY'
 import json, sys
 version, hash_, repo = sys.argv[1], sys.argv[2], sys.argv[3]
+
+# Bornes de compatibilité lues DANS le manifeste : les recopier ici, c'est se
+# condamner à les oublier le jour où Zotero change de version majeure.
+zot = json.load(open("manifest.json"))["applications"]["zotero"]
+bounds = {k: zot[k] for k in ("strict_min_version", "strict_max_version") if k in zot}
 data = {
   "addons": {
     "annota@equiriconi": {
@@ -35,9 +40,7 @@ data = {
         "version": version,
         "update_link": f"https://github.com/{repo}/releases/download/v{version}/annota.xpi",
         "update_hash": "sha256:" + hash_,
-        "applications": {
-          "zotero": {"strict_min_version": "7.0", "strict_max_version": "9.*"}
-        }
+        "applications": {"zotero": bounds}
       }]
     }
   }

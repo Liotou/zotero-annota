@@ -1,5 +1,5 @@
 /* eslint-disable no-undef */
-// Annota — extension Zotero 7/8/9
+// Annota — extension Zotero 7 → 10
 // À la création d'un surlignage, exécute un prompt configurable sur le texte
 // surligné et place la sortie du modèle dans le commentaire de l'annotation.
 

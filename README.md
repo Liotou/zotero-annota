@@ -1,4 +1,4 @@
-# Annota (Zotero 7 / 8 / 9)
+# Annota (Zotero 7 → 10)
 
 > 🤖 **Written by vibe coding with Claude.** This plugin was designed and
 > written in conversation with Claude (Anthropic), from the real needs of a
