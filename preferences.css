@@ -563,27 +563,80 @@ textarea.annota-fe-extra {
   display: flex;
 }
 
+/* Aperçu : une carte d'annotation de la barre latérale du lecteur. */
 .annota-fe-preview {
-  padding: 9px 12px;
-  border-radius: 8px;
-  border-left: 3px solid var(--accent-blue, #4072e5);
-  background: var(--fill-senary, rgba(128, 128, 128, 0.06));
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
 
-.annota-fe-preview-title {
-  margin-bottom: 4px;
+.annota-fe-preview-caption {
   color: var(--fill-secondary, inherit);
-  font-size: 0.8em;
+  font-size: 0.88em;
+}
+
+.annota-fe-annot {
+  --annota-hl: #ffd400;
+  max-width: 340px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--material-background, Field);
+  box-shadow: 0 0 0 1px var(--fill-quarternary, rgba(128, 128, 128, 0.3)),
+    0 1px 3px rgba(0, 0, 0, 0.08);
+  font-size: 0.95em;
+}
+
+.annota-fe-annot-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 9px;
+  border-bottom: 1px solid var(--fill-quinary, rgba(128, 128, 128, 0.2));
+  color: var(--fill-secondary, inherit);
+  font-size: 0.86em;
+}
+
+.annota-fe-annot-mark {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: var(--annota-hl);
+}
+
+.annota-fe-annot-page {
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
-.annota-fe-preview-body {
-  line-height: 1.5;
+.annota-fe-annot-tag {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.annota-fe-preview-ai {
+.annota-fe-annot-text {
+  margin: 8px 9px 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--annota-hl);
+  color: var(--fill-secondary, inherit);
+  font-style: italic;
+  line-height: 1.4;
+}
+
+.annota-fe-annot-comment {
+  padding: 7px 9px 9px;
+  line-height: 1.45;
+}
+
+.annota-fe-annot-ai {
+  text-decoration: underline dotted var(--fill-tertiary, rgba(128, 128, 128, 0.6));
+  text-underline-offset: 3px;
+}
+
+.annota-fe-annot-note {
   color: var(--fill-secondary, inherit);
 }
 

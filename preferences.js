@@ -440,7 +440,7 @@
 		return String(s || "").replace(/\|/g, "/").replace(/\s*\n\s*/g, " ").trim();
 	}
 
-	function createFieldEditor({ host, textarea, templateArea, onChange, onCommit }) {
+	function createFieldEditor({ host, textarea, templateArea, onChange, onCommit, getColor }) {
 		let a = api();
 		let rows = [];
 		// preferred : le choix de l'utilisateur ; mode : ce qui est affiché
@@ -527,20 +527,37 @@
 			if (commit) onCommit(); else onChange();
 		}
 
+		// Aperçu : l'annotation telle que la montre la barre latérale du
+		// lecteur Zotero (en-tête de page, passage marqué de la couleur en
+		// cours d'édition, commentaire), plutôt qu'un encadré abstrait.
 		function renderPreview() {
 			preview.textContent = "";
 			if (!rows.length) { preview.hidden = true; return; }
 			preview.hidden = false;
-			preview.appendChild(el("div", "annota-fe-preview-title", T("fe.preview")));
-			let body = el("div", "annota-fe-preview-body");
+			let c = (getColor && getColor()) || { hex: "#ffd400", name: "", label: "" };
+
+			preview.appendChild(el("div", "annota-fe-preview-caption", T("fe.preview")));
+			let card = el("div", "annota-fe-annot");
+			card.style.setProperty("--annota-hl", c.hex);
+
+			let head = el("div", "annota-fe-annot-head");
+			let mark = el("span", "annota-fe-annot-mark");
+			head.appendChild(mark);
+			head.appendChild(el("span", "annota-fe-annot-page", T("fe.preview.page")));
+			if (c.label || c.name) head.appendChild(el("span", "annota-fe-annot-tag", c.label || c.name));
+			card.appendChild(head);
+
+			card.appendChild(el("div", "annota-fe-annot-text", T("fe.preview.passage")));
+
+			let body = el("div", "annota-fe-annot-comment");
 			if (templateArea && templateArea.value.trim()) {
-				body.appendChild(el("span", "annota-help", T("fe.preview.layout")));
+				body.appendChild(el("span", "annota-fe-annot-note", T("fe.preview.layout")));
 			}
 			else {
 				for (let r of rows) {
 					let sample = r.type === "check" ? "✓ " + (r.label || r.name)
 						: r.type === "select" ? (r.options.split(",")[0] || "").trim() || r.label
-						: r.type === "ai" ? "⟨AI: " + (r.prompt || "instruction") + "⟩"
+						: r.type === "ai" ? (r.label || r.name)
 						: r.label || r.name;
 					let line = el("div");
 					let node = line;
@@ -554,11 +571,15 @@
 						let u = el("u"); node.appendChild(u); node = u;
 					}
 					node.textContent = sample;
-					if (r.type === "ai") line.setAttribute("class", "annota-fe-preview-ai");
+					if (r.type === "ai") {
+						line.setAttribute("class", "annota-fe-annot-ai");
+						line.setAttribute("title", T("fe.type.ai"));
+					}
 					body.appendChild(line);
 				}
 			}
-			preview.appendChild(body);
+			card.appendChild(body);
+			preview.appendChild(card);
 		}
 
 		function renderRow(r, i) {
@@ -742,7 +763,7 @@
 			render();
 			setMode(mode, true);
 		});
-		return { refresh };
+		return { refresh, preview: renderPreview };
 	}
 
 	function setup(tries) {
@@ -899,7 +920,10 @@
 		fieldsArea.setAttribute("placeholder", "name | Label | type | options");
 		fieldsArea.addEventListener("input", scheduleSave);
 		fieldsArea.addEventListener("blur", saveNow);
-		labelInput.addEventListener("input", scheduleSave);
+		labelInput.addEventListener("input", () => {
+			scheduleSave();
+			if (editor) editor.preview();
+		});
 		labelInput.addEventListener("blur", saveNow);
 
 		// --- Choix du mode (auto / manuel) ---
@@ -933,6 +957,11 @@
 
 		let editor = editorHost ? createFieldEditor({
 			host: editorHost,
+			getColor: () => {
+				let c = palette.find(x => x.hex === current);
+				return { hex: current, name: c ? c.name : "",
+					label: String(labelInput.value || "").trim() };
+			},
 			textarea: fieldsArea,
 			templateArea,
 			onChange: scheduleSave,
