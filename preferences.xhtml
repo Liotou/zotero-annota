@@ -386,6 +386,27 @@ resume     | Résumé     | ai       | Résume le passage en une phrase. | itali
       </html:div>
     </html:section>
 
+    <html:section class="annota-card" id="annota-spell-card">
+      <html:h3 class="annota-card-title" data-i18n="spell.title">Spelling and grammar (macOS)</html:h3>
+      <html:div class="annota-form">
+        <html:label class="annota-field-label" for="annota-spell-lang" data-i18n="spell.lang">Language</html:label>
+        <html:select id="annota-spell-lang" class="annota-input annota-w-md" data-pref="annota.spellLanguage">
+          <html:option value="auto" data-i18n="spell.auto">Automatic (detected by macOS)</html:option>
+          <html:option value="fr">Français</html:option>
+          <html:option value="en">English</html:option>
+          <html:option value="de">Deutsch</html:option>
+          <html:option value="es">Español</html:option>
+          <html:option value="it">Italiano</html:option>
+          <html:option value="pt">Português</html:option>
+        </html:select>
+      </html:div>
+      <html:label class="annota-check">
+        <html:input type="checkbox" data-pref="annota.spellGrammar"/>
+        <html:span data-i18n="spell.grammar">Also check grammar</html:span>
+      </html:label>
+      <html:p class="annota-help" data-i18n="spell.help">Uses the macOS spell checker (Pages, Mail). Right-click annotations in the reader, or references and notes in the library, then <html:b>Check spelling and grammar</html:b>. Only the visible text is checked; formatting is kept. Words added to the dictionary are shared with macOS.</html:p>
+    </html:section>
+
     <html:section class="annota-card">
       <html:h3 class="annota-card-title" data-i18n="behav.title">Behavior</html:h3>
       <html:label class="annota-check">

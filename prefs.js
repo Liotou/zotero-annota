@@ -94,3 +94,8 @@ pref("extensions.zotero.annota.chatShortcut", "J");
 // ---- Interface ----
 // Langue : "auto" (celle de Zotero), "en" ou "fr".
 pref("extensions.zotero.annota.uiLanguage", "auto");
+
+// ---- Orthographe et grammaire (macOS, NSSpellChecker) ----
+// Langue : "auto" (détection par macOS) ou un code de langue (fr, en…).
+pref("extensions.zotero.annota.spellLanguage", "auto");
+pref("extensions.zotero.annota.spellGrammar", true);

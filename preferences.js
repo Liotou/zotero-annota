@@ -1244,7 +1244,20 @@
 		sel.addEventListener("change", () => setTimeout(relocalize, 0));
 	}
 
+	// Orthographe : correcteur de macOS, la carte n'a pas de sens ailleurs.
+	function setupSpell(tries) {
+		let card = document.getElementById("annota-spell-card");
+		if (!card) {
+			retry(setupSpell, tries);
+			return;
+		}
+		let mac = false;
+		try { mac = !!Zotero.isMac; } catch (e) {}
+		card.hidden = !mac;
+	}
+
 	bindPrefs();
+	setupSpell();
 	setupLanguage();
 	setupKeyToggle();
 	setupCLI();

@@ -432,6 +432,23 @@ abandoned). Retries follow the setting of the ⚙️ General tab.
 > the document and your annotations are sent to it; with Ollama or Apple
 > Intelligence, nothing leaves the machine.
 
+## 🔤 Spelling and grammar (macOS)
+
+Annota checks your annotation comments and notes with the **macOS spell
+checker** (the one Pages and Mail use): nothing to install, no key, nothing
+leaves the Mac.
+
+Right-click annotations in the reader, or references, attachments and notes in
+the library → **Check spelling and grammar**. The Annota panel opens on a
+review: each issue in its context, its kind (spelling or grammar), the
+explanation and the suggestions. Click a suggestion to apply it — the comment
+or note is saved at once — or ignore the issue, or add the word to the macOS
+dictionary. **Apply all first suggestions** fixes everything that has one.
+
+Only the visible text is checked: bold, italics and note formatting are kept
+as they are. Settings → General → *Spelling and grammar*: language (automatic
+or fixed) and grammar on or off.
+
 ## 🔧 How it works
 
 - Listens to the `add` event of Zotero's notifier on annotation items.

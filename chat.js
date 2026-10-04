@@ -1308,6 +1308,7 @@ var AnnotaChat = {
 		let histBtn = this.iconButton(doc, "history", Annota.t("c.history"), () => {
 			inst.historyOpen = !inst.historyOpen;
 			inst.historyQuery = "";
+			inst.spell = null;
 			if (!this._history) {
 				this.loadHistory().then(() => this.renderInstance(inst))
 					.catch(e => log("historique : " + e));
@@ -1541,7 +1542,14 @@ var AnnotaChat = {
 		let box = inst.thread;
 		box.textContent = "";
 		inst.histBtn.setAttribute("aria-pressed", inst.historyOpen ? "true" : "false");
-		inst.dock.hidden = !!inst.historyOpen;
+		inst.dock.hidden = !!(inst.historyOpen || inst.spell);
+		// Vue « Correction » (spell.js) : prioritaire tant qu'elle est ouverte.
+		if (inst.spell && AnnotaSpell) {
+			inst.root.setAttribute("data-empty", "false");
+			box.appendChild(AnnotaSpell.render(inst));
+			this.updateChips(inst);
+			return;
+		}
 		if (inst.historyOpen) {
 			inst.root.setAttribute("data-empty", "false");
 			box.appendChild(this.renderHistory(inst));
@@ -2395,6 +2403,10 @@ var AnnotaChat = {
 .annota-launch:hover { background: var(--fill-quinary); }
 .annota-home-hint { margin-top: 12px; font-size: 11px; color: var(--fill-tertiary, rgba(128,128,128,.8)); }
 `;
+		// Vue de correction : ses règles vivent avec elle, dans spell.js.
+		if (typeof AnnotaSpell !== "undefined" && AnnotaSpell && AnnotaSpell.CSS) {
+			st.textContent += AnnotaSpell.CSS;
+		}
 		let host = doc.head || doc.documentElement;
 		if (host) host.appendChild(st);
 	}

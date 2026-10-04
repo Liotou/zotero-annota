@@ -2684,6 +2684,15 @@ Annota = {
 								.catch(e => log("runOnReaderAnnotations: " + e));
 						}
 					});
+					if (AnnotaSpell && AnnotaSpell.available()) {
+						append({
+							label: Annota.t("menu.reader.spell"),
+							onCommand: () => {
+								Annota.spellReaderAnnotations(reader, keys)
+									.catch(e => log("orthographe : " + e));
+							}
+						});
+					}
 					if (AnnotaChat) {
 						append({
 							label: Annota.t("menu.reader.ask"),
@@ -2717,6 +2726,29 @@ Annota = {
 		}
 		catch (e) { /* ignore */ }
 		this._readerListener = null;
+	},
+
+	// ---- Orthographe et grammaire (spell.js) ----
+
+	async spellSelection(window) {
+		if (!AnnotaSpell) return;
+		let items = [];
+		try { items = window.ZoteroPane.getSelectedItems() || []; } catch (e) {}
+		let targets = await AnnotaSpell.targetsFromSelection(items);
+		await AnnotaSpell.review(window, targets);
+	},
+
+	async spellReaderAnnotations(reader, keys) {
+		if (!AnnotaSpell) return;
+		let att = await Zotero.Items.getAsync(reader.itemID);
+		if (!att) return;
+		let targets = [];
+		for (let key of keys) {
+			let it = await Zotero.Items.getByLibraryAndKeyAsync(att.libraryID, key);
+			let t = AnnotaSpell.targetFromItem(it);
+			if (t) targets.push(t);
+		}
+		await AnnotaSpell.review(Zotero.getMainWindow(), targets);
 	},
 
 	// Exécute le prompt sur les annotations visées dans le lecteur.
@@ -2804,6 +2836,17 @@ Annota = {
 			});
 			popup.appendChild(retry);
 
+			// Orthographe et grammaire : commentaires et notes de la sélection.
+			if (AnnotaSpell && AnnotaSpell.available()) {
+				popup.appendChild(doc.createXULElement("menuseparator"));
+				let spell = doc.createXULElement("menuitem");
+				spell.setAttribute("label", this.t("menu.spell"));
+				spell.addEventListener("command", () => {
+					Annota.spellSelection(window).catch(e => log("orthographe : " + e));
+				});
+				popup.appendChild(spell);
+			}
+
 			menu.appendChild(popup);
 			itemmenu.appendChild(menu);
 
@@ -2883,6 +2926,9 @@ var AnnotaChat = null;
 
 // Textes de l'interface (i18n.js). Sans eux, Annota.t() rend la clé.
 var AnnotaI18n = null;
+
+// Orthographe et grammaire (spell.js, macOS).
+var AnnotaSpell = null;
 var annotaLangObserver = null;
 
 function install() {}
@@ -2902,6 +2948,11 @@ async function startup({ id, version, rootURI }) {
 	catch (e) {
 		log("discussion indisponible : " + e);
 		AnnotaChat = null;
+	}
+	try { Services.scriptloader.loadSubScript(rootURI + "spell.js"); }
+	catch (e) {
+		log("orthographe indisponible : " + e);
+		AnnotaSpell = null;
 	}
 
 	// Exposé pour le script du panneau de préférences (prompt par défaut, reset).
