@@ -1998,7 +1998,7 @@ var AnnotaChat = {
   border: 1px solid var(--fill-quarternary, rgba(128,128,128,.3)); border-radius: 10px;
   background: var(--material-mix-quarternary, rgba(128,128,128,.06));
   transition: border-color .15s ease; }
-.annota-composer:focus-within { border-color: color-mix(in srgb, var(--accent-blue, #4072e5) 55%, transparent); }
+.annota-composer:focus-within { border-color: var(--fill-tertiary, rgba(128,128,128,.5)); }
 .annota-composer-chips { display: flex; flex-wrap: nowrap; gap: 5px; min-width: 0; }
 .annota-chip { appearance: none; display: inline-flex; align-items: center; gap: 4px; max-width: 100%;
   padding: 2px 7px; border-radius: 6px; border: 1px solid var(--fill-quarternary, rgba(128,128,128,.3));
@@ -2016,6 +2016,26 @@ var AnnotaChat = {
   border: none; outline: none; background: transparent; color: inherit;
   font: inherit; font-size: 13px; line-height: 1.45; }
 .annota-composer-input::placeholder { color: var(--fill-tertiary); }
+/* Zotero entoure tout champ focalisé d'un anneau bleu (contour et ombre) ;
+   dans la carte de saisie, c'est la carte elle-même qui signale le focus. */
+.annota-chat .annota-composer-input,
+.annota-chat .annota-composer-input:focus,
+.annota-chat .annota-composer-input:focus-visible,
+.annota-chat .annota-composer-input:hover {
+  outline: none !important; box-shadow: none !important; border: none !important;
+  background: transparent !important; -moz-appearance: none !important; appearance: none !important;
+  margin: 0 !important; }
+.annota-chat .annota-model-select:focus,
+.annota-chat .annota-model-select:focus-visible,
+.annota-chat .annota-chip:focus,
+.annota-chat .annota-launch:focus,
+.annota-chat .annota-icon-btn:focus,
+.annota-chat .annota-send:focus { outline: none; box-shadow: none; }
+.annota-chat .annota-model-select:focus-visible,
+.annota-chat .annota-chip:focus-visible,
+.annota-chat .annota-launch:focus-visible,
+.annota-chat .annota-icon-btn:focus-visible,
+.annota-chat .annota-send:focus-visible { background: var(--fill-quinary); }
 .annota-composer-controls { display: flex; align-items: center; gap: 4px; margin: 0 -3px; }
 .annota-model-select { appearance: none; -moz-appearance: none; min-width: 0; max-width: 80%;
   padding: 3px 6px; border: none; border-radius: 6px; background: transparent;

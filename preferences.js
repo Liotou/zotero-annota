@@ -104,6 +104,20 @@
 		let tabs = Array.from(bar.querySelectorAll(".annota-tab"));
 		if (!tabs.length) return;
 
+		// Fond de la zone fixée en haut : celui du premier ancêtre opaque,
+		// pour qu'elle se fonde dans la fenêtre au lieu de former une bande.
+		try {
+			let view = bar.ownerDocument.defaultView;
+			for (let n = bar.parentElement; n; n = n.parentElement) {
+				let c = view.getComputedStyle(n).backgroundColor;
+				if (c && c !== "transparent" && !/,\s*0\)$/.test(c)) {
+					bar.style.setProperty("--annota-page-bg", c);
+					break;
+				}
+			}
+		}
+		catch (e) { /* fond transparent : sans conséquence */ }
+
 		function apply(name) {
 			for (let key of Object.keys(panes)) panes[key].hidden = (key !== name);
 			for (let t of tabs) {

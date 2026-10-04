@@ -38,54 +38,70 @@
   display: none !important;
 }
 
-/* ---- Onglets : fixés en haut pendant le défilement ---- */
+/* ---- Onglets : sélecteur segmenté, fixé en haut pendant le défilement ----
+ * Pas de bande colorée : le fond de la zone fixe est celui de la fenêtre des
+ * réglages, relu à l'exécution (preferences.js → --annota-page-bg), car il
+ * diffère d'un thème et d'une version de Zotero à l'autre. */
 
 #annota-tabs {
   position: sticky;
   top: 0;
   z-index: 2;
+  margin: 0;
+  padding: 6px 0 8px;
+  background: var(--annota-page-bg, transparent);
+}
+
+.annota-segmented {
   display: flex;
   gap: 2px;
-  margin: 0;
-  padding: 4px 0 0;
+  width: max-content;
+  max-width: 100%;
+  padding: 3px;
   overflow-x: auto;
   scrollbar-width: none;
-  border-bottom: 1px solid var(--fill-quarternary, rgba(128, 128, 128, 0.35));
-  background: var(--material-background, Field);
+  border-radius: 9px;
+  background: var(--fill-quinary, rgba(128, 128, 128, 0.14));
 }
 
 .annota-tab {
   appearance: none;
   -moz-appearance: none;
   flex: 0 0 auto;
-  margin: 0 0 -1px;
-  padding: 7px 14px;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: 7px 7px 0 0;
+  margin: 0;
+  padding: 4px 13px;
+  border: none;
+  border-radius: 7px;
   background: transparent;
-  color: inherit;
+  color: var(--fill-secondary, inherit);
   font: inherit;
+  font-size: 0.95em;
+  line-height: 1.35;
   white-space: nowrap;
   cursor: pointer;
-  opacity: 0.72;
 }
 
 .annota-tab:hover {
-  background: var(--fill-quinary, rgba(128, 128, 128, 0.14));
-  opacity: 1;
+  color: var(--fill-primary, inherit);
 }
 
 .annota-tab:focus-visible {
   outline: 2px solid var(--accent-blue, #4072e5);
-  outline-offset: -2px;
+  outline-offset: -1px;
 }
 
 .annota-tab[data-active="true"] {
-  border-color: var(--fill-quarternary, rgba(128, 128, 128, 0.35));
-  background: var(--material-sidepane, Field);
+  background: var(--material-background, Field);
+  color: var(--fill-primary, inherit);
   font-weight: 600;
-  opacity: 1;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14), 0 0 0 0.5px rgba(0, 0, 0, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  .annota-tab[data-active="true"] {
+    background: var(--fill-quarternary, rgba(255, 255, 255, 0.14));
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  }
 }
 
 /* ---- Cartes ---- */
@@ -323,8 +339,12 @@ textarea.annota-input {
   .annota-card {
     padding: 10px 11px;
   }
+  .annota-segmented {
+    width: 100%;
+  }
   .annota-tab {
-    padding: 6px 10px;
+    flex: 1 0 auto;
+    padding: 4px 8px;
   }
 }
 

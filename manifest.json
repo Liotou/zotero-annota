@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Annota",
-  "version": "2.28.0",
+  "version": "2.28.1",
   "description": "Runs a configurable AI prompt on every highlight you create in the PDF reader, and writes the reply into the annotation's comment. Chat with the open document or your library, with page citations. Works with Mistral or any OpenAI-compatible endpoint, Ollama, the Claude Code CLI or Apple Intelligence.",
   "author": "elliotquiriconi",
   "icons": {
