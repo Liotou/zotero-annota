@@ -234,6 +234,18 @@ A field of type `ai` keeps its own separate instruction. Put `{{ai}}` in the
 layout and you get the old behaviour instead: one free-form answer for the whole
 comment.
 
+**A visual editor** builds them: one row per field with its label, its type
+(short text, long text, checkbox, choice list, written by the AI) and its
+format in the comment (plain, **B**, *I*, ***BI***, U). Reorder with the
+arrows, start from a ready-made set (title · paraphrase · reference,
+concept · definition…), and watch the **comment preview** update as you go.
+The variable name (`{{paraphrase}}`) follows the label until you change it.
+
+Prefer typing? **Edit as text** switches to the underlying syntax — what the
+editor writes, and what older versions stored, so nothing changes for existing
+settings. A color whose text the editor can't show (a `#` comment, a field
+named after a built-in variable) stays in text mode until it is fixed.
+
 One field per line — `name | Label | type | options | format`:
 
 ```

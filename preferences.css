@@ -321,6 +321,266 @@ textarea.annota-input {
   font-size: 0.92em;
 }
 
+/* ---- Éditeur visuel des champs ---- */
+
+.annota-fe {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.annota-fe-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.annota-fe-list:empty {
+  display: none;
+}
+
+.annota-fe-row {
+  display: grid;
+  grid-template-columns: auto minmax(8em, 1fr) minmax(8em, 11em) auto auto;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+  padding: 8px 8px 7px;
+  border: 1px solid var(--fill-quarternary, rgba(128, 128, 128, 0.3));
+  border-radius: 8px;
+  background: var(--material-background, Field);
+}
+
+.annota-fe-move {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  grid-row: span 2;
+  align-self: start;
+}
+
+.annota-fe-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  appearance: none;
+  -moz-appearance: none;
+  width: 22px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fill-secondary, inherit);
+  font: inherit;
+  font-size: 0.9em;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.annota-fe-icon:hover:not(:disabled) {
+  background: var(--fill-quinary, rgba(128, 128, 128, 0.14));
+  color: var(--fill-primary, inherit);
+}
+
+.annota-fe-icon:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.annota-fe-del {
+  width: 24px;
+  height: 24px;
+  font-size: 1.2em;
+}
+
+.annota-fe-del:hover {
+  color: #e5484d !important;
+}
+
+.annota-fe-format {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--fill-quinary, rgba(128, 128, 128, 0.14));
+}
+
+.annota-fe-fmt {
+  appearance: none;
+  -moz-appearance: none;
+  min-width: 26px;
+  height: 24px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fill-secondary, inherit);
+  font: inherit;
+  font-size: 0.88em;
+  cursor: pointer;
+}
+
+.annota-fe-fmt:hover {
+  color: var(--fill-primary, inherit);
+}
+
+.annota-fe-fmt[aria-pressed="true"] {
+  background: var(--material-sidepane, Field);
+  color: var(--fill-primary, inherit);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.annota-fe-fmt-bold { font-weight: 700; }
+.annota-fe-fmt-italic { font-style: italic; }
+.annota-fe-fmt-bolditalic { font-weight: 700; font-style: italic; }
+.annota-fe-fmt-underline { text-decoration: underline; }
+
+.annota-fe-extra,
+.annota-fe-var {
+  grid-column: 2 / -1;
+}
+
+textarea.annota-fe-extra {
+  resize: vertical;
+}
+
+.annota-fe-row[data-type="ai"] {
+  border-style: dashed;
+}
+
+.annota-fe-var {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  color: var(--fill-secondary, inherit);
+  font-size: 0.82em;
+}
+
+.annota-fe-var > span {
+  margin-right: 6px;
+}
+
+.annota-fe-var code {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  opacity: 0.7;
+}
+
+.annota-fe-name {
+  box-sizing: content-box;
+  min-width: 3ch;
+  max-width: 100%;
+  padding: 1px 3px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 1em;
+}
+
+.annota-fe-name:hover,
+.annota-fe-name:focus {
+  outline: none;
+  border-color: var(--fill-quarternary, rgba(128, 128, 128, 0.4));
+  background: var(--material-background, Field);
+}
+
+.annota-fe-name[data-invalid="true"] {
+  border-color: #e5484d;
+}
+
+.annota-fe-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px dashed var(--fill-quarternary, rgba(128, 128, 128, 0.35));
+  border-radius: 8px;
+}
+
+.annota-fe-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.annota-fe-preset {
+  appearance: none;
+  -moz-appearance: none;
+  padding: 4px 10px;
+  border: 1px solid var(--fill-quarternary, rgba(128, 128, 128, 0.35));
+  border-radius: 999px;
+  background: var(--material-background, Field);
+  color: inherit;
+  font: inherit;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+
+.annota-fe-preset:hover {
+  border-color: var(--accent-blue, #4072e5);
+}
+
+.annota-fe-addbar {
+  display: flex;
+}
+
+.annota-fe-preview {
+  padding: 9px 12px;
+  border-radius: 8px;
+  border-left: 3px solid var(--accent-blue, #4072e5);
+  background: var(--fill-senary, rgba(128, 128, 128, 0.06));
+}
+
+.annota-fe-preview-title {
+  margin-bottom: 4px;
+  color: var(--fill-secondary, inherit);
+  font-size: 0.8em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.annota-fe-preview-body {
+  line-height: 1.5;
+}
+
+.annota-fe-preview-ai {
+  color: var(--fill-secondary, inherit);
+}
+
+.annota-fe-notice {
+  margin: 0;
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: rgba(255, 190, 60, 0.14);
+  border: 1px solid rgba(200, 140, 0, 0.4);
+  font-size: 0.92em;
+}
+
+.annota-fe-foot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.annota-link {
+  appearance: none;
+  -moz-appearance: none;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-blue, #4072e5);
+  font: inherit;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+
+.annota-link:hover {
+  text-decoration: underline;
+}
+
 /* ---- Fenêtre étroite ---- */
 
 @container annota (max-width: 520px) {
@@ -345,6 +605,23 @@ textarea.annota-input {
   .annota-tab {
     flex: 1 0 auto;
     padding: 4px 8px;
+  }
+  .annota-fe-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .annota-fe-move {
+    grid-row: 1 / span 2;
+  }
+  .annota-fe-del {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .annota-fe-type,
+  .annota-fe-format {
+    grid-column: 2 / -1;
+  }
+  .annota-fe-format {
+    justify-self: start;
   }
 }
 

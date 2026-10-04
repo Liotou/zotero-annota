@@ -57,14 +57,17 @@
       <html:h3 class="annota-card-title"><html:span class="annota-num">1</html:span>
         What goes in the comment</html:h3>
       <html:p class="annota-help">
-        Fields you fill in yourself when you highlight. One per line:
-        <html:code>name | Label | type | options | format</html:code>
+        The fields you fill in when you highlight, in the order they appear in the
+        comment. Each one gets its own format, and leaving one empty lets the AI
+        fill it (step 3).
       </html:p>
-      <html:textarea id="annota-fields" rows="5" class="annota-input annota-code"
-                     aria-label="Custom fields"/>
+      <html:div id="annota-fields-editor">
+        <html:textarea id="annota-fields" rows="5" class="annota-input annota-code"
+                       aria-label="Custom fields (text)"/>
+      </html:div>
       <html:div id="annota-lint" class="annota-lint" hidden="hidden" role="status"/>
       <html:details class="annota-details">
-        <html:summary>Field types and formats</html:summary>
+        <html:summary>Field types, formats and the text syntax</html:summary>
         <html:div class="annota-details-body">
           <html:p><html:b>Types</html:b> — <html:code>text</html:code> (default),
           <html:code>textarea</html:code>, <html:code>check</html:code>,
@@ -74,7 +77,9 @@
           <html:p><html:b>Formats</html:b> — <html:code>bold</html:code>,
           <html:code>italic</html:code>, <html:code>bolditalic</html:code>,
           <html:code>underline</html:code>, <html:code>plain</html:code> (default).
-          Drop the format in the 4th column when the field has no options.</html:p>
+          In text mode, one field per line:
+          <html:code>name | Label | type | options | format</html:code> — drop the
+          format in the 4th column when the field has no options.</html:p>
           <html:pre>titre      | Titre      | text     | bold
 paraphrase | Paraphrase | textarea
 reference  | Référence  | text     | italic

@@ -291,6 +291,399 @@
 		}
 	}
 
+	// ---- Éditeur visuel des champs ----
+	//
+	// La préférence reste le texte « nom | Libellé | type | options | format »
+	// lu par parseFieldSchema : l'éditeur le relit et le réécrit, si bien que
+	// les réglages existants restent valides et que le mode texte demeure
+	// disponible pour qui le préfère. Ce que l'éditeur ne sait pas montrer
+	// (lignes de commentaire, nom réservé ou absent) le fait rester en mode
+	// texte plutôt que de le perdre.
+
+	const FIELD_TYPES = [
+		["text", "Short text"],
+		["textarea", "Long text"],
+		["check", "Checkbox"],
+		["select", "Choice list"],
+		["ai", "Written by the AI"]
+	];
+	const FIELD_FORMATS = [
+		["plain", "Aa", "Plain"],
+		["bold", "B", "Bold"],
+		["italic", "I", "Italic"],
+		["bolditalic", "BI", "Bold italic"],
+		["underline", "U", "Underline"]
+	];
+	const FIELD_PRESETS = [
+		{ label: "Title · Paraphrase · Reference", rows: [
+			{ name: "heading", label: "Title", type: "text", format: "bold" },
+			{ name: "paraphrase", label: "Paraphrase", type: "textarea", format: "plain" },
+			{ name: "source", label: "Reference", type: "text", format: "italic" }] },
+		{ label: "Concept · Definition", rows: [
+			{ name: "concept", label: "Concept", type: "text", format: "bold" },
+			{ name: "definition", label: "Definition", type: "textarea", format: "plain" }] },
+		{ label: "Comment · Kind", rows: [
+			{ name: "note", label: "My comment", type: "textarea", format: "plain" },
+			{ name: "kind", label: "Kind", type: "select", options: "idea, method, result, critique",
+				format: "italic" }] }
+	];
+
+	function el(tag, cls, text) {
+		let e = document.createElementNS(XHTML_NS, tag);
+		if (cls) e.setAttribute("class", cls);
+		if (text != null) e.textContent = text;
+		return e;
+	}
+
+	function btn(label, cls, title, onClick) {
+		let b = el("button", cls, label);
+		b.setAttribute("type", "button");
+		if (title) {
+			b.setAttribute("title", title);
+			b.setAttribute("aria-label", title);
+		}
+		b.addEventListener("click", (e) => { e.preventDefault(); onClick(e); });
+		return b;
+	}
+
+	// « Référence indirecte » → reference_indirecte. Un nom réservé
+	// ({{title}}, {{page}}…) prend un préfixe plutôt que d'être ignoré.
+	function slug(label, a) {
+		let s = String(label || "").normalize("NFD").replace(/[̀-ͯ]/g, "")
+			.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+		if (!s) s = "field";
+		if (/^\d/.test(s)) s = "f_" + s;
+		let reserved = (a && a.RESERVED_VARS) || [];
+		if (reserved.includes(s)) s = "my_" + s;
+		return s;
+	}
+
+	// Chevron dessiné : les flèches Unicode passent en emoji colorées sur
+	// certains systèmes.
+	function chevron(up) {
+		const SVG = "http://www.w3.org/2000/svg";
+		let svg = document.createElementNS(SVG, "svg");
+		svg.setAttribute("viewBox", "0 0 12 12");
+		svg.setAttribute("width", "10");
+		svg.setAttribute("height", "10");
+		svg.setAttribute("aria-hidden", "true");
+		let path = document.createElementNS(SVG, "path");
+		path.setAttribute("d", up ? "M2.5 7.5 6 4l3.5 3.5" : "M2.5 4.5 6 8l3.5-3.5");
+		path.setAttribute("fill", "none");
+		path.setAttribute("stroke", "currentColor");
+		path.setAttribute("stroke-width", "1.6");
+		path.setAttribute("stroke-linecap", "round");
+		path.setAttribute("stroke-linejoin", "round");
+		svg.appendChild(path);
+		return svg;
+	}
+
+	function cleanCell(s) {
+		return String(s || "").replace(/\|/g, "/").replace(/\s*\n\s*/g, " ").trim();
+	}
+
+	function createFieldEditor({ host, textarea, templateArea, onChange, onCommit }) {
+		let a = api();
+		let rows = [];
+		// preferred : le choix de l'utilisateur ; mode : ce qui est affiché
+		// (le texte s'impose pour une couleur que l'éditeur ne sait pas lire).
+		let preferred = (a && a._fieldsMode) || "visual";
+		let mode = preferred;
+
+		let list = el("div", "annota-fe-list");
+		let empty = el("div", "annota-fe-empty");
+		let addBar = el("div", "annota-fe-addbar");
+		let preview = el("div", "annota-fe-preview");
+		let notice = el("p", "annota-fe-notice");
+		let toggle = btn("", "annota-link", "", () => {
+			preferred = mode === "visual" ? "text" : "visual";
+			if (a) a._fieldsMode = preferred;
+			setMode(preferred);
+		});
+		let visual = el("div", "annota-fe");
+		visual.appendChild(list);
+		visual.appendChild(empty);
+		visual.appendChild(addBar);
+		visual.appendChild(preview);
+		host.appendChild(visual);
+		host.appendChild(notice);
+		let foot = el("div", "annota-fe-foot");
+		foot.appendChild(toggle);
+		host.appendChild(foot);
+
+		addBar.appendChild(btn("+ Add field", "annota-button annota-fe-add", "Add a field", () => {
+			let base = "Field " + (rows.length + 1);
+			rows.push({ name: uniqueName(slug(base, a)), label: base, type: "text",
+				format: "plain", options: "", prompt: "", nameEdited: false });
+			write(true);
+			render();
+			let inputs = list.querySelectorAll(".annota-fe-label");
+			let last = inputs[inputs.length - 1];
+			if (last) { last.focus(); last.select(); }
+		}));
+
+		function uniqueName(base, except) {
+			let taken = new Set(rows.filter(r => r !== except).map(r => r.name));
+			if (!taken.has(base)) return base;
+			for (let i = 2; ; i++) if (!taken.has(base + i)) return base + i;
+		}
+
+		// Lignes que parseFieldSchema ignorerait, ou commentaires : le
+		// mode visuel les perdrait.
+		function unsupported(text) {
+			let lines = String(text || "").split("\n").map(l => l.trim()).filter(Boolean);
+			if (lines.some(l => l.startsWith("#"))) return true;
+			return a ? a.parseFieldSchema(text).length !== lines.length : false;
+		}
+
+		function parse(text) {
+			if (!a) return [];
+			return a.parseFieldSchema(text).map(f => ({
+				name: f.name,
+				label: f.label,
+				type: f.type,
+				format: f.format || "plain",
+				options: (f.options || []).join(", "),
+				prompt: f.prompt || "",
+				nameEdited: f.name !== slug(f.label, a)
+			}));
+		}
+
+		function serialize() {
+			return rows.map(r => {
+				let cols = [r.name, cleanCell(r.label) || r.name, r.type];
+				let fmt = r.format && r.format !== "plain" ? r.format : "";
+				if (r.type === "select") { cols.push(cleanCell(r.options)); if (fmt) cols.push(fmt); }
+				else if (r.type === "ai") { cols.push(cleanCell(r.prompt)); if (fmt) cols.push(fmt); }
+				else if (fmt) cols.push(fmt);
+				return cols.join(" | ");
+			}).join("\n");
+		}
+
+		// commit : changement de structure, enregistré tout de suite ; sinon
+		// une frappe, enregistrée après une pause (onChange).
+		function write(commit) {
+			textarea.value = serialize();
+			renderPreview();
+			if (commit) onCommit(); else onChange();
+		}
+
+		function renderPreview() {
+			preview.textContent = "";
+			if (!rows.length) { preview.hidden = true; return; }
+			preview.hidden = false;
+			preview.appendChild(el("div", "annota-fe-preview-title", "Comment preview"));
+			let body = el("div", "annota-fe-preview-body");
+			if (templateArea && templateArea.value.trim()) {
+				body.appendChild(el("span", "annota-help",
+					"A custom layout is set (below): the comment follows it."));
+			}
+			else {
+				for (let r of rows) {
+					let sample = r.type === "check" ? "✓ " + (r.label || r.name)
+						: r.type === "select" ? (r.options.split(",")[0] || "").trim() || r.label
+						: r.type === "ai" ? "⟨AI: " + (r.prompt || "instruction") + "⟩"
+						: r.label || r.name;
+					let line = el("div");
+					let node = line;
+					if (r.format === "bold" || r.format === "bolditalic") {
+						let b = el("b"); node.appendChild(b); node = b;
+					}
+					if (r.format === "italic" || r.format === "bolditalic") {
+						let i = el("i"); node.appendChild(i); node = i;
+					}
+					if (r.format === "underline") {
+						let u = el("u"); node.appendChild(u); node = u;
+					}
+					node.textContent = sample;
+					if (r.type === "ai") line.setAttribute("class", "annota-fe-preview-ai");
+					body.appendChild(line);
+				}
+			}
+			preview.appendChild(body);
+		}
+
+		function renderRow(r, i) {
+			let row = el("div", "annota-fe-row");
+			row.setAttribute("data-type", r.type);
+
+			let move = el("div", "annota-fe-move");
+			let up = btn("", "annota-fe-icon", "Move up", () => {
+				[rows[i - 1], rows[i]] = [rows[i], rows[i - 1]];
+				write(true); render();
+			});
+			let down = btn("", "annota-fe-icon", "Move down", () => {
+				[rows[i + 1], rows[i]] = [rows[i], rows[i + 1]];
+				write(true); render();
+			});
+			up.appendChild(chevron(true));
+			down.appendChild(chevron(false));
+			up.disabled = i === 0;
+			down.disabled = i === rows.length - 1;
+			move.appendChild(up);
+			move.appendChild(down);
+
+			let label = el("input", "annota-input annota-fe-label");
+			label.setAttribute("type", "text");
+			label.setAttribute("placeholder", "Label shown when you highlight");
+			label.setAttribute("aria-label", "Field label");
+			label.value = r.label;
+
+			let type = el("select", "annota-input annota-fe-type");
+			type.setAttribute("aria-label", "Field type");
+			for (let [v, l] of FIELD_TYPES) {
+				let o = el("option", null, l);
+				o.setAttribute("value", v);
+				type.appendChild(o);
+			}
+			type.value = r.type;
+
+			let fmt = el("div", "annota-fe-format");
+			fmt.setAttribute("role", "group");
+			fmt.setAttribute("aria-label", "Format in the comment");
+			for (let [v, txt, title] of FIELD_FORMATS) {
+				let f = btn(txt, "annota-fe-fmt annota-fe-fmt-" + v, title, () => {
+					r.format = v;
+					for (let x of fmt.children) {
+						x.setAttribute("aria-pressed", x === f ? "true" : "false");
+					}
+					write(true);
+				});
+				f.setAttribute("aria-pressed", r.format === v ? "true" : "false");
+				fmt.appendChild(f);
+			}
+
+			let del = btn("×", "annota-fe-icon annota-fe-del", "Remove this field", () => {
+				rows.splice(i, 1);
+				write(true); render();
+			});
+
+			row.appendChild(move);
+			row.appendChild(label);
+			row.appendChild(type);
+			row.appendChild(fmt);
+			row.appendChild(del);
+
+			// Selon le type : choix proposés, ou consigne du modèle.
+			if (r.type === "select") {
+				let opts = el("input", "annota-input annota-fe-extra");
+				opts.setAttribute("type", "text");
+				opts.setAttribute("placeholder", "Choices, separated by commas: idea, method, result");
+				opts.setAttribute("aria-label", "Choices");
+				opts.value = r.options;
+				opts.addEventListener("input", () => { r.options = opts.value; write(false); });
+				row.appendChild(opts);
+			}
+			else if (r.type === "ai") {
+				let pr = el("textarea", "annota-input annota-fe-extra");
+				pr.setAttribute("rows", "2");
+				pr.setAttribute("placeholder", "What the model should write here, e.g. “Summarize the passage in one sentence.”");
+				pr.setAttribute("aria-label", "Instruction for the AI");
+				pr.value = r.prompt;
+				pr.addEventListener("input", () => { r.prompt = pr.value; write(false); });
+				row.appendChild(pr);
+			}
+
+			// Nom de variable : déduit du libellé tant qu'on ne l'a pas modifié.
+			let varLine = el("label", "annota-fe-var");
+			varLine.appendChild(el("span", null, "Variable"));
+			let open = el("code", null, "{{");
+			let name = el("input", "annota-fe-name");
+			name.setAttribute("type", "text");
+			name.setAttribute("aria-label", "Variable name");
+			name.setAttribute("spellcheck", "false");
+			name.value = r.name;
+			let fit = () => { name.style.width = (Math.max(3, name.value.length) + 1) + "ch"; };
+			fit();
+			let close = el("code", null, "}}");
+			varLine.appendChild(open);
+			varLine.appendChild(name);
+			varLine.appendChild(close);
+			row.appendChild(varLine);
+
+			label.addEventListener("input", () => {
+				r.label = label.value;
+				if (!r.nameEdited) {
+					r.name = uniqueName(slug(r.label, a), r);
+					name.value = r.name;
+					fit();
+				}
+				write(false);
+			});
+			name.addEventListener("input", () => {
+				let v = name.value.replace(/[^\w]/g, "");
+				if (v !== name.value) name.value = v;
+				fit();
+				let reserved = a && a.RESERVED_VARS && a.RESERVED_VARS.includes(v);
+				name.setAttribute("data-invalid", !v || reserved ? "true" : "false");
+				name.setAttribute("title", reserved
+					? "“" + v + "” is a built-in variable — pick another name"
+					: !v ? "A name is required" : "");
+				if (!v || reserved) return;
+				r.name = v;
+				r.nameEdited = v !== slug(r.label, a);
+				write(false);
+			});
+			type.addEventListener("change", () => {
+				r.type = type.value;
+				write(true);
+				render();
+			});
+			return row;
+		}
+
+		function render() {
+			list.textContent = "";
+			rows.forEach((r, i) => list.appendChild(renderRow(r, i)));
+			empty.textContent = "";
+			empty.hidden = rows.length > 0;
+			if (!rows.length) {
+				empty.appendChild(el("span", "annota-help",
+					"No fields yet — the AI writes a free comment. Add a field, or start from:"));
+				let chips = el("div", "annota-fe-presets");
+				for (let p of FIELD_PRESETS) {
+					chips.appendChild(btn(p.label, "annota-fe-preset", "Use these fields", () => {
+						rows = p.rows.map(x => Object.assign(
+							{ options: "", prompt: "", nameEdited: true }, x));
+						write(true);
+						render();
+					}));
+				}
+				empty.appendChild(chips);
+			}
+			renderPreview();
+		}
+
+		function setMode(m, silent) {
+			if (m === "visual" && unsupported(textarea.value)) {
+				m = "text";
+				notice.textContent = "Some lines (comments, or fields Annota would ignore) "
+					+ "can only be edited as text. Fix or remove them to use the visual editor.";
+				notice.hidden = false;
+			}
+			else notice.hidden = true;
+			if (m === "visual" && !silent) {
+				rows = parse(textarea.value);
+				render();
+			}
+			mode = m;
+			visual.hidden = m !== "visual";
+			textarea.hidden = m === "visual";
+			toggle.textContent = m === "visual" ? "Edit as text" : "Use the visual editor";
+		}
+
+		// Couleur chargée, effacée, ou texte modifié ailleurs.
+		function refresh() {
+			rows = parse(textarea.value);
+			render();
+			setMode(preferred, true);
+		}
+
+		if (templateArea) templateArea.addEventListener("input", renderPreview);
+		refresh();
+		return { refresh };
+	}
+
 	function setup(tries) {
 		let textarea = document.getElementById("annota-prompt");
 		let clearBtn = document.getElementById("annota-prompt-clear");
@@ -304,6 +697,7 @@
 		let fieldsArea = document.getElementById("annota-fields");
 		let lintBox = document.getElementById("annota-lint");
 		let labelInput = document.getElementById("annota-label");
+		let editorHost = document.getElementById("annota-fields-editor");
 		if (!textarea || !swatchBox || triggerRadios.length < 2 || !templateArea || !fieldsArea
 				|| !labelInput) {
 			retry(setup, tries);
@@ -392,6 +786,7 @@
 			labelInput.value = entry ? (entry.label || "") : "";
 			setTrigger(entry ? entry.trigger : "auto");
 			lintNow();
+			if (editor) editor.refresh();
 			if (targetName) {
 				let c = palette.find(x => x.hex === hex);
 				targetName.textContent = c ? c.name : hex;
@@ -473,11 +868,20 @@
 				labelInput.value = "";
 				setTrigger("auto");
 				lintNow();
+				if (editor) editor.refresh();
 				refreshSwatches();
 				flashStatus("Cleared ✓");
 			};
 			clearBtn.addEventListener("click", clearColor);
 		}
+
+		let editor = editorHost ? createFieldEditor({
+			host: editorHost,
+			textarea: fieldsArea,
+			templateArea,
+			onChange: scheduleSave,
+			onCommit: () => { lintNow(); saveNow(); }
+		}) : null;
 
 		load(current);
 	}
