@@ -409,9 +409,13 @@ the passage is quoted in the chat box, with its page, ready for your question.
 
 **Keep what matters.** Under each answer, copy it or **save it as a note** under
 the reference (with its question); the note button at the top keeps the whole
-exchange. Page and reference citations stay clickable in the note. A
-conversation lives as long as Zotero is open, one per reference — the PDF in
-the reader and its entry in the library share it.
+exchange. Page and reference citations stay clickable in the note. Conversations
+are **saved** (file `annota-chats.json` in the Zotero data directory, the 300
+most recent): the **clock button** of the panel lists them by day, with a
+search box; click one to reopen it, hover to delete it. Coming back to a
+reference reopens its latest conversation, and **+** starts a new one without
+losing the previous. The PDF in the reader and its entry in the library share
+the same conversations. Saving can be turned off in **Settings → Chat**.
 
 **How much is sent.** A document that doesn't fit in the provider's window is
 cut by pages: the first page, then those closest to the question; each answer

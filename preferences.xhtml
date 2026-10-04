@@ -346,6 +346,15 @@ resume     | Résumé     | ai       | Résume le passage en une phrase. | itali
     </html:section>
 
     <html:section class="annota-card">
+      <html:h3 class="annota-card-title" data-i18n="chat.hist">History</html:h3>
+      <html:label class="annota-check">
+        <html:input type="checkbox" data-pref="annota.chatKeepHistory"/>
+        <html:span data-i18n="chat.hist.keep">Save conversations</html:span>
+      </html:label>
+      <html:p class="annota-help" data-i18n="chat.hist.help">Stored in <html:code>annota-chats.json</html:code>, in the Zotero data directory. The 300 most recent are kept. Open the list with the clock button of the chat panel.</html:p>
+    </html:section>
+
+    <html:section class="annota-card">
       <html:h3 class="annota-card-title" data-i18n="chat.open">Opening</html:h3>
       <html:div class="annota-form">
         <html:label class="annota-field-label" for="annota-chat-shortcut" data-i18n="chat.shortcut">Shortcut letter</html:label>

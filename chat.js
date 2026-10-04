@@ -27,7 +27,10 @@ var AnnotaChat = {
 	PLUGIN_ID: "annota@equiriconi",
 
 	_windows: new Map(),         // fenêtre principale → { button, panes, visible… }
-	_conversations: new Map(),   // clé (référence ou bibliothèque) → conversation
+	_conversations: new Map(),   // clé (référence ou bibliothèque) → conversation active
+	_history: null,              // toutes les conversations, la plus récente d'abord
+	_historyLoading: null,
+	_saveTimer: null,
 	_pageCache: new Map(),       // id de pièce jointe → { pages, paged, source }
 	_notifierID: null,
 	_hidden: new WeakMap(),      // élément masqué → display d'origine
@@ -131,6 +134,12 @@ var AnnotaChat = {
 	unregister() {
 		for (let conv of this._conversations.values()) {
 			if (conv.cancel) conv.cancel.cancel();
+		}
+		// Écriture en attente : faite tout de suite plutôt que perdue.
+		if (this._saveTimer) {
+			clearTimeout(this._saveTimer);
+			this._saveTimer = null;
+			this.writeHistory().catch(e => log("historique : " + e));
 		}
 		if (this._notifierID) {
 			try { Zotero.Notifier.unregisterObserver(this._notifierID); } catch (e) {}
@@ -368,6 +377,11 @@ var AnnotaChat = {
 
 	refreshContexts(rec) {
 		if (!rec.visible) return;
+		if (!this._history) {
+			this.loadHistory().then(() => this.refreshContexts(rec))
+				.catch(e => log("historique : " + e));
+			return;
+		}
 		let inst = this.activeInstance(rec);
 		if (!inst) return;
 		let ctx = this.contextFor(inst);
@@ -424,19 +438,151 @@ var AnnotaChat = {
 		return { top, att: att || null };
 	},
 
+	// Conversation active d'un contexte : celle déjà ouverte, sinon la plus
+	// récente de l'historique pour cette référence, sinon une nouvelle.
 	conversation(ctx, key) {
 		let conv = this._conversations.get(key);
-		if (!conv) {
-			conv = { key, itemID: ctx.item ? ctx.item.id : null, libraryID: ctx.libraryID,
-				messages: [], scope: ctx.item ? "document" : "library",
-				busy: false, cancel: null, error: null, status: "" };
-			this._conversations.set(key, conv);
-		}
+		if (!conv && this._history) conv = this._history.find(c => c.key === key) || null;
+		if (!conv) conv = this.newConversation(ctx, key);
+		this._conversations.set(key, conv);
 		return conv;
 	},
 
+	newConversation(ctx, key) {
+		let top = ctx.item ? this.topItem(ctx.item) : null;
+		return {
+			id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+			key, itemID: top ? top.id : null, itemKey: top ? top.key : "",
+			libraryID: ctx.libraryID, scope: ctx.item ? "document" : "library",
+			title: "", created: Date.now(), updated: Date.now(), messages: [],
+			busy: false, cancel: null, error: null, status: ""
+		};
+	},
+
+	// ---- Historique des discussions ----
+	//
+	// Fichier annota-chats.json du répertoire de données de Zotero : il suit
+	// la bibliothèque (sauvegardes, déplacement du dossier) sans alourdir les
+	// préférences. Les identifiants d'items sont recalculés depuis leur clé au
+	// chargement : ils survivent ainsi à une base reconstruite.
+
+	HISTORY_MAX: 300,
+
+	historyFile() {
+		let dir;
+		try { dir = Zotero.DataDirectory.dir; } catch (e) {}
+		if (!dir) dir = Zotero.getTempDirectory().path;
+		return PathUtils.join(dir, "annota-chats.json");
+	},
+
+	keepHistory() {
+		return getPref("chatKeepHistory", true) !== false;
+	},
+
+	loadHistory() {
+		if (this._history) return Promise.resolve(this._history);
+		if (this._historyLoading) return this._historyLoading;
+		this._historyLoading = (async () => {
+			let list = [];
+			try {
+				let file = this.historyFile();
+				if (this.keepHistory() && await IOUtils.exists(file)) {
+					let data = await IOUtils.readJSON(file);
+					if (data && Array.isArray(data.conversations)) list = data.conversations;
+				}
+			}
+			catch (e) { log("historique illisible, ignoré : " + e); }
+			for (let c of list) {
+				if (c.itemKey && c.libraryID) {
+					try { c.itemID = Zotero.Items.getIDFromLibraryAndKey(c.libraryID, c.itemKey) || null; }
+					catch (e) { c.itemID = null; }
+					if (c.itemID) c.key = String(c.itemID);
+				}
+				Object.assign(c, { busy: false, cancel: null, error: null, status: "" });
+			}
+			list.sort((a, b) => (b.updated || 0) - (a.updated || 0));
+			this._history = list;
+			return list;
+		})();
+		return this._historyLoading;
+	},
+
+	// Une conversation entre dans l'historique à son premier message.
+	touch(conv) {
+		// Historique pas encore lu : l'écrire maintenant effacerait le fichier.
+		if (!this._history) {
+			this.loadHistory().then(() => this.touch(conv)).catch(e => log("historique : " + e));
+			return;
+		}
+		conv.updated = Date.now();
+		if (!conv.title) conv.title = this.titleFor(conv);
+		let i = this._history.indexOf(conv);
+		if (i !== 0) {
+			if (i > 0) this._history.splice(i, 1);
+			this._history.unshift(conv);
+		}
+		this.scheduleSave();
+	},
+
+	// Première question, sans les citations (« > … ») qui l'introduisent.
+	titleFor(conv) {
+		let q = conv.messages.find(m => m.role === "user");
+		if (!q) return "";
+		let lines = String(q.content).split("\n").map(l => l.trim()).filter(Boolean);
+		let line = lines.find(l => !l.startsWith(">")) || lines[0] || "";
+		line = line.replace(/^>\s*/, "").replace(/\s+/g, " ");
+		return line.length > 80 ? line.slice(0, 78).trim() + "…" : line;
+	},
+
+	scheduleSave() {
+		if (!this.keepHistory()) return;
+		if (this._saveTimer) clearTimeout(this._saveTimer);
+		this._saveTimer = setTimeout(() => {
+			this._saveTimer = null;
+			this.writeHistory().catch(e => log("historique : " + e));
+		}, 800);
+	},
+
+	async writeHistory() {
+		let keep = (this._history || []).filter(c => c.messages.length).slice(0, this.HISTORY_MAX);
+		let data = {
+			version: 1,
+			conversations: keep.map(c => ({
+				id: c.id, itemKey: c.itemKey || "", libraryID: c.libraryID, key: c.key,
+				scope: c.scope, title: c.title, created: c.created, updated: c.updated,
+				messages: c.messages
+			}))
+		};
+		await IOUtils.writeJSON(this.historyFile(), data, { tmpPath: this.historyFile() + ".tmp" });
+	},
+
+	deleteConversation(conv) {
+		if (!conv || conv.busy) return;
+		if (this._history) {
+			let i = this._history.indexOf(conv);
+			if (i >= 0) this._history.splice(i, 1);
+		}
+		for (let [k, c] of this._conversations) if (c === conv) this._conversations.delete(k);
+		// Les vues qui l'affichaient repartent sur une conversation neuve.
+		for (let rec of this._windows.values()) {
+			for (let p of Object.values(rec.panes)) {
+				if (p.inst.conv === conv && p.inst.ctx) {
+					p.inst.conv = this.conversation(p.inst.ctx, p.inst.key);
+				}
+				if (p.inst.conv) this.renderInstance(p.inst);
+			}
+		}
+		this.scheduleSave();
+	},
+
+	clearHistory() {
+		for (let c of (this._history || []).slice()) {
+			if (!c.busy) this.deleteConversation(c);
+		}
+	},
+
 	convItem(conv) {
-		return conv && conv.itemID ? Zotero.Items.get(conv.itemID) : null;
+		return conv && conv.itemID ? (Zotero.Items.get(conv.itemID) || null) : null;
 	},
 
 	// ---- Texte du document ----
@@ -944,6 +1090,7 @@ var AnnotaChat = {
 			return;
 		}
 		conv.messages.push({ role: "user", content: text });
+		this.touch(conv);
 		inst.input.value = "";
 		this.autoGrow(inst);
 		await this.answer(conv);
@@ -1033,6 +1180,7 @@ var AnnotaChat = {
 			conv.busy = false;
 			conv.cancel = null;
 			conv.status = "";
+			this.touch(conv);
 			this.refresh(conv);
 		}
 	},
@@ -1064,7 +1212,9 @@ var AnnotaChat = {
 		library: ["M3 2.5v11", "M6 2.5v11", "M8.75 3.1l3.25 10.4"],
 		chat: ["M3 2.5h10a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 13 11.5H8.5L5 14v-2.5H3A1.5 1.5 0 0 1 1.5 10V4A1.5 1.5 0 0 1 3 2.5z"],
 		retry: ["M13 8a5 5 0 1 1-1.46-3.54", "M13 2.5v3h-3"],
-		check: ["M3.5 8.5l3 3 6-7"]
+		check: ["M3.5 8.5l3 3 6-7"],
+		history: ["M2.5 8a5.5 5.5 0 1 0 1.6-3.9", "M2.5 2.75v2.5H5", "M8 5.25V8l2 1.5"],
+		trash: ["M3 4.5h10", "M6.5 4.5V3h3v1.5", "M4.5 4.5l.6 8.5h5.8l.6-8.5"]
 	},
 
 	icon(doc, name, size = 16) {
@@ -1143,13 +1293,28 @@ var AnnotaChat = {
 			() => this.toggle(win, false)));
 		let newBtn = this.iconButton(doc, "plus", Annota.t("c.new"), () => {
 			let conv = this.conversationOf(inst);
-			if (!conv || conv.busy) return;
-			conv.messages = [];
-			conv.error = null;
-			this.refresh(conv);
+			if (!conv || conv.busy || !inst.ctx) return;
+			// L'ancienne reste dans l'historique ; la nouvelle devient celle
+			// de cette référence.
+			let fresh = this.newConversation(inst.ctx, inst.key);
+			fresh.scope = conv.scope;
+			this._conversations.set(inst.key, fresh);
+			inst.conv = fresh;
+			inst.historyOpen = false;
+			this.renderInstance(inst);
 			inst.input.focus();
 		});
 		left.appendChild(newBtn);
+		let histBtn = this.iconButton(doc, "history", Annota.t("c.history"), () => {
+			inst.historyOpen = !inst.historyOpen;
+			inst.historyQuery = "";
+			if (!this._history) {
+				this.loadHistory().then(() => this.renderInstance(inst))
+					.catch(e => log("historique : " + e));
+			}
+			this.renderInstance(inst);
+		});
+		left.appendChild(histBtn);
 		let title = this.el(doc, "div", "annota-chat-title", "Annota");
 		let saveBtn = this.iconButton(doc, "note", Annota.t("c.savechat"), () => {
 			let conv = this.conversationOf(inst);
@@ -1211,7 +1376,8 @@ var AnnotaChat = {
 		box.appendChild(root);
 
 		let inst = { win, doc, box, root, location, thread, scroller, input, send, modelSel,
-			docChip, docLabel, libChip, libLabel, newBtn, saveBtn, key: null, ctx: null };
+			docChip, docLabel, libChip, libLabel, newBtn, saveBtn, histBtn, dock,
+			key: null, ctx: null, conv: null, historyOpen: false, historyQuery: "" };
 
 		// Le lecteur et la fenêtre principale ont leurs raccourcis : la frappe
 		// s'arrête au panneau (sauf le raccourci qui le ferme).
@@ -1271,7 +1437,7 @@ var AnnotaChat = {
 	},
 
 	conversationOf(inst) {
-		return inst && inst.key ? this._conversations.get(inst.key) || null : null;
+		return (inst && inst.conv) || null;
 	},
 
 	setScope(inst, scope) {
@@ -1307,6 +1473,7 @@ var AnnotaChat = {
 		inst.key = key;
 		inst.ctx = ctx;
 		let conv = this.conversation(ctx, key);
+		inst.conv = conv;
 		this.renderInstance(inst);
 		this.updateChips(inst);
 		this.describeSource(inst, ctx).catch(e => log("describeSource: " + e));
@@ -1352,7 +1519,7 @@ var AnnotaChat = {
 		inst.docChip.setAttribute("data-active", conv.scope === "document" ? "true" : "false");
 		inst.libChip.setAttribute("data-active", conv.scope === "library" ? "true" : "false");
 		inst.input.setAttribute("placeholder", Annota.t(conv.scope === "library" ? "c.ph.lib" : "c.ph.doc"));
-		inst.newBtn.disabled = !conv.messages.length || conv.busy;
+		inst.newBtn.disabled = (!conv.messages.length && !inst.historyOpen) || conv.busy;
 		inst.saveBtn.disabled = !conv.messages.length;
 	},
 
@@ -1362,7 +1529,7 @@ var AnnotaChat = {
 		if (!conv) return;
 		for (let rec of this._windows.values()) {
 			for (let p of Object.values(rec.panes)) {
-				if (p.inst.key === conv.key) this.renderInstance(p.inst);
+				if (p.inst.conv === conv) this.renderInstance(p.inst);
 			}
 		}
 	},
@@ -1373,6 +1540,15 @@ var AnnotaChat = {
 		let doc = inst.doc;
 		let box = inst.thread;
 		box.textContent = "";
+		inst.histBtn.setAttribute("aria-pressed", inst.historyOpen ? "true" : "false");
+		inst.dock.hidden = !!inst.historyOpen;
+		if (inst.historyOpen) {
+			inst.root.setAttribute("data-empty", "false");
+			box.appendChild(this.renderHistory(inst));
+			this.updateChips(inst);
+			inst.scroller.scrollTop = 0;
+			return;
+		}
 		inst.root.setAttribute("data-empty",
 			!conv.messages.length && !conv.busy && !conv.error ? "true" : "false");
 		if (!conv.messages.length && !conv.busy && !conv.error) {
@@ -1416,6 +1592,121 @@ var AnnotaChat = {
 	suggestions(scope) {
 		return (this.SUGGESTIONS[scope] || []).map(k =>
 			[Annota.t("c.s." + k), Annota.t("c.s." + k + ".q")]);
+	},
+
+	dayLabel(ts) {
+		let d = new Date(ts), now = new Date();
+		let start = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+		let diff = Math.round((start(now) - start(d)) / 86400000);
+		if (diff === 0) return Annota.t("c.history.today");
+		if (diff === 1) return Annota.t("c.history.yesterday");
+		return d.toLocaleDateString(Annota.lang(), { day: "numeric", month: "long",
+			year: d.getFullYear() === now.getFullYear() ? undefined : "numeric" });
+	},
+
+	renderHistory(inst) {
+		let doc = inst.doc;
+		let wrap = this.el(doc, "div", "annota-history");
+		let head = this.el(doc, "div", "annota-history-head");
+		head.appendChild(this.el(doc, "div", "annota-history-title", Annota.t("c.history")));
+		let search = this.el(doc, "input", "annota-history-search");
+		search.setAttribute("type", "search");
+		search.setAttribute("placeholder", Annota.t("c.history.search"));
+		search.value = inst.historyQuery || "";
+		head.appendChild(search);
+		wrap.appendChild(head);
+		let list = this.el(doc, "div", "annota-history-list");
+		wrap.appendChild(list);
+
+		let fill = () => {
+			list.textContent = "";
+			if (!this.keepHistory()) {
+				list.appendChild(this.el(doc, "div", "annota-history-empty", Annota.t("c.history.off")));
+			}
+			let q = this.fold(inst.historyQuery || "");
+			let items = (this._history || []).filter(c => c.messages.length && (!q
+				|| this.fold(c.title).includes(q)
+				|| c.messages.some(m => this.fold(m.content).includes(q))));
+			if (!this._history) {
+				list.appendChild(this.el(doc, "div", "annota-history-empty", "…"));
+				return;
+			}
+			if (!items.length) {
+				list.appendChild(this.el(doc, "div", "annota-history-empty",
+					Annota.t(q ? "c.history.nomatch" : "c.history.empty")));
+				return;
+			}
+			let lastDay = "";
+			for (let c of items) {
+				let day = this.dayLabel(c.updated || c.created);
+				if (day !== lastDay) {
+					list.appendChild(this.el(doc, "div", "annota-history-day", day));
+					lastDay = day;
+				}
+				list.appendChild(this.renderHistoryRow(inst, c, fill));
+			}
+			if (items.length > 1 && !q) {
+				let clear = this.button(doc, Annota.t("c.history.clear"), "annota-link-btn annota-history-clear", () => {
+					if (clear.getAttribute("data-confirm") === "true") {
+						this.clearHistory();
+						return;
+					}
+					clear.setAttribute("data-confirm", "true");
+					clear.textContent = Annota.t("c.history.clear.confirm");
+				});
+				list.appendChild(clear);
+			}
+		};
+		search.addEventListener("input", () => {
+			inst.historyQuery = search.value;
+			fill();
+		});
+		fill();
+		inst.win.setTimeout(() => { try { search.focus(); } catch (e) {} }, 30);
+		return wrap;
+	},
+
+	renderHistoryRow(inst, c, refill) {
+		let doc = inst.doc;
+		let row = this.el(doc, "div", "annota-history-row");
+		if (inst.conv === c) row.setAttribute("data-current", "true");
+		row.setAttribute("role", "button");
+		row.setAttribute("tabindex", "0");
+		let main = this.el(doc, "div", "annota-history-main");
+		main.appendChild(this.el(doc, "div", "annota-history-name", c.title || this.titleFor(c) || "…"));
+		let item = this.convItem(c);
+		let where = c.scope === "library" || !item
+			? Annota.t("c.lib") : (this.shortTitle(this.topItem(item)) || Annota.t("c.doc"));
+		let time = new Date(c.updated || c.created).toLocaleTimeString(Annota.lang(),
+			{ hour: "2-digit", minute: "2-digit" });
+		let n = c.messages.filter(m => m.role === "user").length;
+		main.appendChild(this.el(doc, "div", "annota-history-meta",
+			time + " · " + Annota.t("c.history.count", { n }) + " · " + where));
+		row.appendChild(main);
+
+		let del = this.iconButton(doc, "trash", Annota.t("c.history.delete"), () => {
+			if (del.getAttribute("data-confirm") === "true") {
+				this.deleteConversation(c);
+				return;
+			}
+			del.setAttribute("data-confirm", "true");
+			del.setAttribute("title", Annota.t("c.history.confirm"));
+			del.textContent = "";
+			del.appendChild(this.el(doc, "span", null, Annota.t("c.history.confirm")));
+		}, "annota-icon-sm annota-history-del");
+		row.appendChild(del);
+
+		let open = () => {
+			inst.conv = c;
+			// La conversation appartient peut-être à une autre référence : elle
+			// reste affichée tant que la sélection ne change pas.
+			inst.historyOpen = false;
+			this.renderInstance(inst);
+			this.updateChips(inst);
+		};
+		row.addEventListener("click", (e) => { if (!del.contains(e.target)) open(); });
+		row.addEventListener("keydown", (e) => { if (e.key === "Enter") open(); });
+		return row;
 	},
 
 	renderEmpty(inst, conv) {
@@ -2062,6 +2353,34 @@ var AnnotaChat = {
   border: 1px solid var(--fill-quarternary, rgba(128,128,128,.3)); }
 .annota-send svg { stroke-width: 2; }
 
+.annota-icon-btn[aria-pressed="true"] { background: var(--fill-quinary); color: var(--fill-primary); }
+.annota-history { display: flex; flex-direction: column; gap: 10px; }
+.annota-history-head { display: flex; flex-direction: column; gap: 8px; }
+.annota-history-title { font-size: 14px; font-weight: 600; }
+.annota-history-search { appearance: none; width: 100%; box-sizing: border-box; padding: 5px 9px;
+  border: 1px solid var(--fill-quarternary, rgba(128,128,128,.3)); border-radius: 7px;
+  background: var(--material-background, Field); color: inherit; font: inherit; font-size: 12.5px;
+  outline: none !important; box-shadow: none !important; }
+.annota-history-search:focus { border-color: var(--fill-tertiary, rgba(128,128,128,.5)); }
+.annota-history-list { display: flex; flex-direction: column; gap: 2px; }
+.annota-history-day { margin: 8px 2px 2px; font-size: 11px; font-weight: 600; color: var(--fill-secondary); }
+.annota-history-day:first-child { margin-top: 0; }
+.annota-history-row { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 7px;
+  cursor: pointer; outline: none; }
+.annota-history-row:hover, .annota-history-row:focus-visible { background: var(--fill-quinary); }
+.annota-history-row[data-current="true"] { background: var(--fill-quinary); }
+.annota-history-main { flex: 1 1 auto; min-width: 0; }
+.annota-history-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.annota-history-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px;
+  color: var(--fill-secondary); }
+.annota-history-del { opacity: 0; flex: none; width: auto; min-width: 22px; padding: 0 4px; }
+.annota-history-row:hover .annota-history-del, .annota-history-del:focus,
+.annota-history-del[data-confirm="true"] { opacity: 1; }
+.annota-history-del[data-confirm="true"] { color: #e5484d; font-size: 11px; }
+.annota-history-empty { padding: 18px 4px; text-align: center; font-size: 12px; color: var(--fill-secondary); }
+.annota-history-clear { align-self: center; margin-top: 12px; color: var(--fill-secondary); font-size: 11px; }
+.annota-history-clear[data-confirm="true"] { color: #e5484d; }
+.annota-chat-dock[hidden] { display: none; }
 .annota-home { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 4px;
   text-align: center; }
 .annota-home-icon { display: flex; align-items: center; justify-content: center; width: 46px; height: 46px;
