@@ -83,11 +83,21 @@ var AnnotaChat = {
 		return key ? String(getPref(key, "") || "").trim() : "";
 	},
 
+	// Effort propre à la discussion (Claude CLI) ; "" = celui de l'onglet AI.
+	chatEffort(p) {
+		return p === "cli" ? String(getPref("chatCliEffort", "") || "").trim() : "";
+	},
+
 	modelLabel(p) {
 		if (p === "apple") return "on-device";
+		if (p === "cli") {
+			let m = this.chatModel(p) || String(getPref("cliModel", "") || "").trim()
+				|| "default model";
+			let e = this.chatEffort(p) || String(getPref("cliEffort", "") || "").trim();
+			return e ? m + " · " + e + " effort" : m;
+		}
 		let m = this.chatModel(p);
 		if (m) return m;
-		if (p === "cli") return String(getPref("cliModel", "") || "").trim() || "default model";
 		return Annota.chatConfig(p).model;
 	},
 
@@ -990,6 +1000,7 @@ var AnnotaChat = {
 			}, {
 				provider: p,
 				model: this.chatModel(p) || undefined,
+				effort: this.chatEffort(p) || undefined,
 				raw: true,
 				timeout: p === "cli" ? 300000 : 240000,
 				cancel: conv.cancel

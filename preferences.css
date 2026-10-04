@@ -321,6 +321,42 @@ textarea.annota-input {
   font-size: 0.92em;
 }
 
+/* ---- Boutons segmentés (effort du CLI) ---- */
+
+.annota-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-self: flex-start;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--fill-quinary, rgba(128, 128, 128, 0.14));
+}
+
+.annota-seg-btn {
+  appearance: none;
+  -moz-appearance: none;
+  padding: 3px 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fill-secondary, inherit);
+  font: inherit;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+
+.annota-seg-btn:hover {
+  color: var(--fill-primary, inherit);
+}
+
+.annota-seg-btn[aria-pressed="true"] {
+  background: var(--material-sidepane, Field);
+  color: var(--fill-primary, inherit);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
 /* ---- Éditeur visuel des champs ---- */
 
 .annota-fe {

@@ -1740,6 +1740,126 @@ Annota = {
 		}
 	},
 
+	// ---- Claude Code CLI : emplacement, modèles, niveaux d'effort ----
+	//
+	// Le CLI ne liste pas les modèles d'un compte ; son aide, en revanche,
+	// annonce les alias qu'il accepte (« 'fable', 'opus', or 'sonnet' ») et les
+	// niveaux d'effort (« (low, medium, high, xhigh, max) »). On la lit plutôt
+	// que de figer ces listes : elles suivent ainsi la version installée.
+
+	_cliResolved: new Map(),
+	_cliNoEffort: false,
+
+	// Emplacements habituels, pour retrouver `claude` quand Zotero ne voit
+	// pas le PATH du terminal.
+	cliCandidates() {
+		let home = "";
+		try { home = Services.dirsvc.get("Home", Ci.nsIFile).path; } catch (e) {}
+		let j = (...p) => home ? PathUtils.join(home, ...p) : "";
+		return [
+			j(".local", "bin", "claude"), j(".claude", "local", "claude"),
+			"/opt/homebrew/bin/claude", "/usr/local/bin/claude", "/usr/bin/claude",
+			j(".npm-global", "bin", "claude"), j(".volta", "bin", "claude"),
+			j(".bun", "bin", "claude"), j("bin", "claude")
+		].filter(Boolean);
+	},
+
+	// Chemin absolu de l'exécutable, ou "" s'il est introuvable.
+	async resolveCLIPath(cmd) {
+		cmd = String(cmd || "").trim() || "claude";
+		if (this._cliResolved.has(cmd)) return this._cliResolved.get(cmd);
+		let found = "";
+		try {
+			if (PathUtils.isAbsolute(cmd) && await IOUtils.exists(cmd)) found = cmd;
+		}
+		catch (e) {}
+		if (!found) {
+			try {
+				let { Subprocess } = ChromeUtils.importESModule(
+					"resource://gre/modules/Subprocess.sys.mjs");
+				found = await Subprocess.pathSearch(cmd);
+			}
+			catch (e) { /* pas dans le PATH de Zotero */ }
+		}
+		if (!found) {
+			for (let c of this.cliCandidates()) {
+				try { if (await IOUtils.exists(c)) { found = c; break; } } catch (e) {}
+			}
+		}
+		if (found) this._cliResolved.set(cmd, found);
+		return found;
+	},
+
+	// Lit le bloc d'aide d'une option : sa ligne et les suivantes jusqu'à
+	// l'option suivante.
+	parseCLIHelp(text) {
+		let lines = String(text || "").split("\n");
+		let block = (flag) => {
+			let re = new RegExp("^\\s*(?:-\\w,\\s*)?" + flag + "(?![\\w-])");
+			let i = lines.findIndex(l => re.test(l));
+			if (i < 0) return "";
+			let out = [lines[i]];
+			for (let k = i + 1; k < lines.length && !/^\s*-/.test(lines[k]) && lines[k].trim(); k++) {
+				out.push(lines[k]);
+			}
+			return out.join(" ");
+		};
+		let models = [];
+		block("--model").replace(/'([\w.\-\[\]]+)'/g, (m, n) => {
+			if (!models.includes(n)) models.push(n);
+			return m;
+		});
+		let eff = block("--effort");
+		let efforts = [];
+		let paren = eff.match(/\(([^)]*)\)/);
+		if (paren) {
+			efforts = paren[1].split(/[,|/]/).map(x => x.trim().toLowerCase())
+				.filter(x => /^[a-z]+$/.test(x));
+		}
+		return { models, efforts, effort: !!eff };
+	},
+
+	// Interroge le CLI installé et mémorise ce qu'il annonce (préférence
+	// cliCaps, relue par les réglages et la discussion).
+	async probeCLI(pathOverride) {
+		let { Subprocess } = ChromeUtils.importESModule(
+			"resource://gre/modules/Subprocess.sys.mjs");
+		let wanted = String(pathOverride || getPref("cliPath", "claude")).trim() || "claude";
+		this._cliResolved.delete(wanted);
+		let cmd = await this.resolveCLIPath(wanted);
+		if (!cmd) {
+			throw new Error("Claude Code CLI not found. In a terminal, run « which claude »"
+				+ " and paste the path here.");
+		}
+		let workdir;
+		try { workdir = Zotero.getTempDirectory().path; } catch (e) { workdir = undefined; }
+		let run = async (args) => {
+			let proc = await Subprocess.call({ command: cmd, arguments: args, workdir,
+				stderr: "stdout" });
+			let timer = setTimeout(() => { try { proc.kill(); } catch (e) {} }, 15000);
+			try {
+				let out = "", c;
+				while ((c = await proc.stdout.readString()) !== "") out += c;
+				await proc.wait();
+				return out;
+			}
+			finally { clearTimeout(timer); }
+		};
+		let version = (await run(["--version"])).trim();
+		let caps = this.parseCLIHelp(await run(["--help"]));
+		caps.version = (version.match(/\d+\.\d+\.\d+/) || [version.slice(0, 40)])[0];
+		caps.path = cmd;
+		caps.ts = Date.now();
+		Zotero.Prefs.set(PREF_BRANCH + "cliCaps", JSON.stringify(caps));
+		this._cliNoEffort = !caps.effort;
+		return caps;
+	},
+
+	cliCaps() {
+		try { return JSON.parse(String(getPref("cliCaps", "") || "")) || null; }
+		catch (e) { return null; }
+	},
+
 	// Claude Code CLI local (`claude -p`). Utilise l'abonnement connecté du CLI,
 	// pas l'API facturée au token. Aucune clé API : l'authentification est celle
 	// de `claude` sur la machine. Lent (démarrage à froid par appel).
@@ -1754,10 +1874,17 @@ Annota = {
 			throw new Error("Subprocess indisponible : " + (e.message || e));
 		}
 
-		let cmd = String(getPref("cliPath", "claude")).trim() || "claude";
+		let wanted = String(getPref("cliPath", "claude")).trim() || "claude";
+		// Un nom nu (« claude ») est cherché dans le PATH puis aux emplacements
+		// habituels : Zotero ne voit pas le PATH du terminal.
+		let cmd = (await this.resolveCLIPath(wanted)) || wanted;
 		let model = String(opts.model || getPref("cliModel", "")).trim();
+		let effort = String(opts.effort !== undefined ? opts.effort
+			: getPref("cliEffort", "")).trim();
+		if (this._cliNoEffort) effort = "";
 		let args = ["-p", "--output-format", "text"];
 		if (model) args.push("--model", model);
+		if (effort) args.push("--effort", effort);
 		if (system) args.push("--append-system-prompt", system);
 
 		// Répertoire de travail neutre : évite de charger un CLAUDE.md de projet.
@@ -1793,6 +1920,13 @@ Annota = {
 			while ((ce = await proc.stderr.readString()) !== "") errText += ce;
 
 			let { exitCode } = await proc.wait();
+			// CLI trop ancien pour --effort : on s'en passe plutôt que d'échouer.
+			if (exitCode !== 0 && effort && /unknown option.*effort|effort.*unknown/i.test(errText)) {
+				log("--effort refusé par ce CLI : appel sans niveau d'effort");
+				this._cliNoEffort = true;
+				clearTimeout(killTimer);
+				return this.callCLI(prompt, Object.assign({}, opts, { effort: "" }));
+			}
 			if (exitCode !== 0) {
 				throw new Error("CLI code " + exitCode + " : "
 					+ (errText.trim() || "(pas de sortie d'erreur)").slice(0, 300));

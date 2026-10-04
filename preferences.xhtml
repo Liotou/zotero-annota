@@ -247,16 +247,34 @@ resume     | Résumé     | ai       | Résume le passage en une phrase. | itali
       <html:div id="annota-cfg-cli" class="annota-provider-cfg">
         <html:div class="annota-form">
           <html:label class="annota-field-label" for="annota-cli-path">claude path</html:label>
-          <html:input id="annota-cli-path" type="text" class="annota-input annota-w-lg"
-                      data-pref="annota.cliPath"/>
+          <html:div class="annota-field-stack">
+            <html:div class="annota-inline">
+              <html:input id="annota-cli-path" type="text" class="annota-input annota-w-lg"
+                          data-pref="annota.cliPath"/>
+              <html:button id="annota-cli-detect" type="button" class="annota-button">
+                Detect</html:button>
+            </html:div>
+            <html:span id="annota-cli-status" class="annota-help" role="status"/>
+          </html:div>
           <html:label class="annota-field-label" for="annota-cli-model">Model</html:label>
-          <html:input id="annota-cli-model" type="text" class="annota-input annota-w-sm"
-                      data-pref="annota.cliModel" placeholder="default"/>
+          <html:div class="annota-field-stack">
+            <html:select id="annota-cli-model" class="annota-input annota-w-md"/>
+            <html:input id="annota-cli-model-other" type="text" class="annota-input annota-w-md"
+                        placeholder="Full model name, e.g. claude-opus-5-5" hidden="hidden"/>
+          </html:div>
+          <html:span class="annota-field-label">Effort</html:span>
+          <html:div class="annota-field-stack">
+            <html:div id="annota-cli-effort" class="annota-seg" role="group"
+                      aria-label="Effort"/>
+            <html:span id="annota-cli-effort-note" class="annota-help"/>
+          </html:div>
         </html:div>
         <html:p class="annota-help">
           Uses whatever your <html:code>claude</html:code> command is logged into.
-          Give the <html:b>absolute</html:b> path — Zotero doesn't see your shell
-          PATH. Model can be left empty. A few seconds per call.
+          <html:b>Detect</html:b> finds the program (Zotero doesn't see your shell
+          PATH) and reads the models and effort levels your version offers. Higher
+          effort thinks longer: better on hard passages, slower, and more of your
+          usage. A few seconds per call.
         </html:p>
       </html:div>
     </html:section>
@@ -362,8 +380,16 @@ resume     | Résumé     | ai       | Résume le passage en une phrase. | itali
         <html:input id="annota-chat-ollama-model" type="text" class="annota-input annota-w-md"
                     data-pref="annota.chatOllamaModel"/>
         <html:label class="annota-field-label" for="annota-chat-cli-model">Claude CLI</html:label>
-        <html:input id="annota-chat-cli-model" type="text" class="annota-input annota-w-md"
-                    data-pref="annota.chatCliModel"/>
+        <html:div class="annota-field-stack">
+          <html:select id="annota-chat-cli-model" class="annota-input annota-w-md"/>
+          <html:input id="annota-chat-cli-model-other" type="text" class="annota-input annota-w-md"
+                      placeholder="Full model name, e.g. claude-opus-5-5" hidden="hidden"/>
+        </html:div>
+        <html:span class="annota-field-label">Claude effort</html:span>
+        <html:div class="annota-field-stack">
+          <html:div id="annota-chat-cli-effort" class="annota-seg" role="group"
+                    aria-label="Effort for the chat"/>
+        </html:div>
       </html:div>
       <html:p class="annota-help">
         Empty = the model of the AI tab. A small fast model suits annotations; a

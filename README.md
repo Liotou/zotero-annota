@@ -161,7 +161,7 @@ Pick one in the dropdown; only that provider's settings are shown.
 | **Mistral / OpenAI-compatible** | Any remote `chat/completions` endpoint. Needs an API key (console.mistral.ai). |
 | **Ollama (local)** | A model running on your own machine — no API key, no per-token cost, nothing leaves the computer. The model dropdown is read from your running Ollama (hit **Refresh** after `ollama pull …`). **Tags matter**: `llama3.1:8b` and `llama3.1` are different names, and only what is installed will answer. The first call after startup is slow while the model loads. |
 | **Apple Intelligence (on-device)** | The model built into macOS 26+ — no API key, no cost, nothing leaves the Mac, ~1 s per call. Needs Apple Intelligence enabled and the Xcode Command Line Tools (`xcode-select --install`): Annota compiles a small Swift helper once on first use, since Apple exposes this model to native code only. |
-| **Claude Code CLI (local)** | Runs `claude -p` using whatever your `claude` command is logged into (your subscription). Use the **absolute** path — Zotero doesn't see your shell PATH. A few seconds of cold start per call. |
+| **Claude Code CLI (local)** | Runs `claude -p` using whatever your `claude` command is logged into (your subscription). **Detect** finds the program (Zotero doesn't see your shell PATH) and reads what your version offers: pick the **model** (`opus`, `sonnet`, `haiku`… or a full model name) and the **effort** level (low → max; higher thinks longer, slower and uses more of your plan). The chat can use its own model and effort. A few seconds of cold start per call. |
 
 **Temperature** (0–2, lower = steadier) applies to the two HTTP providers; the
 Claude CLI ignores it.

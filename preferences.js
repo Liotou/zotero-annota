@@ -919,8 +919,7 @@
 		// Champs « modèle » vides : on montre celui qui s'appliquera.
 		let hints = {
 			"annota-chat-model": ["annota.model", "mistral-large-latest"],
-			"annota-chat-ollama-model": ["annota.ollamaModel", "llama3.1"],
-			"annota-chat-cli-model": ["annota.cliModel", "CLI default"]
+			"annota-chat-ollama-model": ["annota.ollamaModel", "llama3.1"]
 		};
 		for (let id of Object.keys(hints)) {
 			let el = document.getElementById(id);
@@ -1007,8 +1006,149 @@
 		});
 	}
 
+	// ---- Claude Code CLI : détection, modèles, effort ----
+
+	const CLI_KNOWN = { opus: "most capable", sonnet: "fast and capable",
+		haiku: "fastest, lightest", fable: "" };
+	const EFFORT_FALLBACK = ["low", "medium", "high", "xhigh", "max"];
+	let cliPickers = [];
+
+	function cliCaps() {
+		let a = api();
+		return (a && typeof a.cliCaps === "function" && a.cliCaps()) || null;
+	}
+
+	// Un menu de modèles + des boutons d'effort, liés à deux préférences.
+	// inherit : libellé de l'option vide (« Default » ou « Same as AI tab »).
+	function cliPicker({ select, other, effortHost, effortNote, modelPref, effortPref, inherit }) {
+		const OTHER = "__other__";
+		function build() {
+			let caps = cliCaps();
+			let stored = String(Zotero.Prefs.get(modelPref) || "").trim();
+			let names = ((caps && caps.models) || []).slice();
+			for (let k of Object.keys(CLI_KNOWN)) {
+				if (k !== "fable" && !names.includes(k)) names.push(k);
+			}
+			select.textContent = "";
+			let add = (v, l) => {
+				let o = document.createElementNS(XHTML_NS, "option");
+				o.setAttribute("value", v);
+				o.textContent = l;
+				select.appendChild(o);
+			};
+			add("", inherit);
+			for (let n of names) add(n, n + (CLI_KNOWN[n] ? " — " + CLI_KNOWN[n] : ""));
+			add(OTHER, "Other (full model name)…");
+			let isOther = stored && !names.includes(stored);
+			select.value = isOther ? OTHER : stored;
+			other.hidden = !isOther;
+			if (isOther) other.value = stored;
+
+			// Effort : seulement si le CLI le propose (ou n'a pas encore été
+			// interrogé, auquel cas on montre les niveaux connus).
+			effortHost.textContent = "";
+			let supported = !caps || caps.effort;
+			let levels = (caps && caps.efforts && caps.efforts.length) ? caps.efforts : EFFORT_FALLBACK;
+			let cur = String(Zotero.Prefs.get(effortPref) || "").trim();
+			if (effortNote) {
+				effortNote.textContent = !supported
+					? "Your Claude Code version has no effort setting — update it to choose one."
+					: "Default = whatever Claude Code is set to.";
+			}
+			effortHost.hidden = !supported;
+			if (!supported) return;
+			for (let v of [""].concat(levels)) {
+				let b = document.createElementNS(XHTML_NS, "button");
+				b.setAttribute("type", "button");
+				b.setAttribute("class", "annota-seg-btn");
+				b.textContent = v ? (v === "xhigh" ? "X-high" : v.charAt(0).toUpperCase() + v.slice(1))
+					: (inherit.startsWith("Same") ? "Same" : "Default");
+				b.setAttribute("title", v ? "--effort " + v : inherit);
+				b.setAttribute("aria-pressed", v === cur ? "true" : "false");
+				b.addEventListener("click", () => {
+					Zotero.Prefs.set(effortPref, v);
+					for (let x of effortHost.children) {
+						x.setAttribute("aria-pressed", x === b ? "true" : "false");
+					}
+				});
+				effortHost.appendChild(b);
+			}
+		}
+		select.addEventListener("change", () => {
+			let v = select.value;
+			other.hidden = v !== OTHER;
+			if (v === OTHER) { other.focus(); return; }
+			Zotero.Prefs.set(modelPref, v);
+		});
+		other.addEventListener("input", () => {
+			Zotero.Prefs.set(modelPref, String(other.value || "").trim());
+		});
+		build();
+		cliPickers.push(build);
+	}
+
+	function setupCLI(tries) {
+		let detect = document.getElementById("annota-cli-detect");
+		let status = document.getElementById("annota-cli-status");
+		let pathInput = document.getElementById("annota-cli-path");
+		let sel = document.getElementById("annota-cli-model");
+		let chatSel = document.getElementById("annota-chat-cli-model");
+		if (!detect || !sel || !chatSel || !pathInput) {
+			retry(setupCLI, tries);
+			return;
+		}
+		cliPicker({
+			select: sel, other: document.getElementById("annota-cli-model-other"),
+			effortHost: document.getElementById("annota-cli-effort"),
+			effortNote: document.getElementById("annota-cli-effort-note"),
+			modelPref: "annota.cliModel", effortPref: "annota.cliEffort",
+			inherit: "Default (Claude Code setting)"
+		});
+		cliPicker({
+			select: chatSel, other: document.getElementById("annota-chat-cli-model-other"),
+			effortHost: document.getElementById("annota-chat-cli-effort"),
+			modelPref: "annota.chatCliModel", effortPref: "annota.chatCliEffort",
+			inherit: "Same as AI tab"
+		});
+
+		function describe(caps) {
+			if (!status) return;
+			status.textContent = caps
+				? "✓ Claude Code " + caps.version + " — " + caps.path
+				: "Not detected yet — click Detect.";
+		}
+		describe(cliCaps());
+
+		let busy = false;
+		async function run(auto) {
+			let a = api();
+			if (busy || !a || typeof a.probeCLI !== "function") return;
+			busy = true;
+			if (!auto) status.textContent = "Looking for Claude Code…";
+			try {
+				let caps = await a.probeCLI(pathInput.value);
+				// Chemin trouvé ailleurs que celui saisi : on l'adopte.
+				if (caps.path && caps.path !== pathInput.value.trim()) {
+					pathInput.value = caps.path;
+					Zotero.Prefs.set("annota.cliPath", caps.path);
+				}
+				describe(caps);
+				for (let b of cliPickers) b();
+			}
+			catch (e) {
+				if (!auto) status.textContent = "⚠️ " + (e.message || e);
+			}
+			finally { busy = false; }
+		}
+		detect.addEventListener("click", () => run(false));
+		// Première ouverture : on interroge le CLI sans attendre de clic, sans
+		// message d'erreur si rien n'est installé.
+		if (!cliCaps()) run(true);
+	}
+
 	bindPrefs();
 	setupKeyToggle();
+	setupCLI();
 	setupTabs();
 	setup();
 	setupProvider();

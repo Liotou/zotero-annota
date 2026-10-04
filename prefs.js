@@ -23,6 +23,11 @@ pref("extensions.zotero.annota.swiftcPath", "/usr/bin/swiftc");
 // Claude Code CLI (local).
 pref("extensions.zotero.annota.cliPath", "claude");
 pref("extensions.zotero.annota.cliModel", "");
+// Niveau d'effort (--effort) : "" = celui de Claude Code.
+pref("extensions.zotero.annota.cliEffort", "");
+// Ce que le CLI installé annonce (modèles, efforts, version), relevé par
+// « Detect » dans les réglages. JSON.
+pref("extensions.zotero.annota.cliCaps", "");
 
 pref("extensions.zotero.annota.temperature", "0.2");
 
@@ -68,6 +73,7 @@ pref("extensions.zotero.annota.chatProvider", "");
 pref("extensions.zotero.annota.chatModel", "");
 pref("extensions.zotero.annota.chatOllamaModel", "");
 pref("extensions.zotero.annota.chatCliModel", "");
+pref("extensions.zotero.annota.chatCliEffort", "");
 // Contexte envoyé, en caractères. 0 = selon le fournisseur (API 100 000,
 // Claude CLI 200 000, Ollama 12 000, Apple 6 000).
 pref("extensions.zotero.annota.chatMaxChars", 0);
