@@ -4,239 +4,181 @@
   Panneau de préférences Annota.
 
   Tout est en HTML : la mise en page suit la largeur de la fenêtre (grilles
-  qui passent sur une colonne, champs à 100 %), ce que les <grid> et largeurs
-  fixes du XUL ne permettaient pas. Les éléments portant data-pref sont liés
-  à leur préférence par preferences.js (lecture, écriture, type conservé).
+  qui passent sur une colonne, champs à 100 %). Les éléments portant data-pref
+  sont liés à leur préférence par preferences.js (type conservé).
+
+  Textes : l'anglais figure ici ; data-i18n (contenu) et data-i18n-ph /
+  data-i18n-title (attributs) désignent la clé de i18n.js qui le remplace
+  dans une autre langue.
 -->
 <html:div id="annota-prefs" class="annota-prefs">
 
-  <!-- ============================== ONGLETS ============================= -->
   <html:div id="annota-tabs">
   <html:div class="annota-segmented" role="tablist" aria-label="Annota settings">
-    <html:button id="annota-tab-colors" class="annota-tab" role="tab"
-                 data-pane="colors" type="button">🎨 Colors</html:button>
-    <html:button id="annota-tab-ai" class="annota-tab" role="tab"
-                 data-pane="ai" type="button">✨ AI</html:button>
-    <html:button id="annota-tab-chat" class="annota-tab" role="tab"
-                 data-pane="chat" type="button">💬 Chat</html:button>
-    <html:button id="annota-tab-general" class="annota-tab" role="tab"
-                 data-pane="general" type="button">⚙️ General</html:button>
+    <html:button id="annota-tab-colors" class="annota-tab" role="tab" data-pane="colors"
+                 type="button" data-i18n="tab.colors">Colors</html:button>
+    <html:button id="annota-tab-ai" class="annota-tab" role="tab" data-pane="ai"
+                 type="button" data-i18n="tab.ai">AI</html:button>
+    <html:button id="annota-tab-chat" class="annota-tab" role="tab" data-pane="chat"
+                 type="button" data-i18n="tab.chat">Chat</html:button>
+    <html:button id="annota-tab-general" class="annota-tab" role="tab" data-pane="general"
+                 type="button" data-i18n="tab.general">General</html:button>
   </html:div>
   </html:div>
 
-  <!-- ========================= ONGLET 1 · COULEURS ====================== -->
+  <!-- ============================ COULEURS ============================= -->
   <html:div id="annota-pane-colors" class="annota-pane" role="tabpanel">
 
-    <html:p class="annota-lead">
-      Annota works per highlight color. Pick a color, say what its comment should
-      contain — <html:b>a color you leave empty is never touched.</html:b>
-    </html:p>
-
-    <html:div id="annota-idle-warning" class="annota-warn" hidden="hidden">
-      Nothing is configured yet — Annota will do nothing. Pick a color below and
-      add at least one field or a prompt.
-    </html:div>
+    <html:p class="annota-lead" data-i18n="colors.lead">Each highlight color has its own configuration. A color left empty is ignored.</html:p>
+    <html:div id="annota-idle-warning" class="annota-warn" hidden="hidden"
+              data-i18n="colors.idle">No color is configured: Annota is inactive.</html:div>
 
     <html:section class="annota-card">
       <html:div id="annota-swatches" role="radiogroup" aria-label="Highlight color"/>
       <html:div class="annota-form">
-        <html:span class="annota-field-label">Editing</html:span>
+        <html:span class="annota-field-label" data-i18n="colors.color">Color</html:span>
         <html:span id="annota-target-name" class="annota-target"/>
-        <html:label class="annota-field-label" for="annota-label">Call it</html:label>
+        <html:label class="annota-field-label" for="annota-label"
+                    data-i18n="colors.name">Name</html:label>
         <html:div class="annota-field-stack">
           <html:input id="annota-label" type="text" class="annota-input annota-w-md"
-                      aria-label="Name for this color"/>
-          <html:span class="annota-help">Optional. Shown above the fields when you
-          highlight — “Objection”, “Method”, “Quote”. A name alone doesn't activate
-          a color.</html:span>
+                      placeholder="e.g. Definition" data-i18n-ph="colors.name.ph"/>
+          <html:span class="annota-help" data-i18n="colors.name.help">Optional. Displayed above the fields in the selection popup.</html:span>
         </html:div>
       </html:div>
     </html:section>
 
     <html:section class="annota-card">
       <html:h3 class="annota-card-title"><html:span class="annota-num">1</html:span>
-        What goes in the comment</html:h3>
-      <html:p class="annota-help">
-        The fields you fill in when you highlight, in the order they appear in the
-        comment. Each one gets its own format, and leaving one empty lets the AI
-        fill it (step 3).
-      </html:p>
+        <html:span data-i18n="fields.title">Fields</html:span></html:h3>
+      <html:p class="annota-help" data-i18n="fields.help">Entered when highlighting, in the order of the comment. An empty field is filled by the model when a prompt is set.</html:p>
       <html:div id="annota-fields-editor">
         <html:textarea id="annota-fields" rows="5" class="annota-input annota-code"
-                       aria-label="Custom fields (text)"/>
+                       aria-label="Fields (text)"/>
       </html:div>
       <html:div id="annota-lint" class="annota-lint" hidden="hidden" role="status"/>
       <html:details class="annota-details">
-        <html:summary>Field types, formats and the text syntax</html:summary>
+        <html:summary data-i18n="fields.ref">Types, formats and text syntax</html:summary>
         <html:div class="annota-details-body">
-          <html:p><html:b>Types</html:b> — <html:code>text</html:code> (default),
-          <html:code>textarea</html:code>, <html:code>check</html:code>,
-          <html:code>select</html:code> (options separated by commas),
-          <html:code>ai</html:code> (this one field is written by the model; put its
-          instruction in the options column).</html:p>
-          <html:p><html:b>Formats</html:b> — <html:code>bold</html:code>,
-          <html:code>italic</html:code>, <html:code>bolditalic</html:code>,
-          <html:code>underline</html:code>, <html:code>plain</html:code> (default).
-          In text mode, one field per line:
-          <html:code>name | Label | type | options | format</html:code> — drop the
-          format in the 4th column when the field has no options.</html:p>
+          <html:p data-i18n="fields.ref.types"><html:b>Types</html:b>: <html:code>text</html:code> (default), <html:code>textarea</html:code>, <html:code>check</html:code>, <html:code>select</html:code> (comma-separated options), <html:code>ai</html:code> (written by the model from the instruction in the options column).</html:p>
+          <html:p data-i18n="fields.ref.formats"><html:b>Formats</html:b>: <html:code>bold</html:code>, <html:code>italic</html:code>, <html:code>bolditalic</html:code>, <html:code>underline</html:code>, <html:code>plain</html:code> (default). Text syntax, one field per line: <html:code>name | Label | type | options | format</html:code>. Without options, the format may be given in the fourth column.</html:p>
           <html:pre>titre      | Titre      | text     | bold
 paraphrase | Paraphrase | textarea
 reference  | Référence  | text     | italic
 resume     | Résumé     | ai       | Résume le passage en une phrase. | italic</html:pre>
-          <html:p>The comment is one line per field, in order, each wrapped in its
-          format. Every field is also a variable — <html:code>{{titre}}</html:code>,
-          <html:code>{{paraphrase}}</html:code>… — usable in the prompt and in the
-          layout.</html:p>
+          <html:p data-i18n="fields.ref.vars">The comment has one line per field, in order and in its format. Each field is also a variable (<html:code>{{name}}</html:code>) usable in the prompt and the layout.</html:p>
         </html:div>
       </html:details>
     </html:section>
 
     <html:section class="annota-card">
       <html:h3 class="annota-card-title"><html:span class="annota-num">2</html:span>
-        When it runs</html:h3>
-      <html:div class="annota-choices" role="radiogroup" aria-label="When it runs">
+        <html:span data-i18n="trigger.title">Trigger</html:span></html:h3>
+      <html:div class="annota-choices" role="radiogroup">
         <html:label class="annota-check">
           <html:input type="radio" name="annota-trigger" value="auto"/>
-          <html:span>As soon as I create the highlight</html:span>
+          <html:span data-i18n="trigger.auto">When the highlight is created</html:span>
         </html:label>
         <html:label class="annota-check">
           <html:input type="radio" name="annota-trigger" value="manual"/>
-          <html:span>Only when I ask (right-click → Annota), or when I fill the fields</html:span>
+          <html:span data-i18n="trigger.manual">On request only (context menu, or when fields are filled in)</html:span>
         </html:label>
       </html:div>
     </html:section>
 
     <html:section class="annota-card">
       <html:h3 class="annota-card-title"><html:span class="annota-num">3</html:span>
-        Use the AI <html:span class="annota-optional">optional</html:span></html:h3>
-      <html:p class="annota-help">
-        Leave empty for a fully manual comment. With fields above, the prompt is
-        <html:b>bound to those fields:</html:b> the model fills the ones you left
-        empty, and nothing else — what you typed by hand is never rewritten. Fill
-        the whole form and no request is sent at all.
-      </html:p>
+        <html:span data-i18n="prompt.title">Prompt</html:span>
+        <html:span class="annota-optional" data-i18n="optional">optional</html:span></html:h3>
+      <html:p class="annota-help" data-i18n="prompt.help">Without a prompt, the comment is built from the fields alone. With fields, the model fills only the empty ones; entered values are never rewritten. When every field is filled, no request is sent.</html:p>
       <html:textarea id="annota-prompt" rows="8" class="annota-input annota-code"
-                     aria-label="AI prompt"/>
+                     aria-label="Prompt" placeholder="Empty: highlights of this color are not sent to the model." data-i18n-ph="prompt.ph"/>
 
       <html:details class="annota-details">
-        <html:summary>Custom layout (rarely needed)</html:summary>
+        <html:summary data-i18n="layout.title">Custom layout</html:summary>
         <html:div class="annota-details-body">
-          <html:p>With fields declared above, you can ignore this: the comment is
-          one line per field, in order, each in its own format. Fill it in only to
-          depart from that — put fields on the same line, add fixed text, or use
-          <html:code>{{ai}}</html:code> to have the model write the whole comment
-          in one go instead of filling the fields one by one. A line whose
-          variables are all empty disappears.</html:p>
+          <html:p data-i18n="layout.help">Optional. By default, the comment has one line per field. A layout combines fields, adds fixed text, or inserts <html:code>{{ai}}</html:code> for a single free-form answer. Lines whose variables are all empty are removed.</html:p>
           <html:textarea id="annota-template" rows="5" class="annota-input annota-code"
-                         aria-label="Comment layout"/>
+                         aria-label="Layout" placeholder="Empty: default layout." data-i18n-ph="layout.ph"/>
         </html:div>
       </html:details>
 
       <html:details class="annota-details">
-        <html:summary>Variables you can use</html:summary>
+        <html:summary data-i18n="vars.title">Available variables</html:summary>
         <html:div class="annota-details-body">
-          <html:p><html:b>Your fields</html:b> — each one, by name.</html:p>
-          <html:p><html:b>The passage</html:b> — <html:code>{{text}}</html:code>
-          (highlighted text), <html:code>{{comment}}</html:code> (a note already
-          there), <html:code>{{page}}</html:code>,
-          <html:code>{{references}}</html:code> (works cited inside the
-          passage).</html:p>
-          <html:p><html:b>The document</html:b> — <html:code>{{title}}</html:code>,
-          <html:code>{{authors}}</html:code>, <html:code>{{year}}</html:code>,
-          <html:code>{{publication}}</html:code>,
-          <html:code>{{abstract}}</html:code>.</html:p>
-          <html:p><html:b>Your settings</html:b> —
-          <html:code>{{language}}</html:code>,
-          <html:code>{{maxWords}}</html:code>.</html:p>
-          <html:p>Only in the layout: <html:code>{{ai}}</html:code>. These names are
-          reserved — a field reusing one is ignored. Ready-made prompts:
-          PROMPT-EXAMPLES.txt on GitHub.</html:p>
+          <html:p data-i18n="vars.passage"><html:b>Passage</html:b>: <html:code>{{text}}</html:code>, <html:code>{{comment}}</html:code> (existing comment), <html:code>{{page}}</html:code>, <html:code>{{references}}</html:code> (works cited in the passage).</html:p>
+          <html:p data-i18n="vars.doc"><html:b>Document</html:b>: <html:code>{{title}}</html:code>, <html:code>{{authors}}</html:code>, <html:code>{{year}}</html:code>, <html:code>{{publication}}</html:code>, <html:code>{{abstract}}</html:code>.</html:p>
+          <html:p data-i18n="vars.settings"><html:b>Settings</html:b>: <html:code>{{language}}</html:code>, <html:code>{{maxWords}}</html:code>. <html:b>Layout only</html:b>: <html:code>{{ai}}</html:code>. These names are reserved for fields. Prompt examples: PROMPT-EXAMPLES.txt in the repository.</html:p>
         </html:div>
       </html:details>
     </html:section>
 
     <html:div class="annota-actions">
-      <html:button id="annota-prompt-clear" type="button" class="annota-button">
-        Clear this color</html:button>
+      <html:button id="annota-prompt-clear" type="button" class="annota-button"
+                   data-i18n="colors.reset">Reset this color</html:button>
       <html:span id="annota-prompt-status" class="annota-status" role="status"/>
     </html:div>
   </html:div>
 
-  <!-- =========================== ONGLET 2 · IA ========================= -->
+  <!-- =============================== IA ================================ -->
   <html:div id="annota-pane-ai" class="annota-pane" role="tabpanel" hidden="hidden">
 
-    <html:p class="annota-lead">
-      Only used by colors that call the AI. A fully manual color needs none of
-      this. The chat reuses these connections (💬 Chat tab).
-    </html:p>
+    <html:p class="annota-lead" data-i18n="ai.lead">Used by colors that have a prompt, and by the chat.</html:p>
 
     <html:section class="annota-card">
-      <html:h3 class="annota-card-title">Provider</html:h3>
-      <html:select id="annota-provider" class="annota-input annota-w-lg"
-                   aria-label="AI provider">
-        <html:option value="openai">Mistral / OpenAI-compatible — remote, needs a key</html:option>
-        <html:option value="ollama">Ollama — local, free</html:option>
-        <html:option value="apple">Apple Intelligence — on-device, free</html:option>
-        <html:option value="cli">Claude Code CLI — local, your subscription</html:option>
+      <html:h3 class="annota-card-title" data-i18n="ai.provider">Provider</html:h3>
+      <html:select id="annota-provider" class="annota-input annota-w-lg" aria-label="Provider">
+        <html:option value="openai" data-i18n="ai.opt.openai">Mistral / OpenAI-compatible API (remote, API key)</html:option>
+        <html:option value="ollama" data-i18n="ai.opt.ollama">Ollama (local)</html:option>
+        <html:option value="apple" data-i18n="ai.opt.apple">Apple Intelligence (on-device)</html:option>
+        <html:option value="cli" data-i18n="ai.opt.cli">Claude Code CLI (local, subscription)</html:option>
       </html:select>
 
       <html:div id="annota-cfg-openai" class="annota-provider-cfg">
         <html:div class="annota-form">
-          <html:label class="annota-field-label" for="annota-apikey">API key</html:label>
+          <html:label class="annota-field-label" for="annota-apikey" data-i18n="ai.key">API key</html:label>
           <html:div class="annota-inline">
             <html:input id="annota-apikey" type="password" class="annota-input annota-w-lg"
                         data-pref="annota.apiKey" autocomplete="off"/>
-            <html:button id="annota-apikey-show" type="button" class="annota-button">
-              Show</html:button>
+            <html:button id="annota-apikey-show" type="button" class="annota-button"
+                         data-i18n="ai.show">Show</html:button>
           </html:div>
-          <html:label class="annota-field-label" for="annota-model">Model</html:label>
+          <html:label class="annota-field-label" for="annota-model" data-i18n="ai.model">Model</html:label>
           <html:input id="annota-model" type="text" class="annota-input annota-w-lg"
                       data-pref="annota.model"/>
-          <html:label class="annota-field-label" for="annota-endpoint">Endpoint</html:label>
+          <html:label class="annota-field-label" for="annota-endpoint" data-i18n="ai.endpoint">Endpoint</html:label>
           <html:input id="annota-endpoint" type="text" class="annota-input annota-w-lg"
                       data-pref="annota.endpoint"/>
         </html:div>
-        <html:p class="annota-help">
-          Get a key at console.mistral.ai. Any OpenAI-compatible endpoint works.
-        </html:p>
+        <html:p class="annota-help" data-i18n="ai.openai.help">Any OpenAI-compatible endpoint. Mistral keys: console.mistral.ai.</html:p>
       </html:div>
 
       <html:div id="annota-cfg-ollama" class="annota-provider-cfg">
         <html:div class="annota-form">
-          <html:label class="annota-field-label" for="annota-ollama-model">Model</html:label>
+          <html:label class="annota-field-label" for="annota-ollama-model" data-i18n="ai.model">Model</html:label>
           <html:div class="annota-inline">
             <html:select id="annota-ollama-model" class="annota-input annota-w-md"/>
-            <html:button id="annota-ollama-refresh" type="button" class="annota-button">
-              Refresh</html:button>
+            <html:button id="annota-ollama-refresh" type="button" class="annota-button"
+                         data-i18n="ai.refresh">Refresh</html:button>
             <html:span id="annota-ollama-status" class="annota-status" role="status"/>
           </html:div>
-          <html:label class="annota-field-label" for="annota-ollama-endpoint">Endpoint</html:label>
+          <html:label class="annota-field-label" for="annota-ollama-endpoint" data-i18n="ai.endpoint">Endpoint</html:label>
           <html:input id="annota-ollama-endpoint" type="text" class="annota-input annota-w-lg"
                       data-pref="annota.ollamaEndpoint"/>
         </html:div>
-        <html:p class="annota-help">
-          Runs on your machine, nothing leaves it. The list comes from your running
-          Ollama — hit Refresh after <html:code>ollama pull …</html:code>. Tags
-          matter: <html:code>llama3.1:8b</html:code> ≠
-          <html:code>llama3.1</html:code>.
-        </html:p>
+        <html:p class="annota-help" data-i18n="ai.ollama.help">Models installed in Ollama. Refresh after <html:code>ollama pull</html:code>. Tags are significant: <html:code>llama3.1:8b</html:code> ≠ <html:code>llama3.1</html:code>.</html:p>
       </html:div>
 
       <html:div id="annota-cfg-apple" class="annota-provider-cfg">
-        <html:p class="annota-help">
-          The model built into macOS 26+. Nothing to set up: Annota compiles a small
-          helper on first use. Needs Apple Intelligence enabled and
-          <html:code>xcode-select --install</html:code>.
-        </html:p>
+        <html:p class="annota-help" data-i18n="ai.apple.help">Built-in model of macOS 26 or later. Requires Apple Intelligence and the Xcode Command Line Tools (<html:code>xcode-select --install</html:code>). A helper is compiled on first use.</html:p>
         <html:details class="annota-details">
-          <html:summary>Advanced paths</html:summary>
+          <html:summary data-i18n="ai.paths">Advanced paths</html:summary>
           <html:div class="annota-details-body">
             <html:div class="annota-form">
               <html:label class="annota-field-label" for="annota-swiftc">swiftc</html:label>
               <html:input id="annota-swiftc" type="text" class="annota-input annota-w-lg"
                           data-pref="annota.swiftcPath"/>
-              <html:label class="annota-field-label" for="annota-applepath">Helper binary</html:label>
+              <html:label class="annota-field-label" for="annota-applepath" data-i18n="ai.helper">Helper binary</html:label>
               <html:input id="annota-applepath" type="text" class="annota-input annota-w-lg"
                           data-pref="annota.applePath"/>
             </html:div>
@@ -246,132 +188,101 @@ resume     | Résumé     | ai       | Résume le passage en une phrase. | itali
 
       <html:div id="annota-cfg-cli" class="annota-provider-cfg">
         <html:div class="annota-form">
-          <html:label class="annota-field-label" for="annota-cli-path">claude path</html:label>
+          <html:label class="annota-field-label" for="annota-cli-path" data-i18n="ai.cli.path">Executable</html:label>
           <html:div class="annota-field-stack">
             <html:div class="annota-inline">
               <html:input id="annota-cli-path" type="text" class="annota-input annota-w-lg"
                           data-pref="annota.cliPath"/>
-              <html:button id="annota-cli-detect" type="button" class="annota-button">
-                Detect</html:button>
+              <html:button id="annota-cli-detect" type="button" class="annota-button"
+                           data-i18n="ai.detect">Detect</html:button>
             </html:div>
             <html:span id="annota-cli-status" class="annota-help" role="status"/>
           </html:div>
-          <html:label class="annota-field-label" for="annota-cli-model">Model</html:label>
+          <html:label class="annota-field-label" for="annota-cli-model" data-i18n="ai.model">Model</html:label>
           <html:div class="annota-field-stack">
             <html:select id="annota-cli-model" class="annota-input annota-w-md"/>
             <html:input id="annota-cli-model-other" type="text" class="annota-input annota-w-md"
-                        placeholder="Full model name, e.g. claude-opus-5-5" hidden="hidden"/>
+                        placeholder="Full model name, e.g. claude-opus-5-5" data-i18n-ph="ai.cli.other.ph" hidden="hidden"/>
           </html:div>
-          <html:span class="annota-field-label">Effort</html:span>
+          <html:span class="annota-field-label" data-i18n="ai.effort">Effort</html:span>
           <html:div class="annota-field-stack">
-            <html:div id="annota-cli-effort" class="annota-seg" role="group"
-                      aria-label="Effort"/>
+            <html:div id="annota-cli-effort" class="annota-seg" role="group" aria-label="Effort"/>
             <html:span id="annota-cli-effort-note" class="annota-help"/>
           </html:div>
         </html:div>
-        <html:p class="annota-help">
-          Uses whatever your <html:code>claude</html:code> command is logged into.
-          <html:b>Detect</html:b> finds the program (Zotero doesn't see your shell
-          PATH) and reads the models and effort levels your version offers. Higher
-          effort thinks longer: better on hard passages, slower, and more of your
-          usage. A few seconds per call.
-        </html:p>
+        <html:p class="annota-help" data-i18n="ai.cli.help">Uses the account the <html:code>claude</html:code> command is signed in to. <html:b>Detect</html:b> locates the executable and reads the models and effort levels of the installed version. Higher effort: longer reasoning, slower responses, more usage.</html:p>
       </html:div>
     </html:section>
 
     <html:section class="annota-card">
-      <html:h3 class="annota-card-title">Answers</html:h3>
+      <html:h3 class="annota-card-title" data-i18n="gen.title">Generation</html:h3>
       <html:div class="annota-form">
-        <html:label class="annota-field-label" for="annota-lang">Language</html:label>
+        <html:label class="annota-field-label" for="annota-lang" data-i18n="gen.lang">Output language</html:label>
         <html:input id="annota-lang" type="text" class="annota-input annota-w-sm"
                     data-pref="annota.language"/>
-        <html:label class="annota-field-label" for="annota-maxwords">Word limit</html:label>
+        <html:label class="annota-field-label" for="annota-maxwords" data-i18n="gen.words">Word limit</html:label>
         <html:input id="annota-maxwords" type="number" min="20" max="200"
                     class="annota-input annota-w-num" data-pref="annota.maxWords"/>
-        <html:label class="annota-field-label" for="annota-temp">Temperature</html:label>
+        <html:label class="annota-field-label" for="annota-temp" data-i18n="gen.temp">Temperature</html:label>
         <html:input id="annota-temp" type="number" min="0" max="2" step="0.1"
                     class="annota-input annota-w-num" data-pref="annota.temperature"/>
       </html:div>
-      <html:p class="annota-help">
-        Language and word limit reach your prompt as
-        <html:code>{{language}}</html:code> and <html:code>{{maxWords}}</html:code>
-        — they only apply if you use them. Lower temperature = steadier answers;
-        ignored by the Claude CLI and Apple Intelligence.
-      </html:p>
+      <html:p class="annota-help" data-i18n="gen.help">Language and word limit are available in prompts as <html:code>{{language}}</html:code> and <html:code>{{maxWords}}</html:code>. Temperature applies to the HTTP providers only.</html:p>
       <html:label class="annota-check">
         <html:input type="checkbox" data-pref="annota.structuredOutput"/>
-        <html:span>Ask for structured output when the provider supports it
-          <html:small class="annota-help">Field filling asks for a JSON object instead
-          of <html:code>name: value</html:code> lines — steadier with small local
-          models. Mistral / OpenAI-compatible and Ollama only; a reply that isn't
-          valid JSON is read the old way rather than lost.</html:small></html:span>
+        <html:span><html:span data-i18n="gen.json">Request structured output (JSON) when supported</html:span>
+          <html:small class="annota-help" data-i18n="gen.json.help">Mistral / OpenAI-compatible and Ollama. A reply that is not valid JSON is parsed as plain text.</html:small></html:span>
       </html:label>
     </html:section>
 
     <html:section class="annota-card">
-      <html:h3 class="annota-card-title">What is sent along</html:h3>
+      <html:h3 class="annota-card-title" data-i18n="ctx.title">Context sent</html:h3>
       <html:label class="annota-check">
         <html:input type="checkbox" data-pref="annota.sendContext"/>
-        <html:span>The reference's details (title, authors, year, abstract…)</html:span>
+        <html:span data-i18n="ctx.meta">Reference metadata (title, authors, year, abstract)</html:span>
       </html:label>
       <html:label class="annota-check">
         <html:input type="checkbox" data-pref="annota.resolveCitations"/>
-        <html:span>The works cited inside the passage</html:span>
+        <html:span data-i18n="ctx.refs">Works cited in the passage</html:span>
       </html:label>
       <html:details class="annota-details">
-        <html:summary>Fine-tuning</html:summary>
+        <html:summary data-i18n="ctx.limits">Limits</html:summary>
         <html:div class="annota-details-body">
           <html:div class="annota-form">
-            <html:label class="annota-field-label" for="annota-maxabstract">Abstract limit
-              (characters)</html:label>
+            <html:label class="annota-field-label" for="annota-maxabstract" data-i18n="ctx.abstract">Abstract length (characters)</html:label>
             <html:input id="annota-maxabstract" type="number" min="0" max="10000" step="100"
                         class="annota-input annota-w-num" data-pref="annota.maxAbstractChars"/>
-            <html:label class="annota-field-label" for="annota-maxrefs">Max references</html:label>
+            <html:label class="annota-field-label" for="annota-maxrefs" data-i18n="ctx.maxrefs">Maximum references</html:label>
             <html:input id="annota-maxrefs" type="number" min="1" max="30"
                         class="annota-input annota-w-num" data-pref="annota.maxRefs"/>
           </html:div>
-          <html:p>Sending the reference's details helps the model resolve acronyms;
-          0 disables abstract truncation. Citations like
-          <html:code>[1]</html:code> or <html:code>(Author, year)</html:code> are
-          resolved to real entries, available as
-          <html:code>{{references}}</html:code>: Annota follows the PDF's own links
-          first, then falls back to reading its bibliography.</html:p>
+          <html:p data-i18n="ctx.limits.help">0: no abstract truncation. Citations such as <html:code>[1]</html:code> or <html:code>(Author, year)</html:code> are resolved through the PDF's internal links, then its bibliography, and passed as <html:code>{{references}}</html:code>.</html:p>
         </html:div>
       </html:details>
     </html:section>
   </html:div>
 
-  <!-- ======================== ONGLET 3 · DISCUSSION ==================== -->
+  <!-- ============================ DISCUSSION =========================== -->
   <html:div id="annota-pane-chat" class="annota-pane" role="tabpanel" hidden="hidden">
 
-    <html:p class="annota-lead">
-      Chat with the document you're reading, or with your whole library: click
-      the <html:b>💬 button</html:b> in the tab bar, or press
-      <html:b>⌘J / Ctrl+J</html:b>. The panel takes the place of the right-hand
-      pane, in the library and in the PDF reader. Answers cite pages or
-      references, and a click takes you there.
-    </html:p>
+    <html:p class="annota-lead" data-i18n="chat.lead">Chat with the open document or the library. Open the panel with the button in the tab bar or <html:b>⌘J / Ctrl+J</html:b>. Answers cite pages and references.</html:p>
 
     <html:section class="annota-card">
-      <html:h3 class="annota-card-title">Provider</html:h3>
-      <html:select id="annota-chat-provider" class="annota-input annota-w-lg"
-                   aria-label="Chat provider">
-        <html:option value="">Same as annotations (AI tab)</html:option>
-        <html:option value="openai">Mistral / OpenAI-compatible — remote</html:option>
-        <html:option value="ollama">Ollama — local</html:option>
-        <html:option value="cli">Claude Code CLI — local, your subscription</html:option>
-        <html:option value="apple">Apple Intelligence — on-device</html:option>
+      <html:h3 class="annota-card-title" data-i18n="ai.provider">Provider</html:h3>
+      <html:select id="annota-chat-provider" class="annota-input annota-w-lg" aria-label="Provider">
+        <html:option value="" data-i18n="chat.opt.same">Same as AI tab</html:option>
+        <html:option value="openai" data-i18n="ai.opt.openai">Mistral / OpenAI-compatible API (remote, API key)</html:option>
+        <html:option value="ollama" data-i18n="ai.opt.ollama">Ollama (local)</html:option>
+        <html:option value="cli" data-i18n="ai.opt.cli">Claude Code CLI (local, subscription)</html:option>
+        <html:option value="apple" data-i18n="ai.opt.apple">Apple Intelligence (on-device)</html:option>
       </html:select>
       <html:p id="annota-chat-provider-status" class="annota-state" role="status"/>
-      <html:p class="annota-help">
-        Uses the connection set in the <html:b>✨ AI</html:b> tab (key, endpoint,
-        paths). The menu under the chat's text box switches on the fly.
-      </html:p>
+      <html:p class="annota-help" data-i18n="chat.provider.help">Connection settings come from the AI tab. The provider can also be changed in the chat panel.</html:p>
     </html:section>
 
     <html:section class="annota-card">
-      <html:h3 class="annota-card-title">Model for the chat
-        <html:span class="annota-optional">optional</html:span></html:h3>
+      <html:h3 class="annota-card-title"><html:span data-i18n="chat.models">Chat model</html:span>
+        <html:span class="annota-optional" data-i18n="optional">optional</html:span></html:h3>
       <html:div class="annota-form">
         <html:label class="annota-field-label" for="annota-chat-model">Mistral / API</html:label>
         <html:input id="annota-chat-model" type="text" class="annota-input annota-w-md"
@@ -383,156 +294,129 @@ resume     | Résumé     | ai       | Résume le passage en une phrase. | itali
         <html:div class="annota-field-stack">
           <html:select id="annota-chat-cli-model" class="annota-input annota-w-md"/>
           <html:input id="annota-chat-cli-model-other" type="text" class="annota-input annota-w-md"
-                      placeholder="Full model name, e.g. claude-opus-5-5" hidden="hidden"/>
+                      placeholder="Full model name, e.g. claude-opus-5-5" data-i18n-ph="ai.cli.other.ph" hidden="hidden"/>
         </html:div>
-        <html:span class="annota-field-label">Claude effort</html:span>
+        <html:span class="annota-field-label" data-i18n="chat.cli.effort">Claude effort</html:span>
         <html:div class="annota-field-stack">
-          <html:div id="annota-chat-cli-effort" class="annota-seg" role="group"
-                    aria-label="Effort for the chat"/>
+          <html:div id="annota-chat-cli-effort" class="annota-seg" role="group" aria-label="Effort"/>
         </html:div>
       </html:div>
-      <html:p class="annota-help">
-        Empty = the model of the AI tab. A small fast model suits annotations; a
-        chat about a whole article gains from a bigger one
-        (<html:code>mistral-large-latest</html:code>, <html:code>opus</html:code>,
-        <html:code>qwen2.5:14b</html:code>…). Ollama tags matter here too.
-      </html:p>
+      <html:p class="annota-help" data-i18n="chat.models.help">Empty: model of the AI tab.</html:p>
     </html:section>
 
     <html:section class="annota-card">
-      <html:h3 class="annota-card-title">What the model reads</html:h3>
+      <html:h3 class="annota-card-title" data-i18n="chat.ctx">Context</html:h3>
       <html:label class="annota-check">
         <html:input type="checkbox" data-pref="annota.chatIncludeAnnotations"/>
-        <html:span>My annotations on the document (highlights and comments)</html:span>
+        <html:span data-i18n="chat.ctx.anns">Annotations on the document</html:span>
       </html:label>
       <html:label class="annota-check">
         <html:input type="checkbox" data-pref="annota.chatIncludeNotes"/>
-        <html:span>My notes on the reference</html:span>
+        <html:span data-i18n="chat.ctx.notes">Notes on the reference</html:span>
       </html:label>
       <html:div class="annota-form">
-        <html:label class="annota-field-label" for="annota-chat-maxchars">Context size
-          (characters)</html:label>
+        <html:label class="annota-field-label" for="annota-chat-maxchars" data-i18n="chat.ctx.size">Context size (characters)</html:label>
         <html:div class="annota-field-stack">
-          <html:input id="annota-chat-maxchars" type="number" min="0" max="2000000"
-                      step="1000" class="annota-input annota-w-num"
-                      data-pref="annota.chatMaxChars"/>
-          <html:span class="annota-help">0 = automatic, per provider</html:span>
+          <html:input id="annota-chat-maxchars" type="number" min="0" max="2000000" step="1000"
+                      class="annota-input annota-w-num" data-pref="annota.chatMaxChars"/>
+          <html:span class="annota-help" data-i18n="chat.ctx.size.help">0: automatic, per provider</html:span>
         </html:div>
-        <html:label class="annota-field-label" for="annota-chat-libitems">Library items
-          per answer</html:label>
+        <html:label class="annota-field-label" for="annota-chat-libitems" data-i18n="chat.ctx.items">Library items per answer</html:label>
         <html:input id="annota-chat-libitems" type="number" min="1" max="30"
                     class="annota-input annota-w-num" data-pref="annota.chatLibraryItems"/>
       </html:div>
       <html:details class="annota-details">
-        <html:summary>How the context is built</html:summary>
+        <html:summary data-i18n="chat.ctx.how">Context construction</html:summary>
         <html:div class="annota-details-body">
-          <html:p><html:b>Automatic</html:b>: about 100,000 characters for an API,
-          200,000 for the Claude CLI, 12,000 for Ollama and 6,000 for Apple
-          Intelligence, whose windows are small. A document that doesn't fit is
-          cut by pages: the first page, then the pages closest to your question.
-          The answer says how much was sent.</html:p>
-          <html:p>With the PDF <html:b>open in the reader</html:b>, the text is read
-          page by page with the journal's own page numbers, so “p. 215” is the
-          page printed on the article. Closed, Annota falls back on Zotero's
-          extracted text.</html:p>
-          <html:p>Ollama truncates silently beyond its context window: to send
-          more, raise it (<html:code>OLLAMA_CONTEXT_LENGTH=16384 ollama serve</html:code>)
-          and set the size above accordingly.</html:p>
-          <html:p><html:b>My library</html:b> runs Zotero's own search (all fields,
-          notes, full text) on the words of your question and sends the best
-          matches, with your annotations that mention them.</html:p>
+          <html:p data-i18n="chat.ctx.how1"><html:b>Automatic size</html:b>: about 100,000 characters for an API, 200,000 for the Claude CLI, 12,000 for Ollama, 6,000 for Apple Intelligence. A longer document is reduced to its first page and the pages most relevant to the question.</html:p>
+          <html:p data-i18n="chat.ctx.how2">With the PDF open in the reader, page numbers are those printed in the document. Ollama truncates beyond its context window: raise it (<html:code>OLLAMA_CONTEXT_LENGTH</html:code>) before increasing the size above.</html:p>
+          <html:p data-i18n="chat.ctx.how3"><html:b>Library</html:b>: Zotero search (all fields, notes, full text) on the terms of the question; the best matches are sent with the related annotations.</html:p>
         </html:div>
       </html:details>
     </html:section>
 
     <html:section class="annota-card">
-      <html:h3 class="annota-card-title">Instructions</html:h3>
-      <html:p class="annota-help">
-        Added to Annota's own (stick to the sources, cite pages, answer in the
-        question's language). Tone, format, field, what to look for…
-      </html:p>
+      <html:h3 class="annota-card-title" data-i18n="chat.instr">Instructions</html:h3>
+      <html:p class="annota-help" data-i18n="chat.instr.help">Appended to the built-in instructions.</html:p>
       <html:textarea id="annota-chat-instructions" rows="4" class="annota-input annota-code"
-                     aria-label="Chat instructions"/>
+                     aria-label="Instructions"/>
       <html:div class="annota-actions annota-actions-end">
         <html:span id="annota-chat-status" class="annota-status" role="status"/>
       </html:div>
     </html:section>
 
     <html:section class="annota-card">
-      <html:h3 class="annota-card-title">Opening the chat</html:h3>
+      <html:h3 class="annota-card-title" data-i18n="chat.open">Opening</html:h3>
       <html:div class="annota-form">
-        <html:label class="annota-field-label" for="annota-chat-shortcut">Shortcut letter</html:label>
+        <html:label class="annota-field-label" for="annota-chat-shortcut" data-i18n="chat.shortcut">Shortcut letter</html:label>
         <html:div class="annota-field-stack">
           <html:input id="annota-chat-shortcut" type="text" maxlength="1"
                       class="annota-input annota-w-key" data-pref="annota.chatShortcut"/>
-          <html:span class="annota-help">With ⌘ (Mac) or Ctrl. Empty = no shortcut;
-          the 💬 button stays.</html:span>
+          <html:span class="annota-help" data-i18n="chat.shortcut.help">Combined with ⌘ (macOS) or Ctrl. Empty: no shortcut.</html:span>
         </html:div>
       </html:div>
       <html:label class="annota-check">
         <html:input type="checkbox" data-pref="annota.chatSelectionButton"/>
-        <html:span>Show “💬 Ask Annota” when I select text in the reader</html:span>
+        <html:span data-i18n="chat.askbtn">Show “Ask Annota” in the text selection popup</html:span>
       </html:label>
     </html:section>
   </html:div>
 
-  <!-- ========================= ONGLET 4 · GÉNÉRAL ====================== -->
+  <!-- ============================= GÉNÉRAL ============================= -->
   <html:div id="annota-pane-general" class="annota-pane" role="tabpanel" hidden="hidden">
 
     <html:section class="annota-card">
-      <html:h3 class="annota-card-title">Behaviour</html:h3>
+      <html:h3 class="annota-card-title" data-i18n="gen.ui">Interface</html:h3>
+      <html:div class="annota-form">
+        <html:label class="annota-field-label" for="annota-ui-lang" data-i18n="gen.ui.lang">Language</html:label>
+        <html:select id="annota-ui-lang" class="annota-input annota-w-sm" data-pref="annota.uiLanguage">
+          <html:option value="auto" data-i18n="gen.ui.auto">Automatic (Zotero language)</html:option>
+          <html:option value="en">English</html:option>
+          <html:option value="fr">Français</html:option>
+        </html:select>
+      </html:div>
+    </html:section>
+
+    <html:section class="annota-card">
+      <html:h3 class="annota-card-title" data-i18n="behav.title">Behavior</html:h3>
       <html:label class="annota-check">
         <html:input type="checkbox" data-pref="annota.alsoUnderline"/>
-        <html:span>Also react to underlines, not just highlights</html:span>
+        <html:span data-i18n="behav.underline">Also process underlines</html:span>
       </html:label>
       <html:label class="annota-check">
         <html:input type="checkbox" data-pref="annota.overwrite"/>
-        <html:span>Replace comments that already have text</html:span>
+        <html:span data-i18n="behav.overwrite">Overwrite existing comments</html:span>
       </html:label>
       <html:label class="annota-check">
         <html:input type="checkbox" data-pref="annota.showPlaceholder"/>
-        <html:span>Show ⏳ while the AI is working</html:span>
+        <html:span data-i18n="behav.placeholder">Show a placeholder during generation</html:span>
       </html:label>
     </html:section>
 
     <html:section class="annota-card">
-      <html:h3 class="annota-card-title">When generation fails</html:h3>
-      <html:p class="annota-help">
-        A failed call leaves a highlight with no comment — indistinguishable from
-        one you left bare on purpose. Annota retries, then marks what still fails.
-      </html:p>
+      <html:h3 class="annota-card-title" data-i18n="fail.title">Failures</html:h3>
+      <html:p class="annota-help" data-i18n="fail.help">Failed generations are retried, then tagged.</html:p>
       <html:div class="annota-form">
-        <html:label class="annota-field-label" for="annota-retries">Extra attempts</html:label>
+        <html:label class="annota-field-label" for="annota-retries" data-i18n="fail.retries">Extra attempts</html:label>
         <html:input id="annota-retries" type="number" min="0" max="5"
                     class="annota-input annota-w-num" data-pref="annota.retries"/>
       </html:div>
       <html:label class="annota-check">
         <html:input type="checkbox" data-pref="annota.markFailures"/>
-        <html:span>Tag annotations whose generation failed</html:span>
+        <html:span data-i18n="fail.tag">Tag failed annotations</html:span>
       </html:label>
       <html:div class="annota-form">
-        <html:label class="annota-field-label" for="annota-failedtag">Tag name</html:label>
+        <html:label class="annota-field-label" for="annota-failedtag" data-i18n="fail.tagname">Tag</html:label>
         <html:input id="annota-failedtag" type="text" class="annota-input annota-w-sm"
                     data-pref="annota.failedTag"/>
       </html:div>
-      <html:p class="annota-help">
-        Right-click a reference → <html:b>Annota → Retry failed comments</html:b>
-        replays only the tagged ones. A refused key or a missing model is never
-        retried — the answer would be the same.
-      </html:p>
+      <html:p class="annota-help" data-i18n="fail.help2">Context menu → Annota → <html:b>Retry failed comments</html:b> processes tagged annotations only. Authentication errors and missing models are not retried.</html:p>
     </html:section>
 
     <html:section class="annota-card">
-      <html:h3 class="annota-card-title">Good to know</html:h3>
-      <html:p class="annota-help">
-        There is no master switch: each color decides for itself, and a color with
-        nothing set is never touched. To stop everything automatic, set your colors
-        to <html:i>Only when I ask</html:i>.
-      </html:p>
-      <html:p class="annota-help">
-        API keys are stored in plain text in your Zotero profile — don't share it.
-        Annota updates itself from GitHub.
-      </html:p>
+      <html:h3 class="annota-card-title" data-i18n="notes.title">Notes</html:h3>
+      <html:p class="annota-help" data-i18n="notes.1">There is no global switch. To disable automatic generation, set colors to <html:i>On request only</html:i>.</html:p>
+      <html:p class="annota-help" data-i18n="notes.2">API keys are stored unencrypted in the Zotero profile. Updates are installed automatically from GitHub.</html:p>
     </html:section>
   </html:div>
 

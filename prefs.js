@@ -88,3 +88,7 @@ pref("extensions.zotero.annota.chatSelectionButton", true);
 // Raccourci d'ouverture du panneau de discussion : ⌘ (Mac) ou Ctrl + cette
 // lettre. Vide = aucun raccourci (le bouton de la barre des onglets reste).
 pref("extensions.zotero.annota.chatShortcut", "J");
+
+// ---- Interface ----
+// Langue : "auto" (celle de Zotero), "en" ou "fr".
+pref("extensions.zotero.annota.uiLanguage", "auto");

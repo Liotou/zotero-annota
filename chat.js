@@ -164,8 +164,8 @@ var AnnotaChat = {
 			let btn = doc.createXULElement("toolbarbutton");
 			btn.id = "annota-tb-chat";
 			let sc = this.shortcutLabel();
-			btn.setAttribute("tooltiptext", "Annota Chat" + (sc ? " (" + sc + ")" : ""));
-			btn.setAttribute("aria-label", "Annota Chat");
+			btn.setAttribute("tooltiptext", Annota.t("c.tb") + (sc ? " (" + sc + ")" : ""));
+			btn.setAttribute("aria-label", Annota.t("c.tb"));
 			btn.addEventListener("command", () => this.toggle(win));
 			let sync = toolbar.querySelector("#zotero-tb-sync");
 			if (sync) toolbar.insertBefore(btn, sync);
@@ -198,6 +198,16 @@ var AnnotaChat = {
 		win.addEventListener("keydown", rec.onKey);
 
 		this._windows.set(win, rec);
+	},
+
+	// Langue changée : le panneau est reconstruit, conversations et état
+	// d'ouverture conservés.
+	relocalizeWindow(win) {
+		let rec = this._windows.get(win);
+		let open = !!(rec && rec.visible);
+		this.removeFromWindow(win);
+		this.addToWindow(win);
+		if (open) this.toggle(win, true);
 	},
 
 	removeFromWindow(win) {
@@ -929,8 +939,7 @@ var AnnotaChat = {
 		let p = this.provider();
 		let notReady = Annota.providerReadyError(p);
 		if (notReady) {
-			conv.error = { message: notReady + " Pick another model below, or set it up in"
-				+ " Settings → Annota → ✨ AI." };
+			conv.error = { message: Annota.t("c.notready", { err: notReady }) };
 			this.refresh(conv);
 			return;
 		}
@@ -949,7 +958,7 @@ var AnnotaChat = {
 		conv.busy = true;
 		conv.error = null;
 		conv.cancel = Annota.makeCancelToken();
-		conv.status = conv.scope === "library" ? "Searching your library…" : "Reading the document…";
+		conv.status = Annota.t(conv.scope === "library" ? "c.searching" : "c.reading");
 		this.refresh(conv);
 
 		try {
@@ -969,7 +978,7 @@ var AnnotaChat = {
 				ctx = await this.buildLibraryContext(conv.libraryID, terms, Math.floor(budget * 0.8));
 				extra.sources = ctx.sources;
 				extra.note = ctx.sources.length
-					? ctx.sources.length + " items found" : "no matching item";
+					? Annota.t("c.note.items", { n: ctx.sources.length }) : Annota.t("c.note.noitem");
 			}
 			else {
 				ctx = await this.buildDocumentContext(item, terms, Math.floor(budget * 0.8));
@@ -978,10 +987,11 @@ var AnnotaChat = {
 				let st = ctx.stats;
 				if (st.pages) {
 					extra.note = st.omitted
-						? st.sent + "/" + st.pages + (st.paged ? " pages" : " passages") + " sent"
-						: "full text sent";
+						? Annota.t(st.paged ? "c.note.partial" : "c.note.partialp",
+							{ sent: st.sent, total: st.pages })
+						: Annota.t("c.note.full");
 				}
-				else extra.note = "no full text";
+				else extra.note = Annota.t("c.note.nofull");
 			}
 			if (conv.cancel.cancelled) {
 				let err = new Error("Stopped");
@@ -989,7 +999,7 @@ var AnnotaChat = {
 				throw err;
 			}
 
-			conv.status = "Waiting for " + this.PROVIDER_LABELS[p] + "…";
+			conv.status = Annota.t("c.waiting", { name: this.PROVIDER_LABELS[p] });
 			this.refresh(conv);
 			let t0 = Date.now();
 			let reply = await Annota.complete({
@@ -1015,7 +1025,7 @@ var AnnotaChat = {
 		}
 		catch (e) {
 			conv.error = (e && e.cancelled) || (conv.cancel && conv.cancel.cancelled)
-				? { message: "Stopped.", stopped: true }
+				? { message: Annota.t("c.stopped"), stopped: true }
 				: { message: String((e && e.message) || e) };
 			log("discussion : " + conv.error.message);
 		}
@@ -1129,9 +1139,9 @@ var AnnotaChat = {
 		let left = this.el(doc, "div", "annota-chat-header-group");
 		let right = this.el(doc, "div", "annota-chat-header-group");
 		let sc = this.shortcutLabel();
-		left.appendChild(this.iconButton(doc, "close", "Close" + (sc ? " (" + sc + ")" : ""),
+		left.appendChild(this.iconButton(doc, "close", Annota.t("c.close") + (sc ? " (" + sc + ")" : ""),
 			() => this.toggle(win, false)));
-		let newBtn = this.iconButton(doc, "plus", "New chat", () => {
+		let newBtn = this.iconButton(doc, "plus", Annota.t("c.new"), () => {
 			let conv = this.conversationOf(inst);
 			if (!conv || conv.busy) return;
 			conv.messages = [];
@@ -1141,14 +1151,14 @@ var AnnotaChat = {
 		});
 		left.appendChild(newBtn);
 		let title = this.el(doc, "div", "annota-chat-title", "Annota");
-		let saveBtn = this.iconButton(doc, "note", "Save chat as note", () => {
+		let saveBtn = this.iconButton(doc, "note", Annota.t("c.savechat"), () => {
 			let conv = this.conversationOf(inst);
 			if (conv && conv.messages.length) {
 				this.saveNote(conv, conv.messages).catch(e => log("saveNote: " + e));
 			}
 		});
 		right.appendChild(saveBtn);
-		right.appendChild(this.iconButton(doc, "settings", "Chat settings", () => this.openSettings()));
+		right.appendChild(this.iconButton(doc, "settings", Annota.t("c.settings"), () => this.openSettings()));
 		header.appendChild(left);
 		header.appendChild(title);
 		header.appendChild(right);
@@ -1164,28 +1174,28 @@ var AnnotaChat = {
 		let chips = this.el(doc, "div", "annota-composer-chips");
 		let docChip = this.button(doc, null, "annota-chip", () => this.setScope(inst, "document"));
 		docChip.appendChild(this.icon(doc, "doc", 13));
-		let docLabel = this.el(doc, "span", "annota-chip-label", "This document");
+		let docLabel = this.el(doc, "span", "annota-chip-label", Annota.t("c.doc"));
 		docChip.appendChild(docLabel);
 		let libChip = this.button(doc, null, "annota-chip", () => this.setScope(inst, "library"));
 		libChip.appendChild(this.icon(doc, "library", 13));
-		let libLabel = this.el(doc, "span", "annota-chip-label", "My library");
+		let libLabel = this.el(doc, "span", "annota-chip-label", Annota.t("c.lib"));
 		libChip.appendChild(libLabel);
 		chips.appendChild(docChip);
 		chips.appendChild(libChip);
 
 		let input = this.el(doc, "textarea", "annota-composer-input");
 		input.setAttribute("rows", "1");
-		input.setAttribute("aria-label", "Message Annota");
+		input.setAttribute("aria-label", Annota.t("c.input.aria"));
 
 		let controls = this.el(doc, "div", "annota-composer-controls");
 		let modelSel = this.el(doc, "select", "annota-model-select");
-		modelSel.setAttribute("title", "AI used for the chat — set up in Settings → Annota → ✨ AI");
+		modelSel.setAttribute("title", Annota.t("c.model.title"));
 		let spacer = this.el(doc, "div", "annota-flex");
 		let send = this.button(doc, null, "annota-send", () => {
 			let conv = this.conversationOf(inst);
 			if (conv && conv.busy) this.stop(conv);
 			else this.submit(inst, input.value);
-		}, "Send");
+		}, Annota.t("c.send"));
 		controls.appendChild(modelSel);
 		controls.appendChild(spacer);
 		controls.appendChild(send);
@@ -1256,7 +1266,7 @@ var AnnotaChat = {
 		inst.send.textContent = "";
 		inst.send.appendChild(this.icon(inst.doc, busy ? "stop" : "up", busy ? 12 : 15));
 		inst.send.setAttribute("data-busy", busy ? "true" : "false");
-		inst.send.setAttribute("title", busy ? "Stop" : "Send (Enter)");
+		inst.send.setAttribute("title", Annota.t(busy ? "c.stop" : "c.send"));
 		inst.send.disabled = !busy && !inst.input.value.trim();
 	},
 
@@ -1282,11 +1292,11 @@ var AnnotaChat = {
 		sel.textContent = "";
 		let def = Annota.provider();
 		let label = p => this.PROVIDER_LABELS[p] + " · " + this.modelLabel(p);
-		let opts = [["", label(def) + " (default)"]]
+		let opts = [["", label(def) + " (" + Annota.t("c.default") + ")"]]
 			.concat(Annota.PROVIDERS.map(p => [p, label(p)]));
 		for (let [v, l] of opts) {
 			let o = this.el(inst.doc, "option", null,
-				l + (v && Annota.providerReadyError(v) ? " — not set up" : ""));
+				l + (v && Annota.providerReadyError(v) ? " (" + Annota.t("c.notsetup") + ")" : ""));
 			o.setAttribute("value", v);
 			sel.appendChild(o);
 		}
@@ -1322,18 +1332,17 @@ var AnnotaChat = {
 			name = lib ? lib.name : "";
 		}
 		catch (e) {}
-		inst.libLabel.textContent = name || "My library";
-		inst.libChip.setAttribute("title", "Search " + (name || "your library")
-			+ " — references, notes, annotations, full text");
+		inst.libLabel.textContent = name || Annota.t("c.lib");
+		inst.libChip.setAttribute("title", Annota.t("c.lib.title", { name: name || Annota.t("c.lib") }));
 		if (!ctx.item) return;
 		let top = this.topItem(ctx.item);
-		inst.docLabel.textContent = this.shortTitle(top) || "This document";
+		inst.docLabel.textContent = this.shortTitle(top) || Annota.t("c.doc");
 		let { att } = await this.resolveDocument(ctx.item);
 		if (inst.key !== key) return;
 		let file = "";
 		try { file = att ? (att.attachmentFilename || att.getDisplayTitle()) : ""; } catch (e) {}
 		inst.docChip.setAttribute("title", (top ? top.getDisplayTitle() : "")
-			+ (file ? "\n" + file : "\nNo PDF or EPUB — reference, notes and annotations only"));
+			+ "\n" + (file || Annota.t("c.nofile")));
 	},
 
 	updateChips(inst) {
@@ -1342,9 +1351,7 @@ var AnnotaChat = {
 		inst.docChip.hidden = !conv.itemID;
 		inst.docChip.setAttribute("data-active", conv.scope === "document" ? "true" : "false");
 		inst.libChip.setAttribute("data-active", conv.scope === "library" ? "true" : "false");
-		inst.input.setAttribute("placeholder", conv.scope === "library"
-			? "Ask your library…"
-			: "Ask about this document…");
+		inst.input.setAttribute("placeholder", Annota.t(conv.scope === "library" ? "c.ph.lib" : "c.ph.doc"));
 		inst.newBtn.disabled = !conv.messages.length || conv.busy;
 		inst.saveBtn.disabled = !conv.messages.length;
 	},
@@ -1377,7 +1384,7 @@ var AnnotaChat = {
 			let dots = this.el(doc, "span", "annota-dots");
 			for (let k = 0; k < 3; k++) dots.appendChild(this.el(doc, "span"));
 			t.appendChild(dots);
-			t.appendChild(this.el(doc, "span", null, conv.status || "Working…"));
+			t.appendChild(this.el(doc, "span", null, conv.status || Annota.t("c.working")));
 			box.appendChild(t);
 		}
 		if (conv.error) {
@@ -1389,7 +1396,7 @@ var AnnotaChat = {
 					this.answer(conv).catch(e => log("answer: " + e));
 				});
 				retry.appendChild(this.icon(doc, "retry", 12));
-				retry.appendChild(this.el(doc, "span", null, "Retry"));
+				retry.appendChild(this.el(doc, "span", null, Annota.t("c.retry")));
 				err.appendChild(retry);
 			}
 			box.appendChild(err);
@@ -1399,19 +1406,16 @@ var AnnotaChat = {
 		inst.scroller.scrollTop = inst.scroller.scrollHeight;
 	},
 
+	// [libellé, question] ; une question qui finit par une espace attend la
+	// fin de la phrase plutôt que d'être envoyée.
 	SUGGESTIONS: {
-		document: [
-			["Summarize", "Summarize this document: question, method, main findings."],
-			["Key argument", "What is the main argument, and how is it supported?"],
-			["Methods", "Which methods and data does it use?"],
-			["Limitations", "What are its limitations, stated or not?"],
-			["My highlights", "Summarize my annotations on this document."]
-		],
-		library: [
-			["What do I have on…", "What does my library say about "],
-			["Compare", "Compare how the references in my library address "],
-			["Find a source", "Which reference in my library would support the claim that "]
-		]
+		document: ["sum", "arg", "meth", "lim", "ann"],
+		library: ["what", "cmp", "find"]
+	},
+
+	suggestions(scope) {
+		return (this.SUGGESTIONS[scope] || []).map(k =>
+			[Annota.t("c.s." + k), Annota.t("c.s." + k + ".q")]);
 	},
 
 	renderEmpty(inst, conv) {
@@ -1423,13 +1427,12 @@ var AnnotaChat = {
 		let item = this.convItem(conv);
 		let lib = conv.scope === "library";
 		wrap.appendChild(this.el(doc, "div", "annota-home-title",
-			lib ? "Ask your library" : "Ask about this document"));
+			Annota.t(lib ? "c.home.lib" : "c.home.doc")));
 		wrap.appendChild(this.el(doc, "div", "annota-home-sub", lib
-			? "Annota searches your references, notes and annotations, and cites them."
-			: (this.shortTitle(this.topItem(item)) || "")
-				+ " — answers cite pages; click one to jump there."));
+			? Annota.t("c.home.lib.sub")
+			: Annota.t("c.home.doc.sub", { title: this.shortTitle(this.topItem(item)) || "" })));
 		let actions = this.el(doc, "div", "annota-home-actions");
-		for (let [label, prompt] of this.SUGGESTIONS[conv.scope] || []) {
+		for (let [label, prompt] of this.suggestions(conv.scope)) {
 			actions.appendChild(this.button(doc, label, "annota-launch", () => {
 				// Une suggestion ouverte (« … about ») attend la fin de la phrase.
 				if (/\s$/.test(prompt)) {
@@ -1443,8 +1446,7 @@ var AnnotaChat = {
 		}
 		wrap.appendChild(actions);
 		if (!lib) {
-			wrap.appendChild(this.el(doc, "div", "annota-home-hint",
-				"Tip: select text in the PDF and click “💬 Ask Annota” to quote it here."));
+			wrap.appendChild(this.el(doc, "div", "annota-home-hint", Annota.t("c.home.hint")));
 		}
 		return wrap;
 	},
@@ -1459,7 +1461,7 @@ var AnnotaChat = {
 		let wrap = this.el(doc, "div", "annota-answer");
 		wrap.appendChild(this.renderMarkdown(doc, m.content, m));
 		let foot = this.el(doc, "div", "annota-answer-foot");
-		let copy = this.iconButton(doc, "copy", "Copy", () => {
+		let copy = this.iconButton(doc, "copy", Annota.t("c.copy"), () => {
 			try {
 				Zotero.Utilities.Internal.copyTextToClipboard(m.content);
 				copy.textContent = "";
@@ -1472,7 +1474,7 @@ var AnnotaChat = {
 			catch (e) { log("copy: " + e); }
 		}, "annota-icon-sm");
 		foot.appendChild(copy);
-		foot.appendChild(this.iconButton(doc, "note", "Save as note (with its question)", () => {
+		foot.appendChild(this.iconButton(doc, "note", Annota.t("c.savenote"), () => {
 			let q = conv.messages[i - 1];
 			let pair = q && q.role === "user" ? [q, m] : [m];
 			this.saveNote(conv, pair).catch(e => log("saveNote: " + e));
@@ -1636,7 +1638,7 @@ var AnnotaChat = {
 			if (part.sep !== undefined || !part.target) continue;
 			if (isPage) {
 				if (this.pageIndexFor(msg, part.target) === null) continue;
-				pills.push(this.pill(doc, "p. " + part.text.trim(), "Open page " + part.target,
+				pills.push(this.pill(doc, "p. " + part.text.trim(), Annota.t("c.page", { p: part.target }),
 					"page", () => this.openPage(msg, part.target)));
 				continue;
 			}
@@ -1644,7 +1646,7 @@ var AnnotaChat = {
 			if (!src) continue;
 			let it = Zotero.Items.get(src.id);
 			let title = it && it.getDisplayTitle ? it.getDisplayTitle() : "";
-			pills.push(this.pill(doc, part.target, title || "Show in library", "source",
+			pills.push(this.pill(doc, part.target, title || Annota.t("c.showlib"), "source",
 				() => this.selectItem(src.id)));
 		}
 		if (!pills.length) { parent.appendChild(doc.createTextNode(v)); return; }
@@ -1792,14 +1794,14 @@ var AnnotaChat = {
 		let libraryID = top ? top.libraryID : conv.libraryID;
 		let lib = Zotero.Libraries.get(libraryID);
 		if (lib && lib.editable === false) {
-			toast("Annota", "This library is read-only — the note can't be saved.", "error");
+			toast("Annota", Annota.t("c.ro"), "error");
 			return;
 		}
 		let title = top && top.getDisplayTitle ? top.getDisplayTitle() : "";
-		let html = ["<h1>" + this.esc("💬 " + (title || "Annota chat")) + "</h1>"];
+		let html = ["<h1>" + this.esc(title || Annota.t("c.note.title")) + "</h1>"];
 		for (let m of messages) {
 			if (m.role === "user") {
-				html.push("<p><strong>Question</strong></p><blockquote>"
+				html.push("<p><strong>" + this.esc(Annota.t("c.note.q")) + "</strong></p><blockquote>"
 					+ this.markdownHTML(m.content, null) + "</blockquote>");
 			}
 			else {
@@ -1813,8 +1815,7 @@ var AnnotaChat = {
 		if (top && top.isRegularItem && top.isRegularItem()) note.parentID = top.id;
 		note.setNote(html.join("\n"));
 		await note.saveTx();
-		toast("Annota", note.parentID ? "Saved as a note under this reference."
-			: "Saved as a standalone note.");
+		toast("Annota", Annota.t(note.parentID ? "c.saved.child" : "c.saved.alone"));
 	},
 
 	// ---- Citations depuis le lecteur ----
@@ -1872,8 +1873,8 @@ var AnnotaChat = {
 				? String(ann.position.pageIndex + 1) : "");
 		let btn = doc.createElement("button");
 		btn.type = "button";
-		btn.textContent = "💬 Ask Annota";
-		btn.title = "Quote this passage in the Annota chat";
+		btn.textContent = Annota.t("c.ask");
+		btn.title = Annota.t("c.ask.title");
 		btn.style.cssText = "width:100%;box-sizing:border-box;margin-top:4px;"
 			+ "padding:3px 6px;font:inherit;font-size:11.5px;cursor:pointer;"
 			+ "border:1px solid rgba(128,128,128,.45);border-radius:4px;"
@@ -1897,7 +1898,7 @@ var AnnotaChat = {
 			let text = String(a.annotationText || "").trim();
 			let comment = this.htmlToText(a.annotationComment || "");
 			if (text) quote += this.quoteText(text, a.annotationPageLabel);
-			if (comment) quote += "My comment: " + comment + "\n\n";
+			if (comment) quote += Annota.t("c.mycomment") + comment + "\n\n";
 		}
 		this.addQuote(att.id, quote);
 	},

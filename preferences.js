@@ -32,6 +32,70 @@
 		catch (e) { return null; }
 	}
 
+	function T(key, vars) {
+		let a = api();
+		return a && typeof a.t === "function" ? a.t(key, vars) : key;
+	}
+
+	// Fonctions à rejouer quand la langue change (textes construits par code).
+	const relocalizers = [];
+
+	// Texte traduit → nœuds, sans innerHTML : seules <b>, <i>, <code> sont
+	// reconnues, le reste est du texte.
+	function fillMarkup(el, str) {
+		el.textContent = "";
+		let stack = [el];
+		for (let part of String(str).split(/(<\/?(?:b|i|code)>)/)) {
+			let m = part.match(/^<(\/?)(b|i|code)>$/);
+			if (!m) {
+				if (part) stack[stack.length - 1].appendChild(document.createTextNode(part));
+			}
+			else if (!m[1]) {
+				let n = document.createElementNS(XHTML_NS, m[2]);
+				stack[stack.length - 1].appendChild(n);
+				stack.push(n);
+			}
+			else if (stack.length > 1) stack.pop();
+		}
+	}
+
+	// L'anglais est le texte d'origine du panneau : on le mémorise avant de
+	// le remplacer, pour pouvoir y revenir sans recharger.
+	const original = new WeakMap();
+	function applyI18n() {
+		let a = api();
+		let lang = a && typeof a.lang === "function" ? a.lang() : "en";
+		let dict = (a && a.i18n && a.i18n[lang]) || {};
+		let root = document.getElementById("annota-prefs");
+		if (root) root.setAttribute("lang", lang);
+		for (let el of document.querySelectorAll("[data-i18n]")) {
+			if (!original.has(el)) {
+				original.set(el, Array.from(el.childNodes).map(n => n.cloneNode(true)));
+			}
+			let key = el.getAttribute("data-i18n");
+			if (lang !== "en" && dict[key] != null) fillMarkup(el, dict[key]);
+			else {
+				el.textContent = "";
+				for (let n of original.get(el)) el.appendChild(n.cloneNode(true));
+			}
+		}
+		for (let el of document.querySelectorAll("[data-i18n-ph]")) {
+			if (!el.hasAttribute("data-ph-en")) {
+				el.setAttribute("data-ph-en", el.getAttribute("placeholder") || "");
+			}
+			let key = el.getAttribute("data-i18n-ph");
+			el.setAttribute("placeholder", lang !== "en" && dict[key] != null
+				? dict[key] : el.getAttribute("data-ph-en"));
+		}
+	}
+
+	function relocalize() {
+		applyI18n();
+		for (let fn of relocalizers) {
+			try { fn(); } catch (e) { /* panneau en cours de fermeture */ }
+		}
+	}
+
 	function colors() {
 		let a = api();
 		return (a && Array.isArray(a.COLORS)) ? a.COLORS : [];
@@ -239,18 +303,18 @@
 				let names = models.map(m => m && m.name).filter(Boolean);
 				fill(names);
 				setStatus(names.length
-					? names.length + " installed"
-					: "none installed — run: ollama pull llama3.1:8b");
+					? T("p.ollama.count", { n: names.length })
+					: T("p.ollama.none"));
 			}
 			catch (e) {
 				fill([]);
-				setStatus("Ollama unreachable — is it running?");
+				setStatus(T("p.ollama.unreachable"));
 			}
 		}
 
 		sel.addEventListener("change", () => {
 			Zotero.Prefs.set(PREF_MODEL, sel.value);
-			setStatus("Saved ✓");
+			setStatus(T("p.saved"));
 		});
 		btn.addEventListener("click", refresh);
 
@@ -280,11 +344,11 @@
 			if (p.line) {
 				let where = document.createElementNS(XHTML_NS, "span");
 				where.setAttribute("class", "annota-lint-line");
-				where.textContent = "line " + p.line + " — ";
+				where.textContent = T("p.lint.line", { n: p.line });
 				row.appendChild(where);
 			}
 			let icon = document.createElementNS(XHTML_NS, "span");
-			icon.textContent = (p.level === "error" ? "⚠️ " : "· ");
+			icon.textContent = (p.level === "error" ? "⚠ " : "· ");
 			row.appendChild(icon);
 			row.appendChild(document.createTextNode(p.message));
 			box.appendChild(row);
@@ -300,33 +364,27 @@
 	// (lignes de commentaire, nom réservé ou absent) le fait rester en mode
 	// texte plutôt que de le perdre.
 
-	const FIELD_TYPES = [
-		["text", "Short text"],
-		["textarea", "Long text"],
-		["check", "Checkbox"],
-		["select", "Choice list"],
-		["ai", "Written by the AI"]
-	];
+	const FIELD_TYPES = ["text", "textarea", "check", "select", "ai"];
 	const FIELD_FORMATS = [
-		["plain", "Aa", "Plain"],
-		["bold", "B", "Bold"],
-		["italic", "I", "Italic"],
-		["bolditalic", "BI", "Bold italic"],
-		["underline", "U", "Underline"]
+		["plain", "Aa"], ["bold", "B"], ["italic", "I"], ["bolditalic", "BI"], ["underline", "U"]
 	];
-	const FIELD_PRESETS = [
-		{ label: "Title · Paraphrase · Reference", rows: [
-			{ name: "heading", label: "Title", type: "text", format: "bold" },
-			{ name: "paraphrase", label: "Paraphrase", type: "textarea", format: "plain" },
-			{ name: "source", label: "Reference", type: "text", format: "italic" }] },
-		{ label: "Concept · Definition", rows: [
-			{ name: "concept", label: "Concept", type: "text", format: "bold" },
-			{ name: "definition", label: "Definition", type: "textarea", format: "plain" }] },
-		{ label: "Comment · Kind", rows: [
-			{ name: "note", label: "My comment", type: "textarea", format: "plain" },
-			{ name: "kind", label: "Kind", type: "select", options: "idea, method, result, critique",
-				format: "italic" }] }
-	];
+	// Modèles de départ, dans la langue de l'interface. Les noms de variables
+	// restent fixes : un prompt qui s'y réfère marche dans les deux langues.
+	function fieldPresets() {
+		return [
+			{ label: T("fe.preset.1"), rows: [
+				{ name: "heading", label: T("fe.preset.1.a"), type: "text", format: "bold" },
+				{ name: "paraphrase", label: T("fe.preset.1.b"), type: "textarea", format: "plain" },
+				{ name: "source", label: T("fe.preset.1.c"), type: "text", format: "italic" }] },
+			{ label: T("fe.preset.2"), rows: [
+				{ name: "concept", label: T("fe.preset.2.a"), type: "text", format: "bold" },
+				{ name: "definition", label: T("fe.preset.2.b"), type: "textarea", format: "plain" }] },
+			{ label: T("fe.preset.3"), rows: [
+				{ name: "note", label: T("fe.preset.3.a"), type: "textarea", format: "plain" },
+				{ name: "kind", label: T("fe.preset.3.b"), type: "select",
+					options: T("fe.preset.3.opts"), format: "italic" }] }
+		];
+	}
 
 	function el(tag, cls, text) {
 		let e = document.createElementNS(XHTML_NS, tag);
@@ -411,8 +469,8 @@
 		foot.appendChild(toggle);
 		host.appendChild(foot);
 
-		addBar.appendChild(btn("+ Add field", "annota-button annota-fe-add", "Add a field", () => {
-			let base = "Field " + (rows.length + 1);
+		let addBtn = btn(T("fe.add"), "annota-button annota-fe-add", T("fe.add.title"), () => {
+			let base = T("fe.base", { n: rows.length + 1 });
 			rows.push({ name: uniqueName(slug(base, a)), label: base, type: "text",
 				format: "plain", options: "", prompt: "", nameEdited: false });
 			write(true);
@@ -420,7 +478,8 @@
 			let inputs = list.querySelectorAll(".annota-fe-label");
 			let last = inputs[inputs.length - 1];
 			if (last) { last.focus(); last.select(); }
-		}));
+		});
+		addBar.appendChild(addBtn);
 
 		function uniqueName(base, except) {
 			let taken = new Set(rows.filter(r => r !== except).map(r => r.name));
@@ -472,11 +531,10 @@
 			preview.textContent = "";
 			if (!rows.length) { preview.hidden = true; return; }
 			preview.hidden = false;
-			preview.appendChild(el("div", "annota-fe-preview-title", "Comment preview"));
+			preview.appendChild(el("div", "annota-fe-preview-title", T("fe.preview")));
 			let body = el("div", "annota-fe-preview-body");
 			if (templateArea && templateArea.value.trim()) {
-				body.appendChild(el("span", "annota-help",
-					"A custom layout is set (below): the comment follows it."));
+				body.appendChild(el("span", "annota-help", T("fe.preview.layout")));
 			}
 			else {
 				for (let r of rows) {
@@ -508,11 +566,11 @@
 			row.setAttribute("data-type", r.type);
 
 			let move = el("div", "annota-fe-move");
-			let up = btn("", "annota-fe-icon", "Move up", () => {
+			let up = btn("", "annota-fe-icon", T("fe.up"), () => {
 				[rows[i - 1], rows[i]] = [rows[i], rows[i - 1]];
 				write(true); render();
 			});
-			let down = btn("", "annota-fe-icon", "Move down", () => {
+			let down = btn("", "annota-fe-icon", T("fe.down"), () => {
 				[rows[i + 1], rows[i]] = [rows[i], rows[i + 1]];
 				write(true); render();
 			});
@@ -525,14 +583,14 @@
 
 			let label = el("input", "annota-input annota-fe-label");
 			label.setAttribute("type", "text");
-			label.setAttribute("placeholder", "Label shown when you highlight");
-			label.setAttribute("aria-label", "Field label");
+			label.setAttribute("placeholder", T("fe.label.ph"));
+			label.setAttribute("aria-label", T("fe.label.aria"));
 			label.value = r.label;
 
 			let type = el("select", "annota-input annota-fe-type");
-			type.setAttribute("aria-label", "Field type");
-			for (let [v, l] of FIELD_TYPES) {
-				let o = el("option", null, l);
+			type.setAttribute("aria-label", T("fe.type.aria"));
+			for (let v of FIELD_TYPES) {
+				let o = el("option", null, T("fe.type." + v));
 				o.setAttribute("value", v);
 				type.appendChild(o);
 			}
@@ -540,9 +598,9 @@
 
 			let fmt = el("div", "annota-fe-format");
 			fmt.setAttribute("role", "group");
-			fmt.setAttribute("aria-label", "Format in the comment");
-			for (let [v, txt, title] of FIELD_FORMATS) {
-				let f = btn(txt, "annota-fe-fmt annota-fe-fmt-" + v, title, () => {
+			fmt.setAttribute("aria-label", T("fe.fmt.aria"));
+			for (let [v, txt] of FIELD_FORMATS) {
+				let f = btn(txt, "annota-fe-fmt annota-fe-fmt-" + v, T("fe.fmt." + v), () => {
 					r.format = v;
 					for (let x of fmt.children) {
 						x.setAttribute("aria-pressed", x === f ? "true" : "false");
@@ -553,7 +611,7 @@
 				fmt.appendChild(f);
 			}
 
-			let del = btn("×", "annota-fe-icon annota-fe-del", "Remove this field", () => {
+			let del = btn("×", "annota-fe-icon annota-fe-del", T("fe.remove"), () => {
 				rows.splice(i, 1);
 				write(true); render();
 			});
@@ -568,8 +626,8 @@
 			if (r.type === "select") {
 				let opts = el("input", "annota-input annota-fe-extra");
 				opts.setAttribute("type", "text");
-				opts.setAttribute("placeholder", "Choices, separated by commas: idea, method, result");
-				opts.setAttribute("aria-label", "Choices");
+				opts.setAttribute("placeholder", T("fe.choices.ph"));
+				opts.setAttribute("aria-label", T("fe.choices.aria"));
 				opts.value = r.options;
 				opts.addEventListener("input", () => { r.options = opts.value; write(false); });
 				row.appendChild(opts);
@@ -577,8 +635,8 @@
 			else if (r.type === "ai") {
 				let pr = el("textarea", "annota-input annota-fe-extra");
 				pr.setAttribute("rows", "2");
-				pr.setAttribute("placeholder", "What the model should write here, e.g. “Summarize the passage in one sentence.”");
-				pr.setAttribute("aria-label", "Instruction for the AI");
+				pr.setAttribute("placeholder", T("fe.ai.ph"));
+				pr.setAttribute("aria-label", T("fe.ai.aria"));
 				pr.value = r.prompt;
 				pr.addEventListener("input", () => { r.prompt = pr.value; write(false); });
 				row.appendChild(pr);
@@ -586,11 +644,11 @@
 
 			// Nom de variable : déduit du libellé tant qu'on ne l'a pas modifié.
 			let varLine = el("label", "annota-fe-var");
-			varLine.appendChild(el("span", null, "Variable"));
+			varLine.appendChild(el("span", null, T("fe.var")));
 			let open = el("code", null, "{{");
 			let name = el("input", "annota-fe-name");
 			name.setAttribute("type", "text");
-			name.setAttribute("aria-label", "Variable name");
+			name.setAttribute("aria-label", T("fe.var.aria"));
 			name.setAttribute("spellcheck", "false");
 			name.value = r.name;
 			let fit = () => { name.style.width = (Math.max(3, name.value.length) + 1) + "ch"; };
@@ -616,9 +674,8 @@
 				fit();
 				let reserved = a && a.RESERVED_VARS && a.RESERVED_VARS.includes(v);
 				name.setAttribute("data-invalid", !v || reserved ? "true" : "false");
-				name.setAttribute("title", reserved
-					? "“" + v + "” is a built-in variable — pick another name"
-					: !v ? "A name is required" : "");
+				name.setAttribute("title", reserved ? T("fe.var.reserved", { v })
+					: !v ? T("fe.var.required") : "");
 				if (!v || reserved) return;
 				r.name = v;
 				r.nameEdited = v !== slug(r.label, a);
@@ -638,11 +695,10 @@
 			empty.textContent = "";
 			empty.hidden = rows.length > 0;
 			if (!rows.length) {
-				empty.appendChild(el("span", "annota-help",
-					"No fields yet — the AI writes a free comment. Add a field, or start from:"));
+				empty.appendChild(el("span", "annota-help", T("fe.empty")));
 				let chips = el("div", "annota-fe-presets");
-				for (let p of FIELD_PRESETS) {
-					chips.appendChild(btn(p.label, "annota-fe-preset", "Use these fields", () => {
+				for (let p of fieldPresets()) {
+					chips.appendChild(btn(p.label, "annota-fe-preset", T("fe.preset.title"), () => {
 						rows = p.rows.map(x => Object.assign(
 							{ options: "", prompt: "", nameEdited: true }, x));
 						write(true);
@@ -657,8 +713,7 @@
 		function setMode(m, silent) {
 			if (m === "visual" && unsupported(textarea.value)) {
 				m = "text";
-				notice.textContent = "Some lines (comments, or fields Annota would ignore) "
-					+ "can only be edited as text. Fix or remove them to use the visual editor.";
+				notice.textContent = T("fe.notice");
 				notice.hidden = false;
 			}
 			else notice.hidden = true;
@@ -669,7 +724,7 @@
 			mode = m;
 			visual.hidden = m !== "visual";
 			textarea.hidden = m === "visual";
-			toggle.textContent = m === "visual" ? "Edit as text" : "Use the visual editor";
+			toggle.textContent = T(m === "visual" ? "fe.astext" : "fe.visual");
 		}
 
 		// Couleur chargée, effacée, ou texte modifié ailleurs.
@@ -681,6 +736,12 @@
 
 		if (templateArea) templateArea.addEventListener("input", renderPreview);
 		refresh();
+		relocalizers.push(() => {
+			addBtn.textContent = T("fe.add");
+			addBtn.setAttribute("title", T("fe.add.title"));
+			render();
+			setMode(mode, true);
+		});
 		return { refresh };
 	}
 
@@ -746,7 +807,7 @@
 				delete map[current];
 			}
 			writeColorMap(map);
-			flashStatus("Saved ✓");
+			flashStatus(T("p.saved"));
 			refreshSwatches();
 		}
 
@@ -806,9 +867,9 @@
 				el.setAttribute("data-selected", hex === current ? "true" : "false");
 				el.setAttribute("data-has-prompt", entry ? "true" : "false");
 				let tip = entry
-					? name + (entry.label ? " · " + entry.label : "") + " — "
-						+ (entry.trigger === "manual" ? "on request" : "automatic")
-					: name + " — inactive, no prompt";
+					? name + (entry.label ? " · " + entry.label : "") + ": "
+						+ T(entry.trigger === "manual" ? "p.sw.manual" : "p.sw.auto")
+					: name + ": " + T("p.sw.inactive");
 				el.setAttribute("title", tip);
 			}
 			if (idleWarning) idleWarning.hidden = anyPrompt;
@@ -831,18 +892,13 @@
 		}
 
 		// --- Textarea ---
-		textarea.setAttribute("placeholder",
-			"Empty — Annota ignores highlights of this color.");
 		textarea.addEventListener("input", scheduleSave);
 		textarea.addEventListener("blur", saveNow);
-		templateArea.setAttribute("placeholder",
-			"Empty — the comment is the AI's reply as-is.");
 		templateArea.addEventListener("input", scheduleSave);
 		templateArea.addEventListener("blur", saveNow);
 		fieldsArea.setAttribute("placeholder", "name | Label | type | options");
 		fieldsArea.addEventListener("input", scheduleSave);
 		fieldsArea.addEventListener("blur", saveNow);
-		labelInput.setAttribute("placeholder", "e.g. Objection");
 		labelInput.addEventListener("input", scheduleSave);
 		labelInput.addEventListener("blur", saveNow);
 
@@ -870,7 +926,7 @@
 				lintNow();
 				if (editor) editor.refresh();
 				refreshSwatches();
-				flashStatus("Cleared ✓");
+				flashStatus(T("p.cleared"));
 			};
 			clearBtn.addEventListener("click", clearColor);
 		}
@@ -884,6 +940,7 @@
 		}) : null;
 
 		load(current);
+		relocalizers.push(() => { lintNow(); refreshSwatches(); });
 	}
 
 	// ---- Discussion ----
@@ -904,6 +961,7 @@
 		const KNOWN = ["openai", "ollama", "cli", "apple"];
 		const NAMES = { openai: "Mistral / API", ollama: "Ollama", cli: "Claude Code CLI",
 			apple: "Apple Intelligence" };
+		relocalizers.push(() => { describe(); hint(); });
 
 		function describe() {
 			if (!state) return;
@@ -911,9 +969,8 @@
 			if (!a) { state.textContent = ""; return; }
 			let p = KNOWN.includes(sel.value) ? sel.value : a.provider();
 			let err = a.providerReadyError(p);
-			state.textContent = err
-				? "⚠️ Not set up yet: " + err
-				: "✓ Ready" + (sel.value ? "" : " — currently " + (NAMES[p] || p));
+			state.textContent = err ? T("p.chat.notready", { err })
+				: sel.value ? T("p.chat.ready") : T("p.chat.current", { name: NAMES[p] || p });
 		}
 
 		// Champs « modèle » vides : on montre celui qui s'appliquera.
@@ -921,13 +978,16 @@
 			"annota-chat-model": ["annota.model", "mistral-large-latest"],
 			"annota-chat-ollama-model": ["annota.ollamaModel", "llama3.1"]
 		};
-		for (let id of Object.keys(hints)) {
-			let el = document.getElementById(id);
-			if (!el) continue;
-			let [pref, fallback] = hints[id];
-			let m = String(Zotero.Prefs.get(pref) || "").trim() || fallback;
-			el.setAttribute("placeholder", "Same as AI tab: " + m);
+		function hint() {
+			for (let id of Object.keys(hints)) {
+				let el = document.getElementById(id);
+				if (!el) continue;
+				let [pref, fallback] = hints[id];
+				let m = String(Zotero.Prefs.get(pref) || "").trim() || fallback;
+				el.setAttribute("placeholder", T("p.sameai", { m }));
+			}
 		}
+		hint();
 
 		let stored = String(Zotero.Prefs.get(PREF) || "").trim();
 		sel.value = KNOWN.includes(stored) ? stored : "";
@@ -938,14 +998,12 @@
 		});
 
 		area.value = String(Zotero.Prefs.get(PREF_INSTR) || "");
-		area.setAttribute("placeholder",
-			"e.g. I work in risk sociology; point out the theoretical framework.");
 		let timer = null;
 		function save() {
 			if (timer) { clearTimeout(timer); timer = null; }
 			Zotero.Prefs.set(PREF_INSTR, area.value);
 			if (status) {
-				status.textContent = "Saved ✓";
+				status.textContent = T("p.saved");
 				setTimeout(() => { status.textContent = ""; }, 2000);
 			}
 		}
@@ -1002,14 +1060,14 @@
 		btn.addEventListener("click", () => {
 			let show = input.type === "password";
 			input.type = show ? "text" : "password";
-			btn.textContent = show ? "Hide" : "Show";
+			btn.textContent = T(show ? "p.hide" : "p.show");
 		});
 	}
 
 	// ---- Claude Code CLI : détection, modèles, effort ----
 
-	const CLI_KNOWN = { opus: "most capable", sonnet: "fast and capable",
-		haiku: "fastest, lightest", fable: "" };
+	const CLI_KNOWN = { opus: "p.cli.desc.opus", sonnet: "p.cli.desc.sonnet",
+		haiku: "p.cli.desc.haiku", fable: "" };
 	const EFFORT_FALLBACK = ["low", "medium", "high", "xhigh", "max"];
 	let cliPickers = [];
 
@@ -1036,9 +1094,9 @@
 				o.textContent = l;
 				select.appendChild(o);
 			};
-			add("", inherit);
-			for (let n of names) add(n, n + (CLI_KNOWN[n] ? " — " + CLI_KNOWN[n] : ""));
-			add(OTHER, "Other (full model name)…");
+			add("", T(inherit));
+			for (let n of names) add(n, n + (CLI_KNOWN[n] ? " (" + T(CLI_KNOWN[n]) + ")" : ""));
+			add(OTHER, T("p.cli.other"));
 			let isOther = stored && !names.includes(stored);
 			select.value = isOther ? OTHER : stored;
 			other.hidden = !isOther;
@@ -1051,9 +1109,7 @@
 			let levels = (caps && caps.efforts && caps.efforts.length) ? caps.efforts : EFFORT_FALLBACK;
 			let cur = String(Zotero.Prefs.get(effortPref) || "").trim();
 			if (effortNote) {
-				effortNote.textContent = !supported
-					? "Your Claude Code version has no effort setting — update it to choose one."
-					: "Default = whatever Claude Code is set to.";
+				effortNote.textContent = T(supported ? "p.cli.effortdefault" : "p.cli.noeffort");
 			}
 			effortHost.hidden = !supported;
 			if (!supported) return;
@@ -1061,9 +1117,8 @@
 				let b = document.createElementNS(XHTML_NS, "button");
 				b.setAttribute("type", "button");
 				b.setAttribute("class", "annota-seg-btn");
-				b.textContent = v ? (v === "xhigh" ? "X-high" : v.charAt(0).toUpperCase() + v.slice(1))
-					: (inherit.startsWith("Same") ? "Same" : "Default");
-				b.setAttribute("title", v ? "--effort " + v : inherit);
+				b.textContent = v ? T("p.eff." + v) : T(inherit === "p.cli.same" ? "p.cli.btn.same" : "p.cli.btn.default");
+				b.setAttribute("title", v ? "--effort " + v : T(inherit));
 				b.setAttribute("aria-pressed", v === cur ? "true" : "false");
 				b.addEventListener("click", () => {
 					Zotero.Prefs.set(effortPref, v);
@@ -1102,29 +1157,29 @@
 			effortHost: document.getElementById("annota-cli-effort"),
 			effortNote: document.getElementById("annota-cli-effort-note"),
 			modelPref: "annota.cliModel", effortPref: "annota.cliEffort",
-			inherit: "Default (Claude Code setting)"
+			inherit: "p.cli.default"
 		});
 		cliPicker({
 			select: chatSel, other: document.getElementById("annota-chat-cli-model-other"),
 			effortHost: document.getElementById("annota-chat-cli-effort"),
 			modelPref: "annota.chatCliModel", effortPref: "annota.chatCliEffort",
-			inherit: "Same as AI tab"
+			inherit: "p.cli.same"
 		});
 
 		function describe(caps) {
 			if (!status) return;
-			status.textContent = caps
-				? "✓ Claude Code " + caps.version + " — " + caps.path
-				: "Not detected yet — click Detect.";
+			status.textContent = caps ? T("p.cli.found", { v: caps.version, path: caps.path })
+				: T("p.cli.notdetected");
 		}
 		describe(cliCaps());
+		relocalizers.push(() => { describe(cliCaps()); for (let b of cliPickers) b(); });
 
 		let busy = false;
 		async function run(auto) {
 			let a = api();
 			if (busy || !a || typeof a.probeCLI !== "function") return;
 			busy = true;
-			if (!auto) status.textContent = "Looking for Claude Code…";
+			if (!auto) status.textContent = T("p.cli.looking");
 			try {
 				let caps = await a.probeCLI(pathInput.value);
 				// Chemin trouvé ailleurs que celui saisi : on l'adopte.
@@ -1136,7 +1191,7 @@
 				for (let b of cliPickers) b();
 			}
 			catch (e) {
-				if (!auto) status.textContent = "⚠️ " + (e.message || e);
+				if (!auto) status.textContent = "⚠ " + (e.message || e);
 			}
 			finally { busy = false; }
 		}
@@ -1146,7 +1201,22 @@
 		if (!cliCaps()) run(true);
 	}
 
+	// Langue : appliquée au chargement, puis à chaque changement du menu.
+	function setupLanguage(tries) {
+		let sel = document.getElementById("annota-ui-lang");
+		if (!sel) {
+			retry(setupLanguage, tries);
+			return;
+		}
+		applyI18n();
+		// L'observateur de bootstrap.js reconstruit menus et discussion ; ici,
+		// on traduit le panneau ouvert. Le délai laisse bindPrefs écrire la
+		// préférence d'abord.
+		sel.addEventListener("change", () => setTimeout(relocalize, 0));
+	}
+
 	bindPrefs();
+	setupLanguage();
 	setupKeyToggle();
 	setupCLI();
 	setupTabs();

@@ -101,7 +101,8 @@ call the model), **💬 Chat** (the chat panel's provider, model and context) an
 **⚙️ General** (behaviour). The panel adapts to the window: fields sit next to
 their label when there is room and stack under it when the window is narrow,
 and the tabs stay at the top while you scroll. It reopens on the tab you used
-last. Reference material — field types,
+last. **General → Interface → Language** switches the whole interface (settings,
+chat, menus, messages) between English and French; *Automatic* follows Zotero. Reference material — field types,
 the variable list, advanced paths — sits in collapsible blocks so the everyday
 view stays short.
 

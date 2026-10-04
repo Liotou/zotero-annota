@@ -15,6 +15,7 @@ zip -r -X "$OUT" \
     preferences.xhtml \
     preferences.js \
     preferences.css \
+    i18n.js \
     chat.js \
     chat.svg \
     icon32.png \

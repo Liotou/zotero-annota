@@ -83,16 +83,22 @@ Annota = {
 			if (Array.isArray(raw) && raw.length) {
 				return raw.map(pair => ({
 					hex: String(pair[1]).toLowerCase(),
-					name: String(pair[0])
-						.replace(/^general-/, "")
-						.replace(/^./, m => m.toUpperCase())
+					name: this.colorLabel(String(pair[0]).replace(/^general-/, ""))
 				}));
 			}
 		}
 		catch (e) {
 			log("COLORS: lecture de la palette Zotero impossible, repli : " + e);
 		}
-		return this.FALLBACK_COLORS;
+		return this.FALLBACK_COLORS.map(c => ({ hex: c.hex, name: this.colorLabel(c.name) }));
+	},
+
+	// Nom d'une teinte dans la langue de l'interface (« yellow » → « Jaune »).
+	colorLabel(raw) {
+		let base = String(raw || "").toLowerCase();
+		let key = "color." + base;
+		let tr = this.t(key);
+		return tr !== key ? tr : base.replace(/^./, m => m.toUpperCase());
 	},
 
 	// Prompts par couleur : { "#ff6666": "…", … }. Vide = utiliser le prompt par défaut.
@@ -219,33 +225,30 @@ Annota = {
 
 			if (!name) {
 				out.push({ line: n, level: "error",
-					message: "no field name before the first “|” — this line is ignored" });
+					message: this.t("lint.noname") });
 				continue;
 			}
 			if (name !== rawName) {
 				out.push({ line: n, level: "warn",
-					message: "“" + rawName + "” becomes “" + name
-						+ "” — only letters, digits and _ are kept" });
+					message: this.t("lint.renamed", { raw: rawName, name }) });
 			}
 			if (this.RESERVED_VARS.includes(name)) {
 				out.push({ line: n, level: "error",
-					message: "“" + name + "” is a built-in variable ("
-						+ (this.RESERVED_HINTS[name] || "reserved")
-						+ ") — this field is IGNORED. Rename it, e.g. “"
-						+ this.suggestName(name) + "”." });
+					message: this.t("lint.reserved", { name,
+						hint: this.t(this.RESERVED_HINTS[name] ? "hint." + name : "hint.reserved"),
+						suggest: this.suggestName(name) }) });
 				continue;
 			}
 			if (seen.has(name)) {
 				out.push({ line: n, level: "error",
-					message: "“" + name + "” is already declared on line " + seen.get(name)
-						+ " — both fields would write to the same value" });
+					message: this.t("lint.dup", { name, line: seen.get(name) }) });
 			}
 			else seen.set(name, n);
 
 			let type = (parts[2] || "").toLowerCase();
 			if (parts[2] && !TYPES.includes(type)) {
 				out.push({ line: n, level: "warn",
-					message: "unknown type “" + parts[2] + "” — “text” used instead" });
+					message: this.t("lint.type", { type: parts[2] }) });
 			}
 
 			// Reproduit la lecture des colonnes 4 et 5 de parseFieldSchema.
@@ -260,17 +263,15 @@ Annota = {
 			}
 			if (col5 && !format) {
 				out.push({ line: n, level: "warn",
-					message: "unknown format “" + col5 + "” — plain text used. "
-						+ "Known: bold, italic, bolditalic, underline, plain" });
+					message: this.t("lint.format", { fmt: col5 }) });
 			}
 			if (type === "select" && !extra.split(",").map(x => x.trim()).filter(Boolean).length) {
 				out.push({ line: n, level: "warn",
-					message: "“select” with no options — nothing to choose from" });
+					message: this.t("lint.select") });
 			}
 			if (type === "ai" && !extra.trim()) {
 				out.push({ line: n, level: "error",
-					message: "an “ai” field with no instruction is never filled — "
-						+ "put its instruction in the 4th column" });
+					message: this.t("lint.ai") });
 			}
 		}
 		return out;
@@ -286,8 +287,7 @@ Annota = {
 			if (!known.includes(name) && !seen.has(name)) {
 				seen.add(name);
 				out.push({ line: 0, level: "warn",
-					message: where + ": “{{" + name + "}}” matches no field and no "
-						+ "built-in variable — it will be replaced by nothing" });
+					message: this.t("lint.unknownvar", { where, var: "{{" + name + "}}" }) });
 			}
 			return m;
 		});
@@ -299,14 +299,13 @@ Annota = {
 		entry = entry || {};
 		let out = this.validateFieldSchema(entry.fields);
 		let schema = this.parseFieldSchema(entry.fields);
-		out = out.concat(this.validateVariables("Prompt", entry.prompt, schema));
-		out = out.concat(this.validateVariables("Layout", entry.template, schema));
+		out = out.concat(this.validateVariables(this.t("lint.where.prompt"), entry.prompt, schema));
+		out = out.concat(this.validateVariables(this.t("lint.where.layout"), entry.template, schema));
 
 		// {{ai}} n'a de sens que dans la disposition.
 		if (/\{\{\s*ai\s*\}\}/.test(String(entry.prompt || ""))) {
 			out.push({ line: 0, level: "warn",
-				message: "Prompt: “{{ai}}” is the model's own reply — it only means "
-					+ "something in the layout, not in the prompt" });
+				message: this.t("lint.aiprompt") });
 		}
 		return out;
 	},
@@ -492,17 +491,54 @@ Annota = {
 		}
 		if (p === "cli") {
 			return String(getPref("cliPath", "claude")).trim()
-				? null : "Claude CLI path not set (Preferences → Annota).";
+				? null : this.t("err.cli.path");
 		}
 		let cfg = this.chatConfig(p);
 		if (!cfg.endpoint) {
-			return (p === "ollama" ? "Ollama endpoint" : "API endpoint")
-				+ " not set (Preferences → Annota).";
+			return this.t(p === "ollama" ? "err.endpoint.ollama" : "err.endpoint");
 		}
 		if (cfg.requiresKey && !cfg.apiKey) {
-			return "API key missing (Preferences → Annota).";
+			return this.t("err.key");
 		}
 		return null;
+	},
+
+	// ---- Langue de l'interface ----
+	// uiLanguage : "auto" (langue de Zotero), "en" ou "fr".
+	lang() {
+		let p = String(getPref("uiLanguage", "auto") || "auto");
+		if (p === "en" || p === "fr") return p;
+		let loc = "";
+		try { loc = String(Zotero.locale || ""); } catch (e) {}
+		return /^fr/i.test(loc) ? "fr" : "en";
+	},
+
+	get i18n() {
+		return (typeof AnnotaI18n !== "undefined" && AnnotaI18n) || null;
+	},
+
+	// Texte traduit ; {nom} est remplacé par vars.nom. Repli : anglais, puis
+	// la clé elle-même (visible, donc repérable).
+	t(key, vars) {
+		let d = this.i18n || {};
+		let s = d[this.lang()] && d[this.lang()][key];
+		if (s == null) s = d.en && d.en[key];
+		if (s == null) s = key;
+		if (!vars) return s;
+		return String(s).replace(/\{(\w+)\}/g, (m, k) =>
+			Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k]) : m);
+	},
+
+	// Langue changée : menus et panneau de discussion sont reconstruits.
+	relocalize() {
+		for (let win of Zotero.getMainWindows()) {
+			try {
+				this.removeFromWindow(win);
+				this.addToWindow(win);
+				if (AnnotaChat) AnnotaChat.relocalizeWindow(win);
+			}
+			catch (e) { log("relocalize: " + e); }
+		}
 	},
 
 	init({ id, version, rootURI }) {
@@ -666,7 +702,7 @@ Annota = {
 		}
 		catch (e) {
 			log("Generation error: " + e);
-			toast("Annota", "Generation failed: " + (e.message || e), "error");
+			toast("Annota", this.t("gen.failed", { msg: e.message || e }), "error");
 			await this.markFailed(id, String(e.message || e));
 			// Nettoyer le placeholder en cas d'échec.
 			if (usedPlaceholder) {
@@ -1828,8 +1864,7 @@ Annota = {
 		this._cliResolved.delete(wanted);
 		let cmd = await this.resolveCLIPath(wanted);
 		if (!cmd) {
-			throw new Error("Claude Code CLI not found. In a terminal, run « which claude »"
-				+ " and paste the path here.");
+			throw new Error(this.t("err.cli.notfound"));
 		}
 		let workdir;
 		try { workdir = Zotero.getTempDirectory().path; } catch (e) { workdir = undefined; }
@@ -2124,19 +2159,10 @@ Annota = {
 
 		if (!targets.length) {
 			let why;
-			if (noPrompt) {
-				why = noPrompt + " highlight" + (noPrompt > 1 ? "s" : "")
-					+ " skipped — their color has no prompt yet (Preferences → Annota).";
-			}
-			else if (opts.failedOnly) {
-				why = "Nothing to retry — no annotation is marked as failed.";
-			}
-			else if (all.length) {
-				why = "Nothing to do — all annotations already have comments.";
-			}
-			else {
-				why = "No highlight annotations found in the selection.";
-			}
+			if (noPrompt) why = this.t("batch.skipped", { n: noPrompt });
+			else if (opts.failedOnly) why = this.t("batch.noretry");
+			else if (all.length) why = this.t("batch.nothing");
+			else why = this.t("batch.none");
 			toast("Annota", why);
 			return;
 		}
@@ -2145,7 +2171,7 @@ Annota = {
 		pw.changeHeadline("Annota");
 		let bar = new pw.ItemProgress(
 			"chrome://zotero/skin/tick.png",
-			"Generating 0/" + targets.length + "…"
+			this.t("batch.progress", { i: 0, n: targets.length })
 		);
 		pw.show();
 
@@ -2185,17 +2211,17 @@ Annota = {
 				await this.markFailed(ann.id, String(e.message || e));
 			}
 			bar.setProgress(Math.round(((i + 1) / targets.length) * 100));
-			bar.setText("Generating " + (i + 1) + "/" + targets.length + "…");
+			bar.setText(this.t("batch.progress", { i: i + 1, n: targets.length }));
 		}
 
 		bar.setProgress(100);
-		let summary = ok + " comment" + (ok > 1 ? "s" : "") + " generated";
+		let summary = this.t("batch.done", { n: ok });
 		if (failed) {
 			let tag = this.failedTag();
-			summary += ", " + failed + " failed"
-				+ (tag ? " (tagged “" + tag + "”)" : " (see debug output)");
+			summary += this.t("batch.failed", { n: failed })
+				+ (tag ? this.t("batch.tagged", { tag }) : this.t("batch.debug"));
 		}
-		if (noPrompt) summary += ", " + noPrompt + " skipped (color has no prompt)";
+		if (noPrompt) summary += this.t("batch.nocfg", { n: noPrompt });
 		bar.setText(summary);
 		pw.startCloseTimer(failed ? 8000 : 4000);
 		log("runBatch terminé : " + ok + " ok, " + failed + " échecs, "
@@ -2506,8 +2532,8 @@ Annota = {
 			sw.style.cssText = SWATCH_CSS + "background:" + hex + ";";
 			let msg = doc.createElement("span");
 			msg.textContent = configured
-				? "Click " + colorName(hex) + " above to save"
-				: colorName(hex) + " — no fields configured";
+				? this.t("form.click", { color: colorName(hex) })
+				: this.t("form.none", { color: colorName(hex) });
 			hint.style.opacity = configured ? "0.6" : "0.85";
 			hint.appendChild(sw);
 			hint.appendChild(msg);
@@ -2608,7 +2634,7 @@ Annota = {
 			// on affiche nos propres pastilles.
 			picker.style.display = "flex";
 			let lab = doc.createElement("span");
-			lab.textContent = "Fields:";
+			lab.textContent = this.t("form.fields");
 			lab.style.cssText = "font-size:11px;opacity:.6;";
 			picker.appendChild(lab);
 			for (let c of colors) {
@@ -2651,8 +2677,8 @@ Annota = {
 					if (!keys.length) return;
 					append({
 						label: keys.length > 1
-							? "Annota — generate " + keys.length + " comments"
-							: "Annota — generate comment",
+							? Annota.t("menu.reader.many", { n: keys.length })
+							: Annota.t("menu.reader.one"),
 						onCommand: () => {
 							Annota.runOnReaderAnnotations(reader, keys)
 								.catch(e => log("runOnReaderAnnotations: " + e));
@@ -2660,7 +2686,7 @@ Annota = {
 					});
 					if (AnnotaChat) {
 						append({
-							label: "Annota — ask in chat",
+							label: Annota.t("menu.reader.ask"),
 							onCommand: () => {
 								AnnotaChat.quoteAnnotations(reader, keys)
 									.catch(e => log("quoteAnnotations: " + e));
@@ -2752,7 +2778,7 @@ Annota = {
 			let popup = doc.createXULElement("menupopup");
 
 			let missing = doc.createXULElement("menuitem");
-			missing.setAttribute("label", "Generate missing comments");
+			missing.setAttribute("label", this.t("menu.missing"));
 			missing.addEventListener("command", () => {
 				Annota.runBatch(window, { overwrite: false })
 					.catch(e => log("runBatch: " + e));
@@ -2760,7 +2786,7 @@ Annota = {
 			popup.appendChild(missing);
 
 			let all = doc.createXULElement("menuitem");
-			all.setAttribute("label", "Regenerate all comments");
+			all.setAttribute("label", this.t("menu.all"));
 			all.addEventListener("command", () => {
 				Annota.runBatch(window, { overwrite: true })
 					.catch(e => log("runBatch: " + e));
@@ -2771,7 +2797,7 @@ Annota = {
 			// pour rattraper une coupure réseau ou un modèle indisponible sans
 			// tout régénérer.
 			let retry = doc.createXULElement("menuitem");
-			retry.setAttribute("label", "Retry failed comments");
+			retry.setAttribute("label", this.t("menu.retry"));
 			retry.addEventListener("command", () => {
 				Annota.runBatch(window, { failedOnly: true })
 					.catch(e => log("runBatch: " + e));
@@ -2855,10 +2881,16 @@ Annota = {
 // chargement échoue — les annotations n'en dépendent pas.
 var AnnotaChat = null;
 
+// Textes de l'interface (i18n.js). Sans eux, Annota.t() rend la clé.
+var AnnotaI18n = null;
+var annotaLangObserver = null;
+
 function install() {}
 
 async function startup({ id, version, rootURI }) {
 	Annota.init({ id, version, rootURI });
+	try { Services.scriptloader.loadSubScript(rootURI + "i18n.js"); }
+	catch (e) { log("i18n.js : " + e); }
 	Annota.registerNotifier();
 	Annota.registerReaderMenu();
 	Annota.registerSelectionForm();
@@ -2874,6 +2906,13 @@ async function startup({ id, version, rootURI }) {
 
 	// Exposé pour le script du panneau de préférences (prompt par défaut, reset).
 	Zotero.Annota = Annota;
+
+	// Langue changée dans les réglages : menus et discussion suivent.
+	try {
+		annotaLangObserver = Zotero.Prefs.registerObserver("annota.uiLanguage",
+			() => { if (Annota) Annota.relocalize(); });
+	}
+	catch (e) { log("observateur de langue : " + e); }
 
 	// L'identifiant du panneau sert au bouton « réglages » de la discussion.
 	Promise.resolve(Zotero.PreferencePanes.register({
@@ -2914,6 +2953,10 @@ function onMainWindowUnload({ window }) {
 }
 
 function shutdown() {
+	if (annotaLangObserver) {
+		try { Zotero.Prefs.unregisterObserver(annotaLangObserver); } catch (e) {}
+		annotaLangObserver = null;
+	}
 	if (AnnotaChat) {
 		try { AnnotaChat.unregister(); } catch (e) {}
 	}
