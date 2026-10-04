@@ -7,6 +7,8 @@
                  data-pane="colors" type="button">🎨 Colors</html:button>
     <html:button id="annota-tab-ai" class="annota-tab" role="tab"
                  data-pane="ai" type="button">✨ AI</html:button>
+    <html:button id="annota-tab-chat" class="annota-tab" role="tab"
+                 data-pane="chat" type="button">💬 Chat</html:button>
     <html:button id="annota-tab-general" class="annota-tab" role="tab"
                  data-pane="general" type="button">⚙️ General</html:button>
   </html:div>
@@ -336,7 +338,127 @@ resume     | Résumé     | ai       | Résume le passage en une phrase. | itali
     </html:details>
   </vbox>
 
-  <!-- ========================= ONGLET 3 · GÉNÉRAL ====================== -->
+  <!-- ======================== ONGLET 3 · DISCUSSION ==================== -->
+  <vbox id="annota-pane-chat" class="annota-pane" hidden="true">
+
+    <description class="annota-lead">
+      Chat with the document you're reading, or with your whole library, in the
+      item pane — look for <html:b>Annota Chat</html:b> on the right, in the
+      library and in the PDF reader. Answers cite pages or references, and a
+      click takes you there.
+    </description>
+
+    <label class="annota-step"><html:b>Provider</html:b></label>
+    <hbox align="center">
+      <html:select id="annota-chat-provider" style="min-width: 26em;"
+                   aria-label="Chat provider">
+        <html:option value="">Same as annotations (AI tab)</html:option>
+        <html:option value="openai">Mistral / OpenAI-compatible — remote</html:option>
+        <html:option value="ollama">Ollama — local</html:option>
+        <html:option value="cli">Claude Code CLI — local, your subscription</html:option>
+        <html:option value="apple">Apple Intelligence — on-device</html:option>
+      </html:select>
+    </hbox>
+    <description id="annota-chat-provider-status" class="annota-help"/>
+    <description class="annota-help">
+      Uses the connection set in the <html:b>✨ AI</html:b> tab (key, endpoint,
+      paths). The chat panel has the same menu, to switch on the fly.
+    </description>
+
+    <label class="annota-step"><html:b>Model for the chat (optional)</html:b></label>
+    <grid>
+      <columns><column/><column flex="1"/></columns>
+      <rows>
+        <row align="center">
+          <label value="Mistral / API:" control="annota-chat-model"/>
+          <html:input id="annota-chat-model" type="text" style="width: 18em;"
+                      preference="extensions.zotero.annota.chatModel"/>
+        </row>
+        <row align="center">
+          <label value="Ollama:" control="annota-chat-ollama-model"/>
+          <html:input id="annota-chat-ollama-model" type="text" style="width: 18em;"
+                      preference="extensions.zotero.annota.chatOllamaModel"/>
+        </row>
+        <row align="center">
+          <label value="Claude CLI:" control="annota-chat-cli-model"/>
+          <html:input id="annota-chat-cli-model" type="text" style="width: 18em;"
+                      preference="extensions.zotero.annota.chatCliModel"/>
+        </row>
+      </rows>
+    </grid>
+    <description class="annota-help">
+      Empty = the model of the AI tab. A small fast model suits annotations; a
+      chat about a whole article gains from a bigger one
+      (<html:code>mistral-large-latest</html:code>, <html:code>opus</html:code>,
+      <html:code>qwen2.5:14b</html:code>…). Ollama tags matter here too.
+    </description>
+
+    <label class="annota-step"><html:b>What the model reads</html:b></label>
+    <hbox align="center">
+      <checkbox label="My annotations on the document (highlights and comments)"
+                preference="extensions.zotero.annota.chatIncludeAnnotations" native="true"/>
+    </hbox>
+    <hbox align="center">
+      <checkbox label="My notes on the reference"
+                preference="extensions.zotero.annota.chatIncludeNotes" native="true"/>
+    </hbox>
+    <grid>
+      <columns><column/><column flex="1"/></columns>
+      <rows>
+        <row align="center">
+          <label value="Context size (characters):" control="annota-chat-maxchars"/>
+          <html:input id="annota-chat-maxchars" type="number" min="0" max="2000000"
+                      step="1000" style="width: 8em;"
+                      preference="extensions.zotero.annota.chatMaxChars"/>
+        </row>
+        <row align="center">
+          <label value="Library items per answer:" control="annota-chat-libitems"/>
+          <html:input id="annota-chat-libitems" type="number" min="1" max="30"
+                      style="width: 6em;"
+                      preference="extensions.zotero.annota.chatLibraryItems"/>
+        </row>
+      </rows>
+    </grid>
+    <html:details class="annota-details">
+      <html:summary>How the context is built</html:summary>
+      <html:div class="annota-details-body">
+        <html:p><html:b>0 = automatic</html:b>: about 100,000 characters for an
+        API, 200,000 for the Claude CLI, 12,000 for Ollama and 6,000 for Apple
+        Intelligence, whose windows are small. A document that doesn't fit is
+        cut by pages: the first page, then the pages closest to your question.
+        The answer says how much was sent.</html:p>
+        <html:p>With the PDF <html:b>open in the reader</html:b>, the text is read
+        page by page with the journal's own page numbers, so “[p. 215]” is the
+        page printed on the article. Closed, Annota falls back on Zotero's
+        extracted text.</html:p>
+        <html:p>Ollama truncates silently beyond its context window: to send
+        more, raise it (<html:code>OLLAMA_CONTEXT_LENGTH=16384 ollama serve</html:code>)
+        and set the size above accordingly.</html:p>
+        <html:p><html:b>My library</html:b> runs Zotero's own search (all fields,
+        notes, full text) on the words of your question and sends the best
+        matches, with your annotations that mention them.</html:p>
+      </html:div>
+    </html:details>
+
+    <label class="annota-step"><html:b>Instructions</html:b></label>
+    <description class="annota-help">
+      Added to Annota's own (stick to the sources, cite pages, answer in the
+      question's language). Tone, format, field, what to look for…
+    </description>
+    <html:textarea id="annota-chat-instructions" rows="4" class="annota-code"
+                   aria-label="Chat instructions"/>
+    <hbox class="annota-actions">
+      <spacer flex="1"/>
+      <label id="annota-chat-status" value="" class="annota-status"/>
+    </hbox>
+
+    <hbox align="center">
+      <checkbox label="Show “💬 Ask Annota” when I select text in the reader"
+                preference="extensions.zotero.annota.chatSelectionButton" native="true"/>
+    </hbox>
+  </vbox>
+
+  <!-- ========================= ONGLET 4 · GÉNÉRAL ====================== -->
   <vbox id="annota-pane-general" class="annota-pane" hidden="true">
 
     <label class="annota-step"><html:b>Behaviour</html:b></label>

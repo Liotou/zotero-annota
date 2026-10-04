@@ -60,3 +60,22 @@ pref("extensions.zotero.annota.showPlaceholder", true);
 // JSON { "#ffd400": { prompt, trigger, template }, … }.
 // Vide par défaut : aucune couleur n'est traitée tant que rien n'est configuré.
 pref("extensions.zotero.annota.colorPrompts", "");
+
+// ---- Discussion (panneau « Annota Chat » du volet de l'item) ----
+// Fournisseur : "" = celui des annotations, sinon openai | ollama | cli | apple.
+pref("extensions.zotero.annota.chatProvider", "");
+// Modèles propres à la discussion ; vide = celui réglé pour les annotations.
+pref("extensions.zotero.annota.chatModel", "");
+pref("extensions.zotero.annota.chatOllamaModel", "");
+pref("extensions.zotero.annota.chatCliModel", "");
+// Contexte envoyé, en caractères. 0 = selon le fournisseur (API 100 000,
+// Claude CLI 200 000, Ollama 12 000, Apple 6 000).
+pref("extensions.zotero.annota.chatMaxChars", 0);
+pref("extensions.zotero.annota.chatIncludeAnnotations", true);
+pref("extensions.zotero.annota.chatIncludeNotes", true);
+// Portée « bibliothèque » : nombre d'items transmis au modèle.
+pref("extensions.zotero.annota.chatLibraryItems", 8);
+// Consignes ajoutées à celles d'Annota (ton, langue, format…).
+pref("extensions.zotero.annota.chatInstructions", "");
+// Bouton « Ask Annota » dans le popup de sélection du lecteur.
+pref("extensions.zotero.annota.chatSelectionButton", true);

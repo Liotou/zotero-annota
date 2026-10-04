@@ -1414,6 +1414,11 @@ Annota = {
 	//   raw       rend le texte tel quel, sans conversion du Markdown : la
 	//             discussion fait son propre rendu
 	//   timeout   délai en ms (les longs contextes de la discussion en ont besoin)
+	//   model     impose un modèle (la discussion peut en employer un autre)
+	//   cancel    jeton de makeCancelToken() : le bouton « Stop » de la discussion
+	// Le prompt peut porter, outre { system, user }, un `context` (document,
+	// sources) et un `history` ([{ role, content }]) : la discussion s'en sert,
+	// les annotations non.
 	async complete(prompt, opts = {}) {
 		let p = this.provider(opts.provider);
 		let call = () => {
@@ -1427,15 +1432,60 @@ Annota = {
 		let tries = parseInt(getPref("retries", 1), 10);
 		if (isNaN(tries) || tries < 0) tries = 1;
 		let last;
+		let stopped = () => !!(opts.cancel && opts.cancel.cancelled);
 		for (let i = 0; i <= tries; i++) {
 			try { return await call(); }
 			catch (e) {
 				last = e;
+				// Arrêt demandé : ni nouvel essai, ni message d'erreur du
+				// fournisseur (un process tué n'a rien d'une panne).
+				if (stopped()) {
+					let err = new Error("Stopped");
+					err.cancelled = true;
+					throw err;
+				}
 				if (i === tries || !this._worthRetrying(e)) break;
 				log("échec de génération, nouvel essai (" + (i + 1) + "/" + tries + ") : " + e);
 			}
 		}
 		throw last;
+	},
+
+	// Jeton d'annulation : cancel() exécute les rappels enregistrés (tuer le
+	// process, abandonner la requête HTTP). Un rappel enregistré après coup
+	// s'exécute aussitôt.
+	makeCancelToken() {
+		return {
+			cancelled: false,
+			hooks: [],
+			onCancel(fn) {
+				if (this.cancelled) { try { fn(); } catch (e) {} return; }
+				this.hooks.push(fn);
+			},
+			cancel() {
+				if (this.cancelled) return;
+				this.cancelled = true;
+				for (let fn of this.hooks) { try { fn(); } catch (e) {} }
+				this.hooks = [];
+			}
+		};
+	},
+
+	// Fournisseurs sans notion de messages (CLI, Apple) : le contexte et
+	// l'historique de la discussion précèdent la question dans l'entrée
+	// standard. Pour une annotation, il ne reste que `user`, inchangé.
+	flattenPrompt({ user, context, history }) {
+		let turns = Array.isArray(history) ? history : [];
+		if (!context && !turns.length) return user;
+		let parts = [];
+		if (context) parts.push(context);
+		if (turns.length) {
+			parts.push("Conversation so far:\n\n" + turns.map(m =>
+				(m.role === "assistant" ? "Assistant: " : "User: ") + m.content).join("\n\n"));
+			parts.push("User's new message:\n" + user);
+		}
+		else parts.push(user);
+		return parts.join("\n\n---\n\n");
 	},
 
 	// Rend le gabarit de sortie. Une ligne dont TOUTES les variables sont vides
@@ -1646,7 +1696,8 @@ Annota = {
 		return bin;
 	},
 
-	async callApple({ system, user }, opts = {}) {
+	async callApple(prompt, opts = {}) {
+		let { system } = prompt;
 		let Subprocess;
 		try {
 			({ Subprocess } = ChromeUtils.importESModule(
@@ -1665,8 +1716,9 @@ Annota = {
 
 		let killTimer = setTimeout(() => { try { proc.kill(); } catch (e) {} },
 			opts.timeout || 120000);
+		if (opts.cancel) opts.cancel.onCancel(() => { try { proc.kill(); } catch (e) {} });
 		try {
-			await proc.stdin.write(user);
+			await proc.stdin.write(this.flattenPrompt(prompt));
 			await proc.stdin.close();
 
 			let out = "", chunk;
@@ -1690,7 +1742,8 @@ Annota = {
 	// Claude Code CLI local (`claude -p`). Utilise l'abonnement connecté du CLI,
 	// pas l'API facturée au token. Aucune clé API : l'authentification est celle
 	// de `claude` sur la machine. Lent (démarrage à froid par appel).
-	async callCLI({ system, user }, opts = {}) {
+	async callCLI(prompt, opts = {}) {
+		let { system } = prompt;
 		let Subprocess;
 		try {
 			({ Subprocess } = ChromeUtils.importESModule(
@@ -1701,7 +1754,7 @@ Annota = {
 		}
 
 		let cmd = String(getPref("cliPath", "claude")).trim() || "claude";
-		let model = String(getPref("cliModel", "")).trim();
+		let model = String(opts.model || getPref("cliModel", "")).trim();
 		let args = ["-p", "--output-format", "text"];
 		if (model) args.push("--model", model);
 		if (system) args.push("--append-system-prompt", system);
@@ -1726,8 +1779,11 @@ Annota = {
 		// Garde-fou : tuer le process s'il dépasse le délai (ex. non connecté).
 		let killTimer = setTimeout(() => { try { proc.kill(); } catch (e) {} },
 			opts.timeout || 120000);
+		if (opts.cancel) opts.cancel.onCancel(() => { try { proc.kill(); } catch (e) {} });
 		try {
-			await proc.stdin.write(user);
+			// Le contexte passe par l'entrée standard, jamais par un argument :
+			// un document entier dépasserait la taille maximale d'un argument.
+			await proc.stdin.write(this.flattenPrompt(prompt));
 			await proc.stdin.close();
 
 			let out = "", chunk;
@@ -1749,7 +1805,7 @@ Annota = {
 	},
 
 	// Fournisseur compatible OpenAI (Mistral par défaut).
-	async callOpenAI({ system, user }, opts = {}) {
+	async callOpenAI({ system, user, context, history }, opts = {}) {
 		let cfg = this.chatConfig(opts.provider);
 		if (cfg.requiresKey && !cfg.apiKey) throw new Error("API key missing");
 		if (!cfg.endpoint) throw new Error("Endpoint not set");
@@ -1757,21 +1813,29 @@ Annota = {
 		if (isNaN(temp)) temp = 0.2;
 		temp = Math.max(0, Math.min(2, temp));
 
-		let messages = system
-			? [{ role: "system", content: system }, { role: "user", content: user }]
-			: [{ role: "user", content: user }];
+		// Le contexte de la discussion (document, sources) rejoint les
+		// consignes : il reste en tête quel que soit le nombre de tours.
+		let messages = [];
+		let sys = [system, context].filter(x => x && String(x).trim()).join("\n\n");
+		if (sys) messages.push({ role: "system", content: sys });
+		for (let m of (Array.isArray(history) ? history : [])) {
+			messages.push({ role: m.role === "assistant" ? "assistant" : "user",
+				content: String(m.content || "") });
+		}
+		messages.push({ role: "user", content: user });
 
 		let headers = { "Content-Type": "application/json" };
 		// Ollama ignore l'autorisation : on n'envoie l'en-tête que si une clé existe.
 		if (cfg.apiKey) headers["Authorization"] = "Bearer " + cfg.apiKey;
 
-		let payload = { model: cfg.model, temperature: temp, messages, stream: false };
+		let payload = { model: opts.model || cfg.model, temperature: temp, messages,
+			stream: false };
 		// Sortie structurée : le modèle rend un objet JSON au lieu d'un texte
 		// libre qu'il faut relire à la regex. Mistral et Ollama l'acceptent.
 		if (opts.json) payload.response_format = { type: "json_object" };
 
 		let resp = await this.httpJSON(cfg.endpoint, headers, payload,
-			opts.provider, opts.timeout);
+			opts.provider, opts.timeout, opts.cancel);
 
 		let data = resp.response;
 		let content = data && data.choices && data.choices[0]
@@ -1781,7 +1845,7 @@ Annota = {
 	},
 
 	// POST JSON commun, avec message d'erreur lisible.
-	async httpJSON(url, headers, payload, override, timeoutMs) {
+	async httpJSON(url, headers, payload, override, timeoutMs, cancel) {
 		let prov = this.provider(override);
 		// Un modèle local doit d'abord être chargé en mémoire : délai plus large.
 		let timeout = timeoutMs || (prov === "ollama" ? 180000 : 45000);
@@ -1790,7 +1854,9 @@ Annota = {
 				headers,
 				body: JSON.stringify(payload),
 				responseType: "json",
-				timeout
+				timeout,
+				// Zotero remet une fonction d'abandon : le « Stop » de la discussion.
+				cancellerReceiver: cancel ? (fn => cancel.onCancel(fn)) : undefined
 			});
 		}
 		catch (e) {
@@ -2133,6 +2199,9 @@ Annota = {
 			this._selectionListener = (event) => {
 				try { this._renderSelectionForm(event); }
 				catch (e) { log("renderTextSelectionPopup: " + e); }
+				// « Ask Annota » : la sélection part dans la discussion.
+				try { if (AnnotaChat) AnnotaChat.renderAskButton(event); }
+				catch (e) { log("renderAskButton: " + e); }
 			};
 			Zotero.Reader.registerEventListener(
 				"renderTextSelectionPopup", this._selectionListener, "annota@equiriconi");
@@ -2454,6 +2523,15 @@ Annota = {
 								.catch(e => log("runOnReaderAnnotations: " + e));
 						}
 					});
+					if (AnnotaChat) {
+						append({
+							label: "Annota — ask in chat",
+							onCommand: () => {
+								AnnotaChat.quoteAnnotations(reader, keys)
+									.catch(e => log("quoteAnnotations: " + e));
+							}
+						});
+					}
 				}
 				catch (e) {
 					log("createAnnotationContextMenu: " + e);
@@ -2572,6 +2650,10 @@ Annota = {
 			let onShowing = () => { menu.hidden = !Annota.selectionIsRelevant(window); };
 			itemmenu.addEventListener("popupshowing", onShowing);
 
+			// Libellés du panneau de discussion (locale/en-US/annota-chat.ftl).
+			try { window.MozXULElement.insertFTLIfNeeded("annota-chat.ftl"); }
+			catch (e) { log("insertFTLIfNeeded: " + e); }
+
 			this._windows.set(window, { menu, itemmenu, onShowing });
 			log("Menu ajouté à la fenêtre");
 		}
@@ -2585,6 +2667,14 @@ Annota = {
 		if (!rec) return;
 		try { rec.itemmenu.removeEventListener("popupshowing", rec.onShowing); } catch (e) {}
 		try { rec.menu.remove(); } catch (e) {}
+		try {
+			let doc = window.document;
+			let ftl = doc.querySelector('[href="annota-chat.ftl"]');
+			if (ftl) ftl.remove();
+			let st = doc.getElementById("annota-chat-style");
+			if (st) st.remove();
+		}
+		catch (e) {}
 		this._windows.delete(window);
 	},
 
@@ -2638,6 +2728,10 @@ Annota = {
 
 // ---- Cycle de vie du plugin (Zotero 7) ----
 
+// Discussion : défini par chat.js, chargé au démarrage. Reste nul si le
+// chargement échoue — les annotations n'en dépendent pas.
+var AnnotaChat = null;
+
 function install() {}
 
 async function startup({ id, version, rootURI }) {
@@ -2645,6 +2739,15 @@ async function startup({ id, version, rootURI }) {
 	Annota.registerNotifier();
 	Annota.registerReaderMenu();
 	Annota.registerSelectionForm();
+
+	try {
+		Services.scriptloader.loadSubScript(rootURI + "chat.js");
+		AnnotaChat.register();
+	}
+	catch (e) {
+		log("discussion indisponible : " + e);
+		AnnotaChat = null;
+	}
 
 	// Exposé pour le script du panneau de préférences (prompt par défaut, reset).
 	Zotero.Annota = Annota;
@@ -2675,6 +2778,10 @@ function onMainWindowUnload({ window }) {
 }
 
 function shutdown() {
+	if (AnnotaChat) {
+		try { AnnotaChat.unregister(); } catch (e) {}
+	}
+	AnnotaChat = null;
 	if (Annota) {
 		Annota.unregisterNotifier();
 		Annota.unregisterReaderMenu();

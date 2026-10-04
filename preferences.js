@@ -93,9 +93,10 @@
 		let panes = {
 			colors: document.getElementById("annota-pane-colors"),
 			ai: document.getElementById("annota-pane-ai"),
+			chat: document.getElementById("annota-pane-chat"),
 			general: document.getElementById("annota-pane-general")
 		};
-		if (!bar || !panes.colors || !panes.ai || !panes.general) {
+		if (!bar || !panes.colors || !panes.ai || !panes.chat || !panes.general) {
 			retry(setupTabs, tries);
 			return;
 		}
@@ -447,8 +448,64 @@
 		load(current);
 	}
 
+	// ---- Discussion ----
+	// Le fournisseur et les consignes sont écrits à la main, comme le
+	// fournisseur des annotations : ni <select> ni <textarea> n'ont ici de
+	// liaison « preference » fiable.
+	function setupChat(tries) {
+		let sel = document.getElementById("annota-chat-provider");
+		let state = document.getElementById("annota-chat-provider-status");
+		let area = document.getElementById("annota-chat-instructions");
+		let status = document.getElementById("annota-chat-status");
+		if (!sel || !area) {
+			retry(setupChat, tries);
+			return;
+		}
+		const PREF = "annota.chatProvider";
+		const PREF_INSTR = "annota.chatInstructions";
+		const KNOWN = ["openai", "ollama", "cli", "apple"];
+
+		function describe() {
+			if (!state) return;
+			let a = api();
+			if (!a) { state.textContent = ""; return; }
+			let p = KNOWN.includes(sel.value) ? sel.value : a.provider();
+			let err = a.providerReadyError(p);
+			state.textContent = err
+				? "⚠️ Not set up yet: " + err
+				: "✓ Ready" + (sel.value ? "" : " — currently " + p);
+		}
+
+		let stored = String(Zotero.Prefs.get(PREF) || "").trim();
+		sel.value = KNOWN.includes(stored) ? stored : "";
+		describe();
+		sel.addEventListener("change", () => {
+			Zotero.Prefs.set(PREF, sel.value);
+			describe();
+		});
+
+		area.value = String(Zotero.Prefs.get(PREF_INSTR) || "");
+		area.setAttribute("placeholder",
+			"e.g. I work in risk sociology; point out the theoretical framework.");
+		let timer = null;
+		function save() {
+			if (timer) { clearTimeout(timer); timer = null; }
+			Zotero.Prefs.set(PREF_INSTR, area.value);
+			if (status) {
+				status.setAttribute("value", "Saved ✓");
+				setTimeout(() => status.setAttribute("value", ""), 2000);
+			}
+		}
+		area.addEventListener("input", () => {
+			if (timer) clearTimeout(timer);
+			timer = setTimeout(save, 1500);
+		});
+		area.addEventListener("blur", save);
+	}
+
 	setupTabs();
 	setup();
 	setupProvider();
 	setupOllama();
+	setupChat();
 })();
