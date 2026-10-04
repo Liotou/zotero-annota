@@ -449,7 +449,12 @@ Annota = {
 
 	// Fournisseur actif : "openai" (Mistral ou tout endpoint compatible),
 	// "ollama" (local), "cli" (Claude Code local), "apple" (Apple Intelligence).
-	provider() {
+	// Fournisseurs reconnus. Un appel peut en imposer un (la discussion a son
+	// propre réglage), sinon c'est celui des annotations qui s'applique.
+	PROVIDERS: ["openai", "ollama", "cli", "apple"],
+
+	provider(override) {
+		if (override && this.PROVIDERS.includes(override)) return override;
 		let p = String(getPref("provider", "")).trim();
 		if (p === "openai" || p === "ollama" || p === "cli" || p === "apple") return p;
 		// Rétrocompat avec l'ancienne case à cocher.
@@ -457,8 +462,8 @@ Annota = {
 	},
 
 	// Réglages du chemin compatible OpenAI (Mistral distant ou Ollama local).
-	chatConfig() {
-		if (this.provider() === "ollama") {
+	chatConfig(override) {
+		if (this.provider(override) === "ollama") {
 			return {
 				endpoint: String(getPref("ollamaEndpoint",
 					"http://localhost:11434/v1/chat/completions")).trim(),
@@ -478,8 +483,8 @@ Annota = {
 	},
 
 	// Vérifie que le fournisseur choisi est prêt ; renvoie un message ou null.
-	providerReadyError() {
-		let p = this.provider();
+	providerReadyError(override) {
+		let p = this.provider(override);
 		if (p === "apple") {
 			// Disponibilité réellement vérifiée au premier appel (compilation).
 			return null;
@@ -488,7 +493,7 @@ Annota = {
 			return String(getPref("cliPath", "claude")).trim()
 				? null : "Claude CLI path not set (Preferences → Annota).";
 		}
-		let cfg = this.chatConfig();
+		let cfg = this.chatConfig(p);
 		if (!cfg.endpoint) {
 			return (p === "ollama" ? "Ollama endpoint" : "API endpoint")
 				+ " not set (Preferences → Annota).";
@@ -1400,11 +1405,21 @@ Annota = {
 
 	async generateComment({ text, ctx, color, comment, fields, promptOverride, json }) {
 		let prompt = this.buildPrompt({ text, ctx, color, comment, fields, promptOverride });
-		let p = this.provider();
+		return this.complete(prompt, { json: !!json });
+	},
+
+	// Appel générique à un fournisseur, avec reprise. Options :
+	//   provider  impose un fournisseur (sinon celui des réglages)
+	//   json      demande une sortie structurée (HTTP seulement)
+	//   raw       rend le texte tel quel, sans conversion du Markdown : la
+	//             discussion fait son propre rendu
+	//   timeout   délai en ms (les longs contextes de la discussion en ont besoin)
+	async complete(prompt, opts = {}) {
+		let p = this.provider(opts.provider);
 		let call = () => {
-			if (p === "cli") return this.callCLI(prompt);
-			if (p === "apple") return this.callApple(prompt);
-			return this.callOpenAI(prompt, { json: !!json });
+			if (p === "cli") return this.callCLI(prompt, opts);
+			if (p === "apple") return this.callApple(prompt, opts);
+			return this.callOpenAI(prompt, Object.assign({}, opts, { provider: p }));
 		};
 
 		// Une coupure réseau ou un modèle qui bafouille ne doivent pas coûter
@@ -1631,7 +1646,7 @@ Annota = {
 		return bin;
 	},
 
-	async callApple({ system, user }) {
+	async callApple({ system, user }, opts = {}) {
 		let Subprocess;
 		try {
 			({ Subprocess } = ChromeUtils.importESModule(
@@ -1648,7 +1663,8 @@ Annota = {
 			stderr: "pipe"
 		});
 
-		let killTimer = setTimeout(() => { try { proc.kill(); } catch (e) {} }, 120000);
+		let killTimer = setTimeout(() => { try { proc.kill(); } catch (e) {} },
+			opts.timeout || 120000);
 		try {
 			await proc.stdin.write(user);
 			await proc.stdin.close();
@@ -1664,7 +1680,7 @@ Annota = {
 					+ (errText.trim() || "pas de détail").slice(0, 300));
 			}
 			if (!out.trim()) throw new Error("Réponse vide d'Apple Intelligence");
-			return this.sanitize(out);
+			return opts.raw ? out.trim() : this.sanitize(out);
 		}
 		finally {
 			clearTimeout(killTimer);
@@ -1674,7 +1690,7 @@ Annota = {
 	// Claude Code CLI local (`claude -p`). Utilise l'abonnement connecté du CLI,
 	// pas l'API facturée au token. Aucune clé API : l'authentification est celle
 	// de `claude` sur la machine. Lent (démarrage à froid par appel).
-	async callCLI({ system, user }) {
+	async callCLI({ system, user }, opts = {}) {
 		let Subprocess;
 		try {
 			({ Subprocess } = ChromeUtils.importESModule(
@@ -1708,7 +1724,8 @@ Annota = {
 		}
 
 		// Garde-fou : tuer le process s'il dépasse le délai (ex. non connecté).
-		let killTimer = setTimeout(() => { try { proc.kill(); } catch (e) {} }, 120000);
+		let killTimer = setTimeout(() => { try { proc.kill(); } catch (e) {} },
+			opts.timeout || 120000);
 		try {
 			await proc.stdin.write(user);
 			await proc.stdin.close();
@@ -1724,7 +1741,7 @@ Annota = {
 					+ (errText.trim() || "(pas de sortie d'erreur)").slice(0, 300));
 			}
 			if (!out.trim()) throw new Error("Réponse vide du CLI");
-			return this.sanitize(out);
+			return opts.raw ? out.trim() : this.sanitize(out);
 		}
 		finally {
 			clearTimeout(killTimer);
@@ -1733,7 +1750,7 @@ Annota = {
 
 	// Fournisseur compatible OpenAI (Mistral par défaut).
 	async callOpenAI({ system, user }, opts = {}) {
-		let cfg = this.chatConfig();
+		let cfg = this.chatConfig(opts.provider);
 		if (cfg.requiresKey && !cfg.apiKey) throw new Error("API key missing");
 		if (!cfg.endpoint) throw new Error("Endpoint not set");
 		let temp = parseFloat(getPref("temperature", 0.2));
@@ -1753,19 +1770,21 @@ Annota = {
 		// libre qu'il faut relire à la regex. Mistral et Ollama l'acceptent.
 		if (opts.json) payload.response_format = { type: "json_object" };
 
-		let resp = await this.httpJSON(cfg.endpoint, headers, payload);
+		let resp = await this.httpJSON(cfg.endpoint, headers, payload,
+			opts.provider, opts.timeout);
 
 		let data = resp.response;
 		let content = data && data.choices && data.choices[0]
 			&& data.choices[0].message && data.choices[0].message.content;
 		if (!content) throw new Error("Empty API response");
-		return this.sanitize(content);
+		return opts.raw ? String(content).trim() : this.sanitize(content);
 	},
 
 	// POST JSON commun, avec message d'erreur lisible.
-	async httpJSON(url, headers, payload) {
+	async httpJSON(url, headers, payload, override, timeoutMs) {
+		let prov = this.provider(override);
 		// Un modèle local doit d'abord être chargé en mémoire : délai plus large.
-		let timeout = this.provider() === "ollama" ? 180000 : 45000;
+		let timeout = timeoutMs || (prov === "ollama" ? 180000 : 45000);
 		try {
 			return await Zotero.HTTP.request("POST", url, {
 				headers,
@@ -1792,7 +1811,7 @@ Annota = {
 			if (!msg) msg = raw.slice(0, 200);
 
 			// Aide ciblée sur les deux échecs Ollama les plus fréquents.
-			if (this.provider() === "ollama") {
+			if (prov === "ollama") {
 				if (/not found/i.test(msg)) {
 					msg += " — pick an installed model in Preferences → Annota "
 						+ "(tags matter: « llama3.1:8b », not « llama3.1 »).";
