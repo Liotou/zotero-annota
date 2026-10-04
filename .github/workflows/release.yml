@@ -1,0 +1,66 @@
+# Publication sans gh local : même travail que release.sh, exécuté par GitHub.
+# Lancement : onglet Actions → Release → Run workflow (sur main).
+#
+# 1. lit la version dans manifest.json et refuse une release déjà publiée ;
+# 2. construit annota.xpi et crée la release GitHub avec ce fichier ;
+# 3. régénère updates.json avec l'empreinte DE CE FICHIER-LÀ, puis le pousse
+#    sur main. La release existe avant que updates.json ne l'annonce.
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Version
+        id: v
+        run: |
+          V=$(python3 -c "import json;print(json.load(open('manifest.json'))['version'])")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse an existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.v.outputs.version }}
+        run: |
+          if gh release view "v$V" >/dev/null 2>&1; then
+            echo "::error::Release v$V already exists: bump \"version\" in manifest.json."
+            exit 1
+          fi
+
+      - name: Build
+        run: ./build.sh
+
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.v.outputs.version }}
+        run: |
+          gh release create "v$V" annota.xpi --target "$GITHUB_SHA" \
+            --title "Annota v$V" --generate-notes
+
+      - name: updates.json
+        env:
+          V: ${{ steps.v.outputs.version }}
+        run: |
+          HASH=$(sha256sum annota.xpi | cut -d' ' -f1)
+          python3 make-updates.py "$V" "$HASH" "$GITHUB_REPOSITORY"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # dist/ : paquet de secours servi en brut quand aucune release n'a
+          # pu être créée. La release le remplace.
+          git rm -r -q --ignore-unmatch dist
+          git add updates.json
+          git commit -m "Release v$V" || echo "updates.json unchanged"
+          git push origin HEAD:main

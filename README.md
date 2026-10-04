@@ -442,7 +442,12 @@ Bump `"version"` in `manifest.json`, then run:
 ```
 
 It builds the `.xpi`, computes its SHA-256, regenerates `updates.json`, pushes,
-and creates the GitHub release. The hash in `updates.json` **must** match the
+and creates the GitHub release.
+
+No `gh` at hand? Bump the version, push to `main`, then **Actions → Release →
+Run workflow**: GitHub does the same job (`.github/workflows/release.yml`) —
+it builds, creates the release with the `.xpi`, and only then pushes the
+matching `updates.json`. The hash in `updates.json` **must** match the
 released `.xpi` or Zotero will refuse the update — hence the script.
 
 ---
