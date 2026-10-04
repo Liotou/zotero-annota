@@ -4,8 +4,8 @@
       "updates": [
         {
           "version": "2.26.0",
-          "update_link": "https://raw.githubusercontent.com/Liotou/zotero-annota/main/dist/annota-2.26.0.xpi",
-          "update_hash": "sha256:36dcf77ecf8658ab2e321ab6c6a02ee8e5c1d902d64090d4c58043cc0cf9f081",
+          "update_link": "https://github.com/Liotou/zotero-annota/releases/download/v2.26.0/annota.xpi",
+          "update_hash": "sha256:c6546db6eb30feb6dfa90f13da1149dd94862dcaab112d46f8fc7be89c7816d3",
           "applications": {
             "zotero": {
               "strict_min_version": "7.0",
