@@ -99,3 +99,5 @@ pref("extensions.zotero.annota.uiLanguage", "auto");
 // Langue : "auto" (détection par macOS) ou un code de langue (fr, en…).
 pref("extensions.zotero.annota.spellLanguage", "auto");
 pref("extensions.zotero.annota.spellGrammar", true);
+// Vérification pendant la frappe : notes et commentaires d'annotation.
+pref("extensions.zotero.annota.spellLive", true);

@@ -2927,8 +2927,10 @@ var AnnotaChat = null;
 // Textes de l'interface (i18n.js). Sans eux, Annota.t() rend la clé.
 var AnnotaI18n = null;
 
-// Orthographe et grammaire (spell.js, macOS).
+// Orthographe et grammaire (spell.js, macOS) ; vérification pendant la
+// frappe dans les notes et les commentaires (spell-live.js).
 var AnnotaSpell = null;
+var AnnotaSpellLive = null;
 var annotaLangObserver = null;
 
 function install() {}
@@ -2953,6 +2955,14 @@ async function startup({ id, version, rootURI }) {
 	catch (e) {
 		log("orthographe indisponible : " + e);
 		AnnotaSpell = null;
+	}
+	try {
+		Services.scriptloader.loadSubScript(rootURI + "spell-live.js");
+		if (AnnotaSpell && AnnotaSpell.available()) AnnotaSpellLive.start();
+	}
+	catch (e) {
+		log("orthographe en direct indisponible : " + e);
+		AnnotaSpellLive = null;
 	}
 
 	// Exposé pour le script du panneau de préférences (prompt par défaut, reset).
@@ -3004,6 +3014,10 @@ function onMainWindowUnload({ window }) {
 }
 
 function shutdown() {
+	if (AnnotaSpellLive) {
+		try { AnnotaSpellLive.stop(); } catch (e) {}
+	}
+	AnnotaSpellLive = null;
 	if (annotaLangObserver) {
 		try { Zotero.Prefs.unregisterObserver(annotaLangObserver); } catch (e) {}
 		annotaLangObserver = null;

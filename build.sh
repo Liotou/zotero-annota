@@ -18,6 +18,7 @@ zip -r -X "$OUT" \
     i18n.js \
     chat.js \
     spell.js \
+    spell-live.js \
     chat.svg \
     icon32.png \
     icon48.png \

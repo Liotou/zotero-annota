@@ -438,6 +438,17 @@ Annota checks your annotation comments and notes with the **macOS spell
 checker** (the one Pages and Mail use): nothing to install, no key, nothing
 leaves the Mac.
 
+**While you type** — in any note editor (library, reader side pane, note
+windows) and in annotation comments in the reader — issues are underlined after
+a short pause: red for spelling, blue for grammar. Click an underlined word for
+its suggestions, *Ignore* or *Add to dictionary*; the small badge at the bottom
+of the text counts the issues and offers to fix them all. A correction is typed
+like any keystroke, so ⌘Z undoes it and Zotero saves it as usual. Annota never
+alters these editors: the underlining is drawn over the text (CSS highlights).
+On an older Zotero without that feature, the badge and the suggestions still
+work, without underlining.
+
+To review many texts at once:
 Right-click annotations in the reader, or references, attachments and notes in
 the library → **Check spelling and grammar**. The Annota panel opens on a
 review: each issue in its context, its kind (spelling or grammar), the
@@ -447,7 +458,7 @@ dictionary. **Apply all first suggestions** fixes everything that has one.
 
 Only the visible text is checked: bold, italics and note formatting are kept
 as they are. Settings → General → *Spelling and grammar*: language (automatic
-or fixed) and grammar on or off.
+or fixed), grammar on or off, checking while typing on or off.
 
 ## 🔧 How it works
 

@@ -404,7 +404,11 @@ resume     | Résumé     | ai       | Résume le passage en une phrase. | itali
         <html:input type="checkbox" data-pref="annota.spellGrammar"/>
         <html:span data-i18n="spell.grammar">Also check grammar</html:span>
       </html:label>
-      <html:p class="annota-help" data-i18n="spell.help">Uses the macOS spell checker (Pages, Mail). Right-click annotations in the reader, or references and notes in the library, then <html:b>Check spelling and grammar</html:b>. Only the visible text is checked; formatting is kept. Words added to the dictionary are shared with macOS.</html:p>
+      <html:label class="annota-check">
+        <html:input type="checkbox" data-pref="annota.spellLive"/>
+        <html:span data-i18n="spell.live">Check while typing (notes and annotation comments)</html:span>
+      </html:label>
+      <html:p class="annota-help" data-i18n="spell.help">Uses the macOS spell checker (Pages, Mail). While you type in a note or an annotation comment, issues are underlined (red: spelling, blue: grammar); click an underlined word for suggestions. For a review of several texts at once: right-click annotations in the reader, or references and notes in the library, then <html:b>Check spelling and grammar</html:b>. Only the visible text is checked; formatting is kept. Words added to the dictionary are shared with macOS.</html:p>
     </html:section>
 
     <html:section class="annota-card">

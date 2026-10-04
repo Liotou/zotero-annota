@@ -12,6 +12,9 @@
 
 var AnnotaI18n = {
 	en: {
+		"spell.live": "Check while typing (notes and annotation comments)",
+		"sp.badge.title": "Spelling and grammar issues in this text: click to review them.",
+		"sp.badge": "{n} issue(s)",
 		"menu.spell": "Check spelling and grammar",
 		"menu.reader.spell": "Annota: check spelling and grammar",
 		"sp.title": "Spelling and grammar",
@@ -45,7 +48,7 @@ var AnnotaI18n = {
 		"spell.lang": "Language",
 		"spell.auto": "Automatic (detected by macOS)",
 		"spell.grammar": "Also check grammar",
-		"spell.help": "Uses the macOS spell checker (Pages, Mail). Right-click annotations in the reader, or references and notes in the library, then <b>Check spelling and grammar</b>. Only the visible text is checked; formatting is kept. Words added to the dictionary are shared with macOS.",
+		"spell.help": "Uses the macOS spell checker (Pages, Mail). While you type in a note or an annotation comment, issues are underlined (red: spelling, blue: grammar); click an underlined word for suggestions. For a review of several texts at once: right-click annotations in the reader, or references and notes in the library, then <b>Check spelling and grammar</b>. Only the visible text is checked; formatting is kept. Words added to the dictionary are shared with macOS.",
 		"c.history": "History",
 		"c.history.search": "Search conversations…",
 		"c.history.today": "Today",
@@ -370,6 +373,9 @@ var AnnotaI18n = {
 	},
 
 	fr: {
+		"spell.live": "Vérifier pendant la frappe (notes et commentaires d'annotation)",
+		"sp.badge.title": "Fautes d'orthographe et de grammaire dans ce texte : cliquer pour les revoir.",
+		"sp.badge": "{n} faute(s)",
 		"menu.spell": "Vérifier l'orthographe et la grammaire",
 		"menu.reader.spell": "Annota : vérifier l'orthographe et la grammaire",
 		"sp.title": "Orthographe et grammaire",
@@ -403,7 +409,7 @@ var AnnotaI18n = {
 		"spell.lang": "Langue",
 		"spell.auto": "Automatique (détectée par macOS)",
 		"spell.grammar": "Vérifier aussi la grammaire",
-		"spell.help": "Utilise le correcteur de macOS (Pages, Mail). Clic droit sur des annotations dans le lecteur, ou sur des références et des notes dans la bibliothèque, puis <b>Vérifier l'orthographe et la grammaire</b>. Seul le texte visible est vérifié ; la mise en forme est conservée. Les mots ajoutés au dictionnaire sont partagés avec macOS.",
+		"spell.help": "Utilise le correcteur de macOS (Pages, Mail). Pendant la frappe dans une note ou un commentaire d'annotation, les fautes sont soulignées (rouge : orthographe, bleu : grammaire) ; un clic sur un mot souligné propose les corrections. Pour revoir plusieurs textes d'un coup : clic droit sur des annotations dans le lecteur, ou sur des références et des notes dans la bibliothèque, puis <b>Vérifier l'orthographe et la grammaire</b>. Seul le texte visible est vérifié ; la mise en forme est conservée. Les mots ajoutés au dictionnaire sont partagés avec macOS.",
 		"c.history": "Historique",
 		"c.history.search": "Rechercher dans les discussions…",
 		"c.history.today": "Aujourd'hui",
