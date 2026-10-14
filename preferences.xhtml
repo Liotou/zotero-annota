@@ -256,7 +256,7 @@ resume     | Résumé     | ai       | Résume le passage en une phrase. | itali
             <html:input id="annota-maxrefs" type="number" min="1" max="30"
                         class="annota-input annota-w-num" data-pref="annota.maxRefs"/>
           </html:div>
-          <html:p data-i18n="ctx.limits.help">0: no abstract truncation. Citations such as <html:code>[1]</html:code> or <html:code>(Author, year)</html:code> are resolved through the PDF's internal links, then its bibliography, and passed as <html:code>{{references}}</html:code>.</html:p>
+          <html:p data-i18n="ctx.limits.help">0: no abstract truncation. Citations such as <html:code>[1]</html:code> or <html:code>(Author, year)</html:code> are resolved through the PDF's internal links, then its bibliography, and passed as <html:code>{{references}}</html:code>. In an EPUB, footnote calls (a number glued to a word) are followed to their note, sent as <html:code>[note 9]</html:code>.</html:p>
         </html:div>
       </html:details>
     </html:section>

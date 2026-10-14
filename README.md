@@ -197,6 +197,26 @@ Claude CLI ignores it.
 
   If neither resolves, nothing is sent and the rest works exactly as before.
 
+  **EPUB books: footnotes.** Many books cite their sources in footnotes: the
+  passage only carries a superscript number (`…en tout cas bref⁹.`) linked to
+  the note, which names the author, the work, the year and the page. On an
+  EPUB, Annota opens the book file itself, finds the highlighted passage in its
+  chapter, follows every footnote link inside it (or glued right after it, if
+  your selection stopped on the word or the full stop) and sends each note as
+  `[note 9] …` in `{{references}}`. Index entries and page cross-references
+  are recognised and left out. A note reading *Ibid.*, *Id.* or *op. cit.* is
+  sent together with the earlier note that names the source. No reader tab is
+  needed, so it also works from the library's right-click menu.
+
+  To have the reference field filled from footnotes, tell your prompt that a
+  number glued to a word is a citation, e.g.:
+
+  > Third form: a footnote call, a number glued to a word or a full stop
+  > ("bref9.") that calls the note given as "[note 9]" in the works cited.
+  > Take the author and the year from that note; its page ("p. 164") is the
+  > cited page. If the note says *Ibid.* or *op. cit.*, use the earlier note
+  > given right after it. Ignore a note that cites no work.
+
 ### 🎨 Prompt
 Above the prompt box is a row of **color swatches** — the same colors you use to
 highlight in the reader, read straight from Zotero's own palette. Click one to

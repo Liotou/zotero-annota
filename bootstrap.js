@@ -1153,6 +1153,421 @@ Annota = {
 		}
 	},
 
+	// ---- Voie EPUB : les appels de note de bas de page ----
+	//
+	// Dans un livre au format EPUB, la source est souvent renvoyée en note : le
+	// passage porte un numéro en exposant (« bref9. ») qui est un lien interne
+	// vers la note, laquelle donne l'auteur, l'ouvrage, l'année et la page. On
+	// lit l'EPUB lui-même (une archive zip), on retrouve le passage dans son
+	// chapitre, on relève les liens d'appel de note qu'il contient et on
+	// rapporte le texte de chaque note. Aucun lecteur ouvert n'est nécessaire,
+	// le traitement en lot depuis la bibliothèque en profite donc aussi.
+
+	_epubCache: new Map(),
+
+	isEPUBAttachment(att) {
+		try {
+			return !!att && typeof att.isAttachment === "function" && att.isAttachment()
+				&& att.attachmentContentType === "application/epub+zip";
+		}
+		catch (e) {
+			return false;
+		}
+	},
+
+	_domParser() {
+		if (typeof DOMParser !== "undefined") return new DOMParser();
+		let win = Zotero.getMainWindow && Zotero.getMainWindow();
+		if (win && win.DOMParser) return new win.DOMParser();
+		throw new Error("DOMParser indisponible");
+	},
+
+	// Lit une entrée de l'archive. Le fichier est rouvert à chaque lecture puis
+	// refermé : Zotero ne doit pas trouver le livre verrouillé s'il le déplace
+	// ou le synchronise.
+	async _readZipEntry(path, entry) {
+		let zr = Components.classes["@mozilla.org/libjar/zip-reader;1"]
+			.createInstance(Components.interfaces.nsIZipReader);
+		zr.open(Zotero.File.pathToFile(path));
+		try {
+			if (!zr.hasEntry(entry)) return null;
+			let stream = zr.getInputStream(entry);
+			try {
+				return await Zotero.File.getContentsAsync(stream, "utf-8");
+			}
+			finally {
+				stream.close();
+			}
+		}
+		finally {
+			zr.close();
+		}
+	},
+
+	// Chemin d'une entrée relatif à une autre (« ../Text/notes.html#n4 »).
+	_joinPath(base, rel) {
+		rel = String(rel || "").split("#")[0].split("?")[0];
+		if (!rel) return base;
+		let parts = rel.startsWith("/") ? [] : String(base).split("/").slice(0, -1);
+		for (let seg of rel.split("/")) {
+			if (!seg || seg === ".") continue;
+			if (seg === "..") parts.pop();
+			else parts.push(seg);
+		}
+		let out = parts.join("/");
+		try { out = decodeURIComponent(out); }
+		catch (e) { /* chemin déjà décodé */ }
+		return out;
+	},
+
+	_parseMarkup(str, type) {
+		let parser = this._domParser();
+		let doc = parser.parseFromString(str, type || "application/xhtml+xml");
+		// Certains EPUB servent du HTML mal formé : l'analyseur XML le refuse,
+		// l'analyseur HTML le lit.
+		let broken = !doc || !doc.documentElement
+			|| doc.documentElement.localName === "parsererror"
+			|| doc.getElementsByTagName("parsererror").length > 0;
+		if (broken && type !== "text/xml") doc = parser.parseFromString(str, "text/html");
+		return doc;
+	},
+
+	// Livre ouvert : chapitres dans l'ordre de lecture (spine) et documents
+	// déjà analysés. Gardé dix minutes : une séance de lecture surligne
+	// plusieurs passages du même livre.
+	async _openEPUB(att) {
+		let path = await att.getFilePathAsync();
+		if (!path) return null;
+		let book = this._epubCache.get(att.id);
+		if (book && book.path === path && Date.now() - book.at < 10 * 60000) return book;
+
+		book = { path, at: Date.now(), spine: [], docs: new Map() };
+		let container = await this._readZipEntry(path, "META-INF/container.xml");
+		if (!container) return null;
+		let cdoc = this._parseMarkup(container, "text/xml");
+		let rootFile = cdoc.getElementsByTagNameNS("*", "rootfile")[0];
+		let opfPath = rootFile && rootFile.getAttribute("full-path");
+		if (!opfPath) return null;
+		let opf = await this._readZipEntry(path, opfPath);
+		if (!opf) return null;
+		let odoc = this._parseMarkup(opf, "text/xml");
+
+		let idToHref = new Map();
+		for (let it of odoc.getElementsByTagNameNS("*", "item")) {
+			let id = it.getAttribute("id"), href = it.getAttribute("href");
+			if (id && href) idToHref.set(id, this._joinPath(opfPath, href));
+		}
+		// On garde la place des entrées introuvables : l'index du chapitre dans
+		// la CFI de l'annotation compte TOUTES les entrées du spine.
+		for (let ref of odoc.getElementsByTagNameNS("*", "itemref")) {
+			book.spine.push(idToHref.get(ref.getAttribute("idref")) || null);
+		}
+
+		if (this._epubCache.size > 2) {
+			this._epubCache.delete(this._epubCache.keys().next().value);
+		}
+		this._epubCache.set(att.id, book);
+		return book;
+	},
+
+	async _epubDoc(book, entry) {
+		if (!entry) return null;
+		if (book.docs.has(entry)) return book.docs.get(entry);
+		let str = await this._readZipEntry(book.path, entry);
+		let doc = str ? this._parseMarkup(str) : null;
+		book.docs.set(entry, doc);
+		return doc;
+	},
+
+	// Le surlignage d'un EPUB ne garde que le texte et une CFI. On repère le
+	// texte en ignorant les blancs, qui diffèrent entre le fichier et ce que
+	// le lecteur a enregistré.
+	_squeeze(s) {
+		return String(s || "").replace(/[\s\u00ad\u200b-\u200d\u2060\ufeff]+/g, "");
+	},
+
+	// Texte compact du document et, pour chaque nœud texte, sa position de
+	// départ dans ce texte.
+	_textIndex(doc) {
+		let flat = "", starts = new Map();
+		let walk = (node) => {
+			for (let c = node.firstChild; c; c = c.nextSibling) {
+				if (c.nodeType === 3) {
+					starts.set(c, flat.length);
+					flat += this._squeeze(c.nodeValue);
+				}
+				else if (c.nodeType === 1) {
+					let n = String(c.localName || "").toLowerCase();
+					if (n === "script" || n === "style" || n === "head") continue;
+					walk(c);
+				}
+			}
+		};
+		walk(doc.body || doc.documentElement);
+		return { flat, starts };
+	},
+
+	_findPassage(index, text) {
+		let needle = this._squeeze(text);
+		if (needle.length < 8) return null;
+		let at = index.flat.indexOf(needle);
+		if (at >= 0) return { start: at, end: at + needle.length };
+		// Repli : le début et la fin du passage, si son milieu diffère un peu
+		// (guillemets ou ligatures normalisés par le lecteur).
+		let k = Math.min(60, Math.floor(needle.length / 3));
+		let head = needle.slice(0, k), tail = needle.slice(-k);
+		let s = index.flat.indexOf(head);
+		while (s >= 0) {
+			let e = index.flat.indexOf(tail, s + k);
+			if (e >= 0 && e - s <= needle.length * 1.5 + 50) return { start: s, end: e + k };
+			s = index.flat.indexOf(head, s + 1);
+		}
+		return null;
+	},
+
+	// Texte d'un appel de note : chiffre, chiffre romain, lettre ou symbole,
+	// éventuellement entre crochets.
+	_NOTE_MARK: /^[[(]?\s*(\d{1,4}|[ivxlc]{1,6}|[a-z]|[*\u2020\u2021\u00a7\u00b6]{1,3})\s*[\])]?\.?$/i,
+
+	_semanticType(el) {
+		let t = "";
+		try { t += " " + (el.getAttributeNS("http://www.idpf.org/2007/ops", "type") || ""); }
+		catch (e) { /* attribut absent */ }
+		t += " " + (el.getAttribute("epub:type") || "") + " " + (el.getAttribute("role") || "");
+		return t.toLowerCase();
+	},
+
+	_firstText(el) {
+		for (let c = el.firstChild; c; c = c.nextSibling) {
+			if (c.nodeType === 3 && this._squeeze(c.nodeValue)) return c;
+			if (c.nodeType === 1) {
+				let t = this._firstText(c);
+				if (t) return t;
+			}
+		}
+		return null;
+	},
+
+	// Liens d'appel de note situés dans le passage, ou accolés juste après
+	// lui : on arrête souvent la sélection sur le mot ou le point, et le
+	// numéro qui suit appartient bien au passage.
+	_noteCallsIn(doc, index, span) {
+		let out = [];
+		for (let a of doc.getElementsByTagNameNS("*", "a")) {
+			let href = a.getAttribute("href")
+				|| a.getAttributeNS("http://www.w3.org/1999/xlink", "href") || "";
+			if (!href.includes("#") || /^[a-z][a-z0-9+.-]*:/i.test(href)) continue;
+			let label = String(a.textContent || "").replace(/\s+/g, " ").trim();
+			let semantic = /noteref/.test(this._semanticType(a));
+			if (!semantic && !this._NOTE_MARK.test(label)) continue;
+			let first = this._firstText(a);
+			if (!first || !index.starts.has(first)) continue;
+			let pos = index.starts.get(first);
+			let inside = pos >= span.start && pos < span.end;
+			if (!inside && pos >= span.end && pos - span.end <= 3) {
+				inside = /^[.,;:!?\u00bb\u201d\u2019"')\]]*$/.test(index.flat.slice(span.end, pos));
+			}
+			if (!inside) continue;
+			label = label.replace(/^[[(]\s*/, "").replace(/\s*[\])]?\.?$/, "") || label;
+			out.push({ a, href, label });
+		}
+		return out;
+	},
+
+	async _noteTarget(book, entry, href) {
+		let hash = href.indexOf("#");
+		let file = href.slice(0, hash), frag = href.slice(hash + 1);
+		try { frag = decodeURIComponent(frag); }
+		catch (e) { /* identifiant brut */ }
+		if (!frag) return null;
+		let tEntry = file ? this._joinPath(entry, file) : entry;
+		let tdoc = await this._epubDoc(book, tEntry);
+		if (!tdoc) return null;
+		let el = tdoc.getElementById(frag);
+		if (!el) {
+			for (let n of tdoc.getElementsByTagNameNS("*", "*")) {
+				if (n.getAttribute("id") === frag || n.getAttribute("name") === frag) { el = n; break; }
+			}
+		}
+		return el ? { doc: tdoc, el, entry: tEntry } : null;
+	},
+
+	_BLOCK: /^(p|div|li|aside|section|article|dd|dt|td|blockquote|footer|note)$/,
+
+	// Bloc qui porte la note : la cible du lien est souvent une ancre vide
+	// (« <a id="n4"/> ») posée au début du paragraphe de la note.
+	_noteBlock(el) {
+		let b = el;
+		while (b && b.nodeType === 1 && !this._BLOCK.test(String(b.localName || "").toLowerCase())) {
+			b = b.parentNode;
+		}
+		if (!b || b.nodeType !== 1) return null;
+		// Un bloc qui ne contient que le numéro (« <div class="numero">1.</div> »)
+		// n'est pas la note entière : on remonte d'un cran.
+		let p = b.parentNode;
+		if (this._squeeze(b.textContent).length < 6 && p && p.nodeType === 1
+			&& this._BLOCK.test(String(p.localName || "").toLowerCase())) {
+			b = p;
+		}
+		return b;
+	},
+
+	_escRe(s) {
+		return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	},
+
+	// Texte de la note, sans son numéro de tête.
+	_noteText(block, label) {
+		let s = String(block.textContent || "").replace(/\s+/g, " ").trim();
+		if (label) {
+			s = s.replace(new RegExp("^[[(]?\\s*" + this._escRe(label)
+				+ "\\s*[\\])]?\\s*[.:)\\-\\u2013\\u2014]?\\s*", "i"), "");
+		}
+		return s;
+	},
+
+	// La cible est-elle bien une note, et pas une page de l'index ni un renvoi
+	// interne ? Balisage sémantique d'abord, nom de la cible ensuite, et à
+	// défaut une note qui commence par le même numéro que l'appel.
+	_looksLikeNote(call, el, block) {
+		if (/noteref/.test(this._semanticType(call.a))) return true;
+		for (let n = el, i = 0; n && n.nodeType === 1 && i < 4; n = n.parentNode, i++) {
+			if (/footnote|endnote|rearnote|\bnote\b/.test(this._semanticType(n))) return true;
+			if (String(n.localName || "").toLowerCase() === "aside") return true;
+			let names = (n.getAttribute("id") || "") + " " + (n.getAttribute("class") || "");
+			if (/(^|[^a-z])(fn|ftn|notes?|nbp|ntb|ntf|endnotes?|footnotes?)([^a-z]|$)/i.test(names)) {
+				return true;
+			}
+		}
+		let head = String(block.textContent || "").replace(/\s+/g, " ").trim().slice(0, 16);
+		return new RegExp("^[[(]?\\s*" + this._escRe(call.label) + "(?![0-9])", "i").test(head);
+	},
+
+	_IBID: /^(ibid|ibidem|idem|id)\b\.?/i,
+	_OPCIT: /\b(op|art|loc)\.?\s*cit\b/i,
+
+	// Notes qui précèdent celle-ci, de la plus proche à la plus lointaine.
+	_previousNotes(block, max) {
+		let out = [];
+		for (let n = block.previousElementSibling; n && out.length < max; n = n.previousElementSibling) {
+			let ln = String(n.localName || "").toLowerCase();
+			if (/^h[1-6]$/.test(ln) || ln === "hr") break;
+			if (this._squeeze(n.textContent).length > 6) out.push(n);
+		}
+		return out;
+	},
+
+	_leadingNumber(block) {
+		let m = String(block.textContent || "").trim().match(/^[[(]?\s*(\d{1,4})/);
+		return m ? m[1] : "";
+	},
+
+	// « Ibid. » et « op. cit. » ne nomment pas la source : on va la chercher
+	// dans une note antérieure. Ibid. renvoie à la note qui précède (en
+	// remontant une chaîne d'ibid.), op. cit. à la dernière note qui cite le
+	// même auteur avec une année.
+	_earlierSource(block, noteText) {
+		let ibid = this._IBID.test(noteText);
+		let opcit = !ibid && this._OPCIT.test(noteText);
+		if (!ibid && !opcit) return null;
+
+		if (ibid) {
+			for (let prev of this._previousNotes(block, 4)) {
+				let t = this._noteText(prev, this._leadingNumber(prev));
+				if (!this._IBID.test(t)) return { block: prev, text: t };
+			}
+			return null;
+		}
+
+		// Auteurs possibles : les mots à majuscule de la citation qui précède
+		// « op. cit. », hors formules d'introduction (« Cité in Duckworth A. »).
+		let cut = noteText.search(this._OPCIT);
+		let segment = noteText.slice(0, cut).split(";").pop();
+		let names = (segment.match(/\p{Lu}[\p{L}'\u2019-]{2,}/gu) || [])
+			.filter(w => !/^(cit[ée]e?s?|voir|cf|in|dans|chez|selon|see|quoted|cited|ibid|idem|trad|ed|op)$/i.test(w));
+		if (!names.length) return null;
+		let doc = block.ownerDocument;
+		let cls = block.getAttribute("class");
+		let candidates = Array.from(doc.getElementsByTagNameNS("*", block.localName))
+			.filter(n => n.getAttribute("class") === cls);
+		let i = candidates.indexOf(block);
+		for (let surname of names) {
+			for (let j = i - 1, seen = 0; j >= 0 && seen < 300; j--, seen++) {
+				let t = this._noteText(candidates[j], this._leadingNumber(candidates[j]));
+				if (t.includes(surname) && /\b(1[5-9]|20)\d{2}\b/.test(t) && !this._OPCIT.test(t)) {
+					return { block: candidates[j], text: t };
+				}
+			}
+		}
+		return null;
+	},
+
+	// Notes appelées dans un passage surligné d'un EPUB : [{ marker, entry }].
+	async getEPUBFootnoteReferences(item, text) {
+		try {
+			let att = item.parentItem;
+			if (!this.isEPUBAttachment(att)) return [];
+			let book = await this._openEPUB(att);
+			if (!book || !book.spine.length) return [];
+
+			// Chapitre visé par la CFI (« epubcfi(/6/18!… » = 9e entrée du spine),
+			// puis tous les autres si le passage n'y est pas.
+			let pos = item.annotationPosition;
+			if (typeof pos === "string") pos = JSON.parse(pos);
+			let m = String((pos && pos.value) || "").match(/^epubcfi\(\/6\/(\d+)/);
+			let first = m ? parseInt(m[1], 10) / 2 - 1 : -1;
+			let order = book.spine.filter(Boolean);
+			if (first >= 0 && book.spine[first]) {
+				order = [book.spine[first]].concat(order.filter(e => e !== book.spine[first]));
+			}
+
+			let doc = null, entry = null, index = null, span = null;
+			for (let e of order) {
+				let d = await this._epubDoc(book, e);
+				if (!d) continue;
+				let ix = this._textIndex(d);
+				let sp = this._findPassage(ix, text);
+				if (sp) { doc = d; entry = e; index = ix; span = sp; break; }
+			}
+			if (!doc) {
+				log("EPUB : passage introuvable dans le livre, notes ignorées");
+				return [];
+			}
+
+			let max = parseInt(getPref("maxRefs", 8), 10) || 8;
+			let out = [], seen = new Set();
+			for (let call of this._noteCallsIn(doc, index, span)) {
+				if (out.length >= max) break;
+				let target = await this._noteTarget(book, entry, call.href);
+				if (!target) continue;
+				let block = this._noteBlock(target.el);
+				if (!block || !this._looksLikeNote(call, target.el, block)) continue;
+				let key = target.entry + "#" + call.href.split("#")[1];
+				if (seen.has(key)) continue;
+				seen.add(key);
+
+				let note = this._noteText(block, call.label);
+				if (note.length < 3) continue;
+				out.push({ marker: "[note " + call.label + "]", entry: this._trimEntry(note, 600) });
+
+				let earlier = this._earlierSource(block, note);
+				if (earlier && out.length < max) {
+					let n = this._leadingNumber(earlier.block);
+					out.push({
+						marker: "[note " + (n || "?") + ", the source note " + call.label + " refers to]",
+						entry: this._trimEntry(earlier.text, 600)
+					});
+				}
+			}
+			if (out.length) log("EPUB : notes résolues par lien : " + out.length);
+			return out;
+		}
+		catch (e) {
+			log("getEPUBFootnoteReferences: " + e);
+			return [];
+		}
+	},
+
 	// Socle commun : liens internes du PDF d'abord (déterministe, même principe
 	// que le popup de Zotero), analyse du texte en repli.
 	// Renvoie [{ marker, entry }] — le prompt et l'index partagent ce résultat.
@@ -1160,6 +1575,15 @@ Annota = {
 		if (!getPref("resolveCitations", true)) return [];
 		try {
 			let max = parseInt(getPref("maxRefs", 8), 10) || 8;
+
+			// EPUB : la source passe le plus souvent par une note de bas de
+			// page, dont l'appel est un simple numéro en exposant que la
+			// détection textuelle ci-dessous ne reconnaît pas.
+			if (this.isEPUBAttachment(item.parentItem)) {
+				let notes = await this.getEPUBFootnoteReferences(item, text);
+				if (notes.length) return notes.slice(0, max);
+			}
+
 			let markers = this.detectCitationMarkers(text);
 
 			// Aucun appel de citation dans le passage : il n'y a rien à résoudre.
@@ -1213,13 +1637,25 @@ Annota = {
 		if (vars.authors) lines.push("Authors: " + vars.authors);
 		if (vars.year) lines.push("Year: " + vars.year);
 		if (vars.publication) lines.push("Publication: " + vars.publication);
-		if (vars.page) lines.push("Passage page: " + vars.page);
+		// Libellé explicite : présentée seule, cette page était recopiée par le
+		// modèle comme page citée dans le champ référence.
+		if (vars.page) {
+			lines.push("Passage page: " + vars.page + " (where the passage sits in the"
+				+ " document being read; never a cited page, never use it in a reference)");
+		}
 		if (vars.abstract) lines.push("Document abstract: " + vars.abstract);
 		let block = lines.length ? "Document context:\n" + lines.join("\n") : "";
 		if (vars.references) {
-			block += (block ? "\n\n" : "")
-				+ "Works cited in the passage (resolved from this article's reference list):\n"
-				+ vars.references;
+			// Notes de bas de page (EPUB) : l'appel est un numéro collé au texte,
+			// que le modèle ne reconnaîtrait pas seul comme une citation.
+			let header = /^\[note /m.test(vars.references)
+				? "Works cited in the passage, through footnotes. A footnote call is a"
+					+ " number glued to a word or punctuation mark of the passage"
+					+ " (\"bref9.\" calls [note 9]); each note below is the one the passage"
+					+ " calls, quoted as printed. Take the cited author, year and page"
+					+ " from the note; ignore a note that cites no work:\n"
+				: "Works cited in the passage (resolved from this article's reference list):\n";
+			block += (block ? "\n\n" : "") + header + vars.references;
 		}
 		return block;
 	},
