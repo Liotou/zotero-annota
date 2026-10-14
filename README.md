@@ -205,7 +205,12 @@ Claude CLI ignores it.
   your selection stopped on the word or the full stop) and sends each note as
   `[note 9] …` in `{{references}}`. Index entries and page cross-references
   are recognised and left out. A note reading *Ibid.*, *Id.* or *op. cit.* is
-  sent together with the earlier note that names the source. No reader tab is
+  sent together with the earlier note that names the source. Many books mix
+  references and remarks in their notes: a note that cites no work (no year,
+  no author in bibliographic form, e.g. *"I come back to this later, cf.
+  infra"*, a translator's note) is not sent at all. And should the model still
+  answer with the book you are reading as the source (its own author and
+  year), that citation is removed from the field. No reader tab is
   needed, so it also works from the library's right-click menu.
 
   To have the reference field filled from footnotes, tell your prompt that a

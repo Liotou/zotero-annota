@@ -1502,6 +1502,21 @@ Annota = {
 		return null;
 	},
 
+	// Une note cite-t-elle un ouvrage ? Une référence porte une année de
+	// parution, ou commence par un auteur sous sa forme bibliographique
+	// (« Rosenfeld M. J., … », « D. Riesman, … », éventuellement après
+	// « Cité in » ou « Voir »). Une remarque, une précision du traducteur ou
+	// un renvoi interne (« cf. infra ») n'a ni l'un ni l'autre.
+	_citesWork(note) {
+		let s = String(note || "").trim();
+		if (/^(n\.\s?d\.\s?[teé]\.?|note d[eu'\u2019]|en (fran[cç]ais|anglais|allemand|italien|espagnol|latin|grec)\b)/i.test(s)) {
+			return false;
+		}
+		if (/(^|[^\d])(1[5-9]\d{2}|20\d{2})(?!\d)/.test(s)) return true;
+		let lead = s.replace(/^(cit[ée]e?s?\s+(in|par|dans|chez)|voir( aussi)?|see( also)?|cf\.?)\s+/i, "");
+		return /^(\p{Lu}[\p{L}'\u2019-]{2,},?\s+(\p{Lu}\.\s*-?){1,3}[,\s]|(\p{Lu}\.\s*-?){1,3}\s*\p{Lu}[\p{L}'\u2019-]{2,}\s*[,(])/u.test(lead);
+	},
+
 	// Notes appelées dans un passage surligné d'un EPUB : [{ marker, entry }].
 	async getEPUBFootnoteReferences(item, text) {
 		try {
@@ -1548,9 +1563,19 @@ Annota = {
 
 				let note = this._noteText(block, call.label);
 				if (note.length < 3) continue;
+				let earlier = this._earlierSource(block, note);
+
+				// Beaucoup de livres mêlent dans leurs notes les références et les
+				// remarques de l'auteur (« Je reviendrai plus loin sur cette
+				// question. Cf. infra… »). Une remarque ne cite aucun ouvrage :
+				// transmise, elle poussait le modèle à citer le livre lu lui-même.
+				// Sans année ni note antérieure qui nomme la source, on l'écarte.
+				if (!earlier && !this._citesWork(note)) {
+					log("EPUB : note " + call.label + " sans ouvrage cité (remarque), écartée");
+					continue;
+				}
 				out.push({ marker: "[note " + call.label + "]", entry: this._trimEntry(note, 600) });
 
-				let earlier = this._earlierSource(block, note);
 				if (earlier && out.length < max) {
 					let n = this._leadingNumber(earlier.block);
 					out.push({
@@ -1653,7 +1678,10 @@ Annota = {
 					+ " number glued to a word or punctuation mark of the passage"
 					+ " (\"bref9.\" calls [note 9]); each note below is the one the passage"
 					+ " calls, quoted as printed. Take the cited author, year and page"
-					+ " from the note; ignore a note that cites no work:\n"
+					+ " from the note. A note may be a mere remark by the author or a"
+					+ " cross-reference to another part of the book (\"cf. infra\","
+					+ " \"see chapter 3\"): it cites no work, so it gives no reference."
+					+ " Never cite the document being read itself as a source:\n"
 				: "Works cited in the passage (resolved from this article's reference list):\n";
 			block += (block ? "\n\n" : "") + header + vars.references;
 		}
@@ -1982,6 +2010,32 @@ Annota = {
 	// Produit le commentaire final d'une annotation : réponse de l'IA seule, ou
 	// gabarit mêlant cette réponse ({{ai}}) et des entrées déterministes.
 	// Renvoie null si la couleur n'a rien à produire.
+	// Retire d'une liste de citations « (A, 1999 ; B, 2001) » celles qui
+	// désignent le document lu (son premier auteur et son année) : quand le
+	// passage ne cite rien d'identifiable, le modèle se rabat parfois sur
+	// « (Lahire, 2026) » en lisant un livre de Lahire paru en 2026. Seule une
+	// valeur faite uniquement de citations est touchée.
+	stripSelfCitations(value, ctx) {
+		let s = String(value || "");
+		let year = ctx && String(ctx.year || "");
+		let first = ctx && String(ctx.authors || "").split(",")[0];
+		if (!year || !first || !first.trim()) return s;
+		let norm = x => String(x).normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+			.toLowerCase().trim();
+		let m = s.trim().match(/^\(([^()]+)\)\.?$/);
+		if (!m) return s;
+		let parts = m[1].split(/\s*;\s*/).filter(Boolean);
+		let kept = parts.filter(p => {
+			let y = p.match(/(^|[^\d])(\d{4})[a-z]?(?!\d)/);
+			if (!y || y[2] !== year) return true;
+			let who = norm(p.split(",")[0]).split(/\s+/)[0];
+			return who !== norm(first).split(/\s+/)[0];
+		});
+		if (kept.length === parts.length) return s;
+		log("citation du document lu retirée : " + s.trim());
+		return kept.length ? "(" + kept.join(" ; ") + ")" : "";
+	},
+
 	async buildComment({ text, ctx, color, comment, fields, getRefs }) {
 		let entry = this.getColorEntry(color);
 		if (!entry) return null;
@@ -2049,6 +2103,13 @@ Annota = {
 					if (!parsed) {
 						if (json) log("réponse non-JSON : relecture « nom: valeur »");
 						parsed = this.parseFieldReply(reply, toFill);
+					}
+					// Faute de source, le modèle cite parfois le document lu
+					// lui-même : jamais une référence secondaire.
+					for (let f of toFill) {
+						if (typeof parsed[f.name] === "string") {
+							parsed[f.name] = this.stripSelfCitations(parsed[f.name], ctx);
+						}
 					}
 					Object.assign(values, parsed);
 				}
