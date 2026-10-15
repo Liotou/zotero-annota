@@ -785,6 +785,300 @@ var AnnotaChat = {
 		return { chosen, omitted: pages.length - chosen.length };
 	},
 
+	// ---- Notes Zotero : lues avec leur clé, modifiées sur proposition ----
+	//
+	// Le modèle reçoit chaque note entière, en Markdown, sous « [note CLÉ] ».
+	// Ce que le Markdown ne sait pas dire (citations, surlignages, images,
+	// liens, formules, tableaux) y devient un repère ⟦Z3 citation: …⟧ qui
+	// garde le HTML d'origine : recopié par le modèle, il est rendu tel quel.
+	// Le modèle ne modifie rien lui-même : il propose un bloc « zotero-note »
+	// (remplacer, compléter, créer), affiché en carte ; c'est le chercheur qui
+	// l'applique, et peut l'annuler.
+
+	NOTE_RULES: [
+		"The researcher's Zotero notes are given in full, each under its key, such as"
+			+ " [note ABCD1234]. Marks written like ⟦Z3 citation: (Author, 2015, p. 4)⟧ stand for"
+			+ " citations, highlights, images, links or tables of the note: copy them exactly,"
+			+ " where they belong; never alter, merge or invent one.",
+		"When the researcher asks you to write, correct, complete, rephrase or reorganise a"
+			+ " note, propose it in a fenced block; the researcher reviews and applies it, you"
+			+ " never apply anything yourself and must not say the note was changed:",
+		"```zotero-note replace ABCD1234\n(the complete new content of note ABCD1234, in Markdown)\n```",
+		"```zotero-note append ABCD1234\n(only the content to add at the end of the note)\n```",
+		"```zotero-note create\n(the content of a new note, in Markdown, starting with a # title)\n```",
+		"A replace block must hold the whole note: whatever it leaves out is deleted. A note"
+			+ " marked (truncated) can only be appended to, never replaced. One block per note."
+			+ " Explain briefly, outside the block, what you propose."
+	],
+
+	newNoteContext(libraryID, parentKey) {
+		return { libraryID: libraryID || Zotero.Libraries.userLibraryID, parentKey: parentKey || null,
+			keys: {}, tokens: [] };
+	},
+
+	// Notes sous leur clé, dans la limite donnée. Une note qui n'y tient pas
+	// entière est marquée tronquée : on ne pourra que la compléter.
+	notesBlock(notes, max, nctx) {
+		let out = [], used = 0;
+		for (let n of notes) {
+			if (!n || !(n.isNote && n.isNote())) continue;
+			let md = this.noteToMarkdown(n.getNote(), nctx.tokens);
+			if (!md.trim()) continue;
+			let head = "[note " + n.key + "]";
+			let room = max - used - head.length - 20;
+			if (room < 200) break;
+			let truncated = md.length > room;
+			let body = truncated ? md.slice(0, room) + "…" : md;
+			nctx.keys[n.key] = { libraryID: n.libraryID, truncated };
+			let block = head + (truncated ? " (truncated)" : "") + "\n" + body;
+			out.push(block);
+			used += block.length + 2;
+		}
+		return out.join("\n\n");
+	},
+
+	_spanEnd(html, from) {
+		let re = /<span\b[^>]*>|<\/span>/gi;
+		re.lastIndex = from;
+		let depth = 1, m;
+		while ((m = re.exec(html)) !== null) {
+			depth += m[0].toLowerCase() === "</span>" ? -1 : 1;
+			if (depth === 0) return m.index + m[0].length;
+		}
+		return -1;
+	},
+
+	noteToMarkdown(html, tokens) {
+		let s = String(html || "");
+		let plain = x => this.htmlToText(x).replace(/\s+/g, " ").replace(/[⟦⟧]/g, "").trim();
+		let tok = (frag, label) => {
+			tokens.push(frag);
+			return "⟦Z" + tokens.length + (label ? " " + label.slice(0, 140) : "") + "⟧";
+		};
+		// Éléments propres à Zotero : gardés tels quels derrière un repère.
+		let out = "", last = 0, m;
+		let open = /<span\b(?=[^>]*\bclass="(citation|highlight|underline|math)")[^>]*>/gi;
+		while ((m = open.exec(s)) !== null) {
+			let end = this._spanEnd(s, m.index + m[0].length);
+			if (end < 0) continue;
+			let frag = s.slice(m.index, end);
+			out += s.slice(last, m.index) + tok(frag, m[1].toLowerCase() + ": " + plain(frag));
+			last = end;
+			open.lastIndex = end;
+		}
+		s = out + s.slice(last);
+		s = s.replace(/<table\b[\s\S]*?<\/table>/gi, t => tok(t, "table: " + plain(t)))
+			.replace(/<pre\b[^>]*\bclass="math"[^>]*>[\s\S]*?<\/pre>/gi, t => tok(t, "formula"))
+			.replace(/<img\b[^>]*>/gi, t => tok(t, "image"))
+			.replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi, t => tok(t, "link: " + plain(t)));
+		// Mise en forme courante.
+		let inl = x => x
+			.replace(/<(strong|b)\b[^>]*>([\s\S]*?)<\/\1>/gi, "**$2**")
+			.replace(/<(em|i)\b[^>]*>([\s\S]*?)<\/\1>/gi, "*$2*")
+			.replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, "`$1`")
+			.replace(/<br\s*\/?>/gi, "\n");
+		s = s.replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi,
+			(x, l, t) => "\n\n" + "#".repeat(parseInt(l, 10)) + " " + inl(t).replace(/\n/g, " ") + "\n\n");
+		s = s.replace(/<blockquote\b[^>]*>([\s\S]*?)<\/blockquote>/gi, (x, t) => "\n\n"
+			+ this.htmlToText(inl(t)).split("\n").map(l => "> " + l).join("\n") + "\n\n");
+		s = s.replace(/<(ul|ol)\b[^>]*>([\s\S]*?)<\/\1>/gi, (x, kind, body) => {
+			let i = 0;
+			return "\n\n" + body.replace(/<li\b[^>]*>([\s\S]*?)<\/li>/gi, (y, t) =>
+				(kind.toLowerCase() === "ol" ? (++i) + ". " : "- ")
+				+ this.htmlToText(inl(t)).replace(/\n+/g, " ") + "\n") + "\n";
+		});
+		s = this.htmlToText(inl(s.replace(/<p\b[^>]*>/gi, "\n\n").replace(/<\/p>/gi, "\n\n")));
+		return s.replace(/\n{3,}/g, "\n\n").trim();
+	},
+
+	// Markdown proposé → HTML de note, repères rendus à leur HTML d'origine.
+	noteHTMLFromMarkdown(md, tokens, msg) {
+		let inline = x => this.inlineHTML(this.inlineTokens(x), msg);
+		let alone = /^\s*⟦Z(\d+)[^⟧]*⟧\s*$/;
+		let html = this.mdBlocks(md).map(b => {
+			if (b.type === "p") {
+				let a = b.lines.join("\n").match(alone);
+				let t = a && tokens[parseInt(a[1], 10) - 1];
+				if (t && /^<(table|pre)\b/i.test(t)) return t;
+				return "<p>" + inline(b.lines.join("\n")) + "</p>";
+			}
+			if (b.type === "h") {
+				let l = Math.min(Math.max(b.level || 3, 1), 3);
+				return "<h" + l + ">" + inline(b.text) + "</h" + l + ">";
+			}
+			if (b.type === "hr") return "<hr/>";
+			if (b.type === "quote") return "<blockquote><p>" + inline(b.lines.join("\n")) + "</p></blockquote>";
+			if (b.type === "code") return "<pre>" + this.esc(b.lines.join("\n")) + "</pre>";
+			if (b.type === "ul" || b.type === "ol") {
+				return "<" + b.type + ">" + b.items.map(it => "<li>" + inline(it) + "</li>").join("")
+					+ "</" + b.type + ">";
+			}
+			if (b.type === "table") {
+				return "<table>" + b.rows.map((row, r) => "<tr>" + row.map(c => {
+					let tag = r === 0 ? "th" : "td";
+					return "<" + tag + ">" + inline(c) + "</" + tag + ">";
+				}).join("") + "</tr>").join("") + "</table>";
+			}
+			return "";
+		}).join("\n");
+		let missing = [];
+		html = html.replace(/⟦Z(\d+)[^⟧]*⟧/g, (x, n) => {
+			let t = tokens[parseInt(n, 10) - 1];
+			if (t == null) { missing.push(n); return ""; }
+			return t;
+		});
+		return { html, missing };
+	},
+
+	// Enveloppe d'une note Zotero (métadonnées des citations comprises).
+	noteWrapper(html) {
+		let m = String(html || "").match(/^\s*<div\b[^>]*\bdata-schema-version\b[^>]*>/i);
+		return m ? m[0] : "";
+	},
+
+	noteProposal(b) {
+		let m = String(b.info || "").match(/^zotero-note\s+(replace|append|create)\b\s*([A-Z0-9]{8})?/i);
+		if (!m) return null;
+		return { action: m[1].toLowerCase(), key: m[2] ? m[2].toUpperCase() : null,
+			md: b.lines.join("\n").trim() };
+	},
+
+	async proposedNote(msg, prop) {
+		let nctx = msg.notes || {};
+		if (prop.action === "create") return null;
+		let info = nctx.keys && nctx.keys[prop.key];
+		let libraryID = (info && info.libraryID) || nctx.libraryID || Zotero.Libraries.userLibraryID;
+		let note = prop.key ? await Zotero.Items.getByLibraryAndKeyAsync(libraryID, prop.key) : null;
+		return note && note.isNote && note.isNote() ? note : null;
+	},
+
+	renderNoteProposal(doc, b, msg, index) {
+		let card = this.el(doc, "div", "annota-noteprop");
+		let prop = this.noteProposal(b);
+		if (!prop) {
+			card.appendChild(this.el(doc, "pre", null, b.lines.join("\n")));
+			return card;
+		}
+		let nctx = msg.notes || {};
+		let info = prop.key && nctx.keys ? nctx.keys[prop.key] : null;
+		let state = (msg.noteApplied || {})[index] || null;
+		let head = this.el(doc, "div", "annota-noteprop-head");
+		head.appendChild(this.icon(doc, "note", 14));
+		let title = this.el(doc, "span", "annota-noteprop-title",
+			Annota.t("c.np." + prop.action, { key: prop.key || "" }));
+		head.appendChild(title);
+		card.appendChild(head);
+		// Titre de la note visée, lu après coup (la note peut avoir changé).
+		if (prop.key) {
+			this.proposedNote(msg, prop).then(n => {
+				if (n) title.textContent = Annota.t("c.np." + prop.action,
+					{ key: "« " + (n.getNoteTitle() || prop.key) + " »" });
+			}).catch(() => {});
+		}
+		let preview = prop.md.replace(/⟦Z\d+\s*([^⟧]*)⟧/g, (x, l) => "‹" + (l || "…").trim() + "›");
+		let body = this.renderMarkdown(doc, preview, null);
+		body.classList.add("annota-noteprop-body");
+		card.appendChild(body);
+
+		let bar = this.el(doc, "div", "annota-noteprop-bar");
+		let status = this.el(doc, "span", "annota-noteprop-status");
+		let render = () => {
+			bar.textContent = "";
+			let st = (msg.noteApplied || {})[index] || null;
+			let blocked = prop.action === "replace" && (!info || info.truncated);
+			if (st && st.done) {
+				status.textContent = Annota.t("c.np.applied");
+				bar.appendChild(status);
+				bar.appendChild(this.button(doc, Annota.t("c.np.open"), "annota-np-btn", () => {
+					let n = Zotero.Items.getByLibraryAndKey(st.libraryID, st.key);
+					if (n) this.selectItem(n.id);
+				}));
+				bar.appendChild(this.button(doc, Annota.t("c.np.undo"), "annota-np-btn", () => {
+					this.undoNoteProposal(msg, index).then(render, e => {
+						status.textContent = String(e.message || e);
+					});
+				}));
+				return;
+			}
+			if (blocked) {
+				status.textContent = Annota.t(info ? "c.np.truncated" : "c.np.unknown");
+				bar.appendChild(status);
+				return;
+			}
+			let apply = this.button(doc, Annota.t("c.np.apply"), "annota-np-btn annota-np-primary", () => {
+				apply.disabled = true;
+				this.applyNoteProposal(msg, index, prop).then(render, e => {
+					apply.disabled = false;
+					status.textContent = String(e.message || e);
+				});
+			});
+			bar.appendChild(apply);
+			if (st && st.undone) status.textContent = Annota.t("c.np.undone");
+			bar.appendChild(status);
+		};
+		render();
+		card.appendChild(bar);
+		return card;
+	},
+
+	async applyNoteProposal(msg, index, prop) {
+		let nctx = msg.notes || { tokens: [], keys: {} };
+		let tokens = nctx.tokens || [];
+		let conv = this.noteHTMLFromMarkdown(prop.md, tokens, msg);
+		if (conv.missing.length) throw new Error(Annota.t("c.np.badmark"));
+		let note, before = null, after;
+		if (prop.action === "create") {
+			let libraryID = nctx.libraryID || Zotero.Libraries.userLibraryID;
+			let lib = Zotero.Libraries.get(libraryID);
+			if (lib && lib.editable === false) throw new Error(Annota.t("c.ro"));
+			note = new Zotero.Item("note");
+			note.libraryID = libraryID;
+			if (nctx.parentKey) {
+				let parent = Zotero.Items.getByLibraryAndKey(libraryID, nctx.parentKey);
+				if (parent) note.parentID = parent.id;
+			}
+			after = conv.html;
+		}
+		else {
+			note = await this.proposedNote(msg, prop);
+			if (!note) throw new Error(Annota.t("c.np.gone"));
+			if (!note.library || note.library.editable === false) throw new Error(Annota.t("c.ro"));
+			let info = nctx.keys && nctx.keys[prop.key];
+			if (prop.action === "replace" && (!info || info.truncated)) throw new Error(Annota.t("c.np.truncated"));
+			before = note.getNote();
+			let wrap = this.noteWrapper(before);
+			if (prop.action === "replace") {
+				after = wrap ? wrap + conv.html + "</div>" : conv.html;
+			}
+			else {
+				after = /<\/div>\s*$/i.test(before) && wrap
+					? before.replace(/<\/div>\s*$/i, conv.html + "</div>")
+					: before + conv.html;
+			}
+		}
+		note.setNote(after);
+		await note.saveTx();
+		msg.noteApplied = msg.noteApplied || {};
+		msg.noteApplied[index] = { done: true, action: prop.action, libraryID: note.libraryID,
+			key: note.key, before, after: note.getNote(), at: Date.now() };
+		this.scheduleSave();
+	},
+
+	// Rétablit la note d'avant, si personne ne l'a modifiée depuis ; une
+	// note créée part à la corbeille.
+	async undoNoteProposal(msg, index) {
+		let st = (msg.noteApplied || {})[index];
+		if (!st || !st.done) return;
+		let note = await Zotero.Items.getByLibraryAndKeyAsync(st.libraryID, st.key);
+		if (!note) throw new Error(Annota.t("c.np.gone"));
+		if (note.getNote() !== st.after) throw new Error(Annota.t("c.np.changed"));
+		if (st.action === "create") note.deleted = true;
+		else note.setNote(st.before);
+		await note.saveTx();
+		msg.noteApplied[index] = { undone: true };
+		this.scheduleSave();
+	},
+
 	// ---- Contexte ----
 
 	htmlToText(html) {
@@ -885,11 +1179,14 @@ var AnnotaChat = {
 		if (meta) parts.push("REFERENCE\n" + meta);
 		let room = budget - meta.length;
 
+		let noteCtx = this.newNoteContext((top || item).libraryID,
+			top && top.isRegularItem && top.isRegularItem() ? top.key : null);
 		if (getPref("chatIncludeNotes", true) && top && top.isRegularItem && top.isRegularItem()) {
-			let notes = this.notesText(top, Math.floor(budget * 0.15));
-			if (notes) {
-				parts.push("THE RESEARCHER'S NOTES ON THIS REFERENCE\n" + notes);
-				room -= notes.length;
+			let notes = top.getNotes().map(id => Zotero.Items.get(id)).filter(Boolean);
+			let txt = this.notesBlock(notes, Math.floor(budget * 0.25), noteCtx);
+			if (txt) {
+				parts.push("THE RESEARCHER'S NOTES ON THIS REFERENCE\n" + txt);
+				room -= txt.length;
 			}
 		}
 		if (getPref("chatIncludeAnnotations", true) && att) {
@@ -934,7 +1231,7 @@ var AnnotaChat = {
 				+ " extractable text — work from the reference, notes and annotations)");
 		}
 		return {
-			text: parts.join("\n\n"), paged, pageMap, att, top,
+			text: parts.join("\n\n"), paged, pageMap, att, top, notes: noteCtx,
 			stats: { pages: doc.pages.length, sent, omitted, paged }
 		};
 	},
@@ -1009,16 +1306,31 @@ var AnnotaChat = {
 		}
 		let per = Math.floor((budget - head.length) / hits.length);
 		let folded = terms.map(t => this.fold(t));
+		let noteCtx = this.newNoteContext(libraryID, null);
+		let withNotes = getPref("chatIncludeNotes", true);
 		let blocks = [], sources = [];
 		hits.forEach((h, i) => {
 			let n = i + 1;
-			let block = "[" + n + "]\n" + this.describeItem(h.item, Math.max(300, per - 700));
-			let anns = this.matchingAnnotations(h.item, folded, 3);
+			let isNote = h.item.isNote && h.item.isNote();
+			let block = "[" + n + "]\n" + (isNote ? "" : this.describeItem(h.item, Math.max(300, per - 700)));
+			let anns = isNote ? "" : this.matchingAnnotations(h.item, folded, 3);
 			if (anns) block += "\nThe researcher's annotations:\n" + anns;
-			blocks.push(Annota.truncate(block, per));
+			// Notes : la note trouvée elle-même, ou celles de la référence qui
+			// parlent de la question, entières et avec leur clé.
+			let notes = isNote ? [h.item]
+				: (withNotes && h.item.isRegularItem && h.item.isRegularItem()
+					? h.item.getNotes().map(id => Zotero.Items.get(id)).filter(nt => nt
+						&& folded.some(t => this.fold(this.htmlToText(nt.getNote())).includes(t)))
+					: []);
+			let txt = notes.length
+				? this.notesBlock(notes, Math.max(600, per - block.length), noteCtx) : "";
+			if (txt) block += (isNote ? "Standalone note:\n" : "\nThe researcher's notes on it:\n") + txt;
+			// Un bloc portant des notes n'est jamais recoupé : notesBlock a déjà
+			// tenu la limite, et une note présentée entière doit l'être.
+			blocks.push(txt ? block : Annota.truncate(block, per));
 			sources.push({ n, id: h.item.id });
 		});
-		return { text: head + "\n\n" + blocks.join("\n\n"), sources };
+		return { text: head + "\n\n" + blocks.join("\n\n"), sources, notes: noteCtx };
 	},
 
 	systemPrompt(scope, paged) {
@@ -1044,6 +1356,7 @@ var AnnotaChat = {
 		}
 		lines.push("The researcher's own annotations and notes, when present, show what"
 			+ " they found important: use them, and keep them distinct from the author's text.");
+		if (getPref("chatEditNotes", true)) lines.push("", ...this.NOTE_RULES);
 		lines.push("Answer in the language of the researcher's last message unless asked"
 			+ " otherwise. Be precise and concise; use Markdown (short paragraphs, lists,"
 			+ " bold) when it helps.");
@@ -1123,12 +1436,14 @@ var AnnotaChat = {
 			let ctx, extra = { scope: conv.scope };
 			if (conv.scope === "library") {
 				ctx = await this.buildLibraryContext(conv.libraryID, terms, Math.floor(budget * 0.8));
+				extra.notes = ctx.notes;
 				extra.sources = ctx.sources;
 				extra.note = ctx.sources.length
 					? Annota.t("c.note.items", { n: ctx.sources.length }) : Annota.t("c.note.noitem");
 			}
 			else {
 				ctx = await this.buildDocumentContext(item, terms, Math.floor(budget * 0.8));
+				extra.notes = ctx.notes;
 				extra.attachmentID = ctx.att ? ctx.att.id : null;
 				extra.pageMap = ctx.pageMap;
 				let st = ctx.stats;
@@ -1800,11 +2115,15 @@ var AnnotaChat = {
 				else cur.lines.push(line);
 				continue;
 			}
-			if (/^\s*```/.test(line)) { close(); cur = { type: "code", lines: [] }; continue; }
-			if (!line.trim()) { close(); continue; }
-			if ((m = line.match(/^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$/))) {
+			if ((m = line.match(/^\s*```\s*(.*)$/))) {
 				close();
-				blocks.push({ type: "h", text: m[1] });
+				cur = { type: "code", lines: [], info: m[1].trim() };
+				continue;
+			}
+			if (!line.trim()) { close(); continue; }
+			if ((m = line.match(/^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/))) {
+				close();
+				blocks.push({ type: "h", text: m[2], level: m[1].length });
 				continue;
 			}
 			if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) { close(); blocks.push({ type: "hr" }); continue; }
@@ -1975,8 +2294,13 @@ var AnnotaChat = {
 	renderMarkdown(doc, text, msg) {
 		let root = this.el(doc, "div", "annota-chat-md");
 		let inline = (parent, s) => this.appendInline(doc, parent, this.inlineTokens(s), msg);
+		let proposal = 0;
 		for (let b of this.mdBlocks(text)) {
 			let e;
+			if (b.type === "code" && msg && /^zotero-note\b/i.test(b.info || "")) {
+				root.appendChild(this.renderNoteProposal(doc, b, msg, proposal++));
+				continue;
+			}
 			if (b.type === "p") { e = this.el(doc, "p"); inline(e, b.lines.join("\n")); }
 			else if (b.type === "h") { e = this.el(doc, "p", "annota-chat-h"); inline(e, b.text); }
 			else if (b.type === "hr") e = this.el(doc, "hr");
@@ -2252,6 +2576,22 @@ var AnnotaChat = {
   border-radius: 10px; background: var(--material-mix-quarternary, rgba(128,128,128,.07));
   line-height: 1.5; overflow-wrap: anywhere; }
 .annota-answer { line-height: 1.55; padding: 0 2px; overflow-wrap: anywhere; }
+.annota-noteprop { margin: .5em 0 .8em; border: 1px solid var(--fill-quinary, rgba(128,128,128,.25));
+  border-radius: 8px; overflow: hidden; }
+.annota-noteprop-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+  font-size: 12px; font-weight: 600; color: var(--fill-secondary);
+  background: var(--fill-quinary, rgba(128,128,128,.08)); }
+.annota-noteprop-body { padding: 8px 10px; max-height: 320px; overflow: auto; }
+.annota-noteprop-bar { display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+  border-top: 1px solid var(--fill-quinary, rgba(128,128,128,.2)); }
+.annota-noteprop-status { font-size: 12px; color: var(--fill-secondary); }
+.annota-np-btn { appearance: none; border: 1px solid var(--fill-quarternary, rgba(128,128,128,.35));
+  background: transparent; border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer;
+  color: inherit; }
+.annota-np-btn:hover { background: var(--fill-quinary, rgba(128,128,128,.12)); }
+.annota-np-btn[disabled] { opacity: .5; cursor: default; }
+.annota-np-primary { background: var(--accent-blue, #2ea8e5); border-color: transparent; color: #fff; }
+.annota-np-primary:hover { background: var(--accent-blue, #2ea8e5); filter: brightness(1.08); }
 .annota-answer-foot { display: flex; align-items: center; gap: 1px; margin: 5px 0 0 -4px;
   opacity: .5; transition: opacity .15s ease; }
 .annota-answer:hover .annota-answer-foot, .annota-answer:focus-within .annota-answer-foot { opacity: 1; }
