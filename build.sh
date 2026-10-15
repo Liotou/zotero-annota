@@ -17,6 +17,7 @@ zip -r -X "$OUT" \
     preferences.css \
     i18n.js \
     chat.js \
+    citelink.js \
     spell.js \
     spell-live.js \
     chat.svg \

@@ -3428,6 +3428,9 @@ var AnnotaI18n = null;
 // frappe dans les notes et les commentaires (spell-live.js).
 var AnnotaSpell = null;
 var AnnotaSpellLive = null;
+
+// Lien d'une citation glissée dans une note vers son surlignage (citelink.js).
+var AnnotaCiteLink = null;
 var annotaLangObserver = null;
 
 function install() {}
@@ -3447,6 +3450,14 @@ async function startup({ id, version, rootURI }) {
 	catch (e) {
 		log("discussion indisponible : " + e);
 		AnnotaChat = null;
+	}
+	try {
+		Services.scriptloader.loadSubScript(rootURI + "citelink.js");
+		AnnotaCiteLink.start();
+	}
+	catch (e) {
+		log("lien citation → surlignage indisponible : " + e);
+		AnnotaCiteLink = null;
 	}
 	try { Services.scriptloader.loadSubScript(rootURI + "spell.js"); }
 	catch (e) {
@@ -3511,6 +3522,10 @@ function onMainWindowUnload({ window }) {
 }
 
 function shutdown() {
+	if (AnnotaCiteLink) {
+		try { AnnotaCiteLink.stop(); } catch (e) {}
+	}
+	AnnotaCiteLink = null;
 	if (AnnotaSpellLive) {
 		try { AnnotaSpellLive.stop(); } catch (e) {}
 	}

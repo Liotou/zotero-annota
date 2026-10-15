@@ -48,6 +48,7 @@ and references, and a click takes you there. See
 - [🖱️ Running a prompt on one annotation](#-running-a-prompt-on-one-annotation)
 - [⏳ Generating comments after the fact](#-generating-comments-after-the-fact)
 - [💬 Chat with your documents](#-chat-with-your-documents)
+- [🔗 From a note's citation back to the highlight](#-from-a-notes-citation-back-to-the-highlight)
 - [🔧 How it works](#-how-it-works)
 - [🔒 Security](#-security)
 - [🧑‍💻 Development](#-development)
@@ -456,6 +457,30 @@ abandoned). Retries follow the setting of the ⚙️ General tab.
 > What leaves your computer depends on the provider: with an API, the text of
 > the document and your annotations are sent to it; with Ollama or Apple
 > Intelligence, nothing leaves the machine.
+
+## 🔗 From a note's citation back to the highlight
+
+Dragging a highlight into a note can give the bare citation, e.g.
+`(Valkokari, 2015, p. 17)`, if you set Zotero's note template to the citation
+alone: **Settings → Advanced → Config Editor**,
+`extensions.zotero.annotations.noteTemplates.highlight` = `<p>{{citation}}</p>`.
+
+On its own, Zotero keeps only the source and the page in that citation:
+**Go to Page** opens the page, not the passage, and nothing at all for an EPUB
+highlight without a page number. Annota fills the gap:
+
+- **The highlight's key goes into the citation** when you drop it
+  (`annotationKey` and `annotationURI` in the citation data). The visible text
+  does not change.
+- **Go to Page opens the highlight itself**: selected and framed as if you had
+  clicked it, with the annotations sidebar open on it.
+- **An Open annotation button** joins the citation's menu, also where Zotero
+  shows no Go to Page (EPUB without page numbers).
+
+Citations dropped before this version carry no key: Annota then opens the
+source's highlight on that page if it is the only one, and otherwise leaves
+Zotero's behaviour unchanged. In Obsidian, **Ariane** uses the key to point the
+citation at the matching annotation note (`zotflow-anno-key`).
 
 ## 🔤 Spelling and grammar (macOS)
 
