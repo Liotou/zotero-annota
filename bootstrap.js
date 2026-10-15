@@ -3286,6 +3286,7 @@ Annota = {
 			return items.some(i =>
 				(i.isAnnotation && i.isAnnotation())
 				|| (i.isAttachment && i.isAttachment())
+				|| (i.isNote && i.isNote())
 				|| (i.isRegularItem && i.isRegularItem()));
 		}
 		catch (e) {
@@ -3342,6 +3343,27 @@ Annota = {
 					Annota.spellSelection(window).catch(e => log("orthographe : " + e));
 				});
 				popup.appendChild(spell);
+			}
+
+			// Notes : surlignages glissés avec l'ancien gabarit, réduits à leur
+			// citation (citelink.js).
+			if (AnnotaCiteLink) {
+				popup.appendChild(doc.createXULElement("menuseparator"));
+				let entries = [
+					["menu.reduce.selection", () => AnnotaCiteLink.reduce(window,
+						AnnotaCiteLink.notesOfSelection(window))],
+					["menu.reduce.library", async () => AnnotaCiteLink.reduce(window,
+						await AnnotaCiteLink.notesOfLibrary(window.ZoteroPane.getSelectedLibraryID()))],
+					["menu.reduce.undo", () => AnnotaCiteLink.undoLast(window)]
+				];
+				for (let [key, run] of entries) {
+					let mi = doc.createXULElement("menuitem");
+					mi.setAttribute("label", this.t(key));
+					mi.addEventListener("command", () => {
+						Promise.resolve().then(run).catch(e => log("réduction des notes : " + e));
+					});
+					popup.appendChild(mi);
+				}
 			}
 
 			menu.appendChild(popup);

@@ -420,9 +420,271 @@ var AnnotaCiteLink = {
 		return b;
 	},
 
-	t(key) {
-		try { if (Annota && typeof Annota.t === "function") return Annota.t(key); }
+	t(key, vars) {
+		try { if (Annota && typeof Annota.t === "function") return Annota.t(key, vars); }
 		catch (e) { /* textes indisponibles */ }
 		return key === "cite.open" ? "Open annotation" : key;
+	},
+
+	// ---- 4. Notes déjà écrites : le surlignage réduit à sa citation ----
+	//
+	// Avec l'ancien gabarit, un surlignage glissé dans une note y déposait
+	// « <span class="highlight" data-annotation=…>« passage »</span>
+	// <span class="citation" …>(Auteur, 2015, p. 18)</span> commentaire ».
+	// Le passage et le commentaire vivent déjà dans l'annotation : le trio
+	// devient la seule citation, portant la clé du surlignage comme au dépôt
+	// (annotationKey, annotationURI), pour « Aller à la page » et « Ouvrir
+	// l'annotation ». Le texte qui suit la citation n'est retiré que s'il est
+	// le commentaire du surlignage, ou une version antérieure que le
+	// commentaire actuel contient : une phrase ajoutée à la main reste.
+	// Un surlignage supprimé depuis n'est pas touché : son passage n'existe
+	// plus que dans la note.
+
+	_HL_OPEN: /<span\b(?=[^>]*\bclass="highlight")[^>]*\bdata-annotation="([^"]*)"[^>]*>/g,
+	_CIT_OPEN: /^(?:\s|&nbsp;|\u00a0)*<span\b(?=[^>]*\bclass="citation")[^>]*>/,
+
+	// Indice qui suit le </span> fermant le span ouvert juste avant « from ».
+	_endOfSpan(html, from) {
+		let re = /<span\b[^>]*>|<\/span>/g;
+		re.lastIndex = from;
+		let depth = 1, m;
+		while ((m = re.exec(html)) !== null) {
+			depth += m[0] === "</span>" ? -1 : 1;
+			if (depth === 0) return m.index + m[0].length;
+		}
+		return -1;
+	},
+
+	// Texte réduit à ses mots : balises, entités, accents, casse et blancs
+	// ne comptent pas (un commentaire a pu être reformaté ou corrigé).
+	_plain(s) {
+		return String(s || "")
+			.replace(/<br\s*\/?>/gi, " ")
+			.replace(/<[^>]+>/g, " ")
+			.replace(/&nbsp;|&#160;/g, " ")
+			.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+			.replace(/&quot;/g, "\"").replace(/&#0?39;|&apos;/g, "'")
+			.replace(/[*_]+/g, "")
+			.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+			.toLowerCase()
+			.replace(/\s+/g, " ")
+			.trim();
+	},
+
+	// Texte lisible d'un fragment de note, pour l'aperçu.
+	_display(s) {
+		return String(s || "")
+			.replace(/<br\s*\/?>/gi, " ")
+			.replace(/<[^>]+>/g, "")
+			.replace(/&nbsp;|&#160;/g, " ")
+			.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+			.replace(/&quot;/g, "\"").replace(/&#0?39;|&apos;/g, "'")
+			.replace(/\s+/g, " ")
+			.trim();
+	},
+
+	// Surlignages glissés présents dans une note : [{ key, attachmentURI }].
+	highlightsIn(html) {
+		let out = [], m;
+		let re = new RegExp(this._HL_OPEN.source, "g");
+		while ((m = re.exec(String(html || ""))) !== null) {
+			try {
+				let a = JSON.parse(decodeURIComponent(m[1]));
+				if (a && a.annotationKey) out.push({ key: String(a.annotationKey), attachmentURI: a.attachmentURI || "" });
+			}
+			catch (e) { /* attribut illisible */ }
+		}
+		return out;
+	},
+
+	// Réduit une note. info(clé) rend { comment, uri } pour un surlignage
+	// existant, null sinon. Renvoie { html, count, kept, examples } ; kept :
+	// les textes laissés après une citation, faute d'être le commentaire.
+	reduceHTML(html, info) {
+		html = String(html || "");
+		let re = new RegExp(this._HL_OPEN.source, "g");
+		let out = "", last = 0, count = 0, kept = [], examples = [], m;
+		while ((m = re.exec(html)) !== null) {
+			let hlEnd = this._endOfSpan(html, m.index + m[0].length);
+			if (hlEnd < 0) continue;
+			let key = null;
+			try { key = JSON.parse(decodeURIComponent(m[1])).annotationKey || null; }
+			catch (e) { key = null; }
+			let ann = key ? info(String(key)) : null;
+			let mc = ann ? html.slice(hlEnd).match(this._CIT_OPEN) : null;
+			if (!mc) { re.lastIndex = hlEnd; continue; }
+			let citStart = hlEnd + mc[0].length - mc[0].replace(/^(?:\s|&nbsp;|\u00a0)*/, "").length;
+			let citEnd = this._endOfSpan(html, hlEnd + mc[0].length);
+			if (citEnd < 0) { re.lastIndex = hlEnd; continue; }
+
+			// Fin du paragraphe : la première balise fermante de bloc.
+			let rest = html.slice(citEnd);
+			let close = rest.search(/<\/(?:p|li|h[1-6]|div|blockquote|td)>/i);
+			let parEnd = close < 0 ? html.length : citEnd + close;
+			let tail = this._plain(html.slice(citEnd, parEnd));
+			let comment = this._plain(ann.comment);
+			let dropTail = !!comment && tail !== ""
+				&& (tail === comment || (tail.length >= 12 && comment.includes(tail)));
+
+			let citation = this._tagCitation(html.slice(citStart, citEnd), String(key), ann.uri);
+			let end = dropTail ? parEnd : citEnd;
+			if (tail && !dropTail) kept.push(this._display(html.slice(citEnd, parEnd)));
+			if (examples.length < 3) {
+				examples.push({ before: this._display(html.slice(m.index, end)), after: this._display(citation) });
+			}
+			out += html.slice(last, m.index) + citation;
+			last = end;
+			re.lastIndex = end;
+			count++;
+		}
+		return { html: count ? out + html.slice(last) : html, count, kept, examples };
+	},
+
+	_tagCitation(span, key, uri) {
+		return span.replace(/data-citation="([^"]*)"/, (m, enc) => {
+			try {
+				let c = JSON.parse(decodeURIComponent(enc));
+				let ci = c && c.citationItems && c.citationItems[0];
+				if (!ci) return m;
+				ci.annotationKey = key;
+				if (uri) ci.annotationURI = uri;
+				return 'data-citation="' + encodeURIComponent(JSON.stringify(c)) + '"';
+			}
+			catch (e) {
+				return m;
+			}
+		});
+	},
+
+	// Surlignages d'une note encore présents dans Zotero : clé -> { comment, uri }.
+	async annotationsFor(html) {
+		let map = new Map();
+		for (let h of this.highlightsIn(html)) {
+			if (map.has(h.key)) continue;
+			let uri = String(h.attachmentURI || "").replace(/[^/]+$/, h.key);
+			let it = null;
+			try { it = uri ? await Zotero.URI.getURIItem(uri) : null; }
+			catch (e) { it = null; }
+			if (this.isAnnotation(it)) map.set(h.key, { comment: it.annotationComment || "", uri });
+		}
+		return map;
+	},
+
+	// Ce que la réduction changerait : [{ note, html, count, examples }].
+	async plan(notes) {
+		let out = [];
+		for (let note of notes) {
+			let html = note.getNote();
+			if (!html || !html.includes('class="highlight"')) continue;
+			let anns = await this.annotationsFor(html);
+			if (!anns.size) continue;
+			let r = this.reduceHTML(html, k => anns.get(k) || null);
+			if (r.count) out.push({ note, html: r.html, before: html, count: r.count, examples: r.examples });
+		}
+		return out;
+	},
+
+	// Notes visées par la sélection : les notes elles-mêmes, et les notes
+	// filles des documents sélectionnés.
+	notesOfSelection(window) {
+		let seen = new Set(), out = [];
+		let add = n => { if (n && !seen.has(n.id)) { seen.add(n.id); out.push(n); } };
+		for (let it of window.ZoteroPane.getSelectedItems() || []) {
+			if (it.isNote && it.isNote()) add(it);
+			else if (it.isRegularItem && it.isRegularItem()) {
+				for (let id of it.getNotes()) add(Zotero.Items.get(id));
+			}
+		}
+		return out;
+	},
+
+	async notesOfLibrary(libraryID) {
+		let s = new Zotero.Search();
+		s.libraryID = libraryID;
+		s.addCondition("itemType", "is", "note");
+		let ids = await s.search();
+		return (await Zotero.Items.getAsync(ids)).filter(n => n && n.isNote && n.isNote());
+	},
+
+	// IOUtils et PathUtils : globaux dans Zotero ; à défaut, ceux de la fenêtre.
+	_io() {
+		let win = Zotero.getMainWindow && Zotero.getMainWindow();
+		return {
+			IO: typeof IOUtils !== "undefined" ? IOUtils : win.IOUtils,
+			Path: typeof PathUtils !== "undefined" ? PathUtils : win.PathUtils
+		};
+	},
+
+	_backupDir() {
+		return this._io().Path.join(Zotero.DataDirectory.dir, "annota", "sauvegardes-notes");
+	},
+
+	// Montre ce qui changera, demande l'accord, garde les notes d'origine,
+	// puis écrit.
+	async reduce(window, notes) {
+		let plan = await this.plan(notes);
+		let ps = Services.prompt;
+		if (!plan.length) {
+			ps.alert(window, "Annota", this.t("reduce.none"));
+			return;
+		}
+		let hl = plan.reduce((n, p) => n + p.count, 0);
+		let ex = plan[0].examples[0];
+		let cut = s => s.length > 220 ? s.slice(0, 217) + "…" : s;
+		let msg = this.t("reduce.confirm", { notes: plan.length, highlights: hl })
+			+ "\n\n" + this.t("reduce.before") + "\n" + cut(ex.before)
+			+ "\n\n" + this.t("reduce.after") + "\n" + cut(ex.after)
+			+ "\n\n" + this.t("reduce.backup");
+		if (!ps.confirm(window, "Annota", msg)) return;
+
+		let { IO, Path } = this._io();
+		let dir = this._backupDir();
+		await IO.makeDirectory(dir, { createAncestors: true, ignoreExisting: true });
+		let stamp = new Date().toISOString().replace(/[:.]/g, "-");
+		let file = Path.join(dir, "reduction-" + stamp + ".json");
+		await IO.writeUTF8(file, JSON.stringify({
+			date: new Date().toISOString(),
+			notes: plan.map(p => ({ libraryID: p.note.libraryID, key: p.note.key, before: p.before, after: p.html }))
+		}));
+
+		let done = 0;
+		for (let p of plan) {
+			try {
+				p.note.setNote(p.html);
+				await p.note.saveTx();
+				done++;
+			}
+			catch (e) {
+				log("réduction de la note " + p.note.key + " : " + e);
+			}
+		}
+		toast("Annota", this.t("reduce.done", { notes: done, highlights: hl }));
+	},
+
+	// Rétablit les notes de la dernière réduction, sauf celles modifiées depuis.
+	async undoLast(window) {
+		let ps = Services.prompt;
+		let { IO } = this._io();
+		let dir = this._backupDir();
+		let files = [];
+		try { files = (await IO.getChildren(dir)).filter(f => /reduction-.*\.json$/.test(f)).sort(); }
+		catch (e) { files = []; }
+		if (!files.length) {
+			ps.alert(window, "Annota", this.t("reduce.noundo"));
+			return;
+		}
+		let file = files[files.length - 1];
+		let data = JSON.parse(await IO.readUTF8(file));
+		if (!ps.confirm(window, "Annota", this.t("reduce.undoconfirm", { notes: data.notes.length, date: data.date }))) return;
+		let restored = 0, skipped = 0;
+		for (let n of data.notes) {
+			let note = await Zotero.Items.getByLibraryAndKeyAsync(n.libraryID, n.key);
+			if (!note || note.getNote() !== n.after) { skipped++; continue; }
+			note.setNote(n.before);
+			await note.saveTx();
+			restored++;
+		}
+		await IO.move(file, file.replace(/\.json$/, ".annulee.json"));
+		ps.alert(window, "Annota", this.t("reduce.undone", { restored, skipped }));
 	}
 };
