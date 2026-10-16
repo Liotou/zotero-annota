@@ -48,6 +48,7 @@ and references, and a click takes you there. See
 - [🖱️ Running a prompt on one annotation](#-running-a-prompt-on-one-annotation)
 - [⏳ Generating comments after the fact](#-generating-comments-after-the-fact)
 - [💬 Chat with your documents](#-chat-with-your-documents)
+- [🔗 From a note's citation back to the highlight](#-from-a-notes-citation-back-to-the-highlight)
 - [🔧 How it works](#-how-it-works)
 - [🔒 Security](#-security)
 - [🧑‍💻 Development](#-development)
@@ -196,6 +197,31 @@ Claude CLI ignores it.
      them up in the article's reference list extracted from the PDF text.
 
   If neither resolves, nothing is sent and the rest works exactly as before.
+
+  **EPUB books: footnotes.** Many books cite their sources in footnotes: the
+  passage only carries a superscript number (`…en tout cas bref⁹.`) linked to
+  the note, which names the author, the work, the year and the page. On an
+  EPUB, Annota opens the book file itself, finds the highlighted passage in its
+  chapter, follows every footnote link inside it (or glued right after it, if
+  your selection stopped on the word or the full stop) and sends each note as
+  `[note 9] …` in `{{references}}`. Index entries and page cross-references
+  are recognised and left out. A note reading *Ibid.*, *Id.* or *op. cit.* is
+  sent together with the earlier note that names the source. Many books mix
+  references and remarks in their notes: a note that cites no work (no year,
+  no author in bibliographic form, e.g. *"I come back to this later, cf.
+  infra"*, a translator's note) is not sent at all. And should the model still
+  answer with the book you are reading as the source (its own author and
+  year), that citation is removed from the field. No reader tab is
+  needed, so it also works from the library's right-click menu.
+
+  To have the reference field filled from footnotes, tell your prompt that a
+  number glued to a word is a citation, e.g.:
+
+  > Third form: a footnote call, a number glued to a word or a full stop
+  > ("bref9.") that calls the note given as "[note 9]" in the works cited.
+  > Take the author and the year from that note; its page ("p. 164") is the
+  > cited page. If the note says *Ibid.* or *op. cit.*, use the earlier note
+  > given right after it. Ignore a note that cites no work.
 
 ### 🎨 Prompt
 Above the prompt box is a row of **color swatches** — the same colors you use to
@@ -442,6 +468,30 @@ abandoned). Retries follow the setting of the ⚙️ General tab.
 > What leaves your computer depends on the provider: with an API, the text of
 > the document and your annotations are sent to it; with Ollama or Apple
 > Intelligence, nothing leaves the machine.
+
+## 🔗 From a note's citation back to the highlight
+
+Dragging a highlight into a note can give the bare citation, e.g.
+`(Valkokari, 2015, p. 17)`, if you set Zotero's note template to the citation
+alone: **Settings → Advanced → Config Editor**,
+`extensions.zotero.annotations.noteTemplates.highlight` = `<p>{{citation}}</p>`.
+
+On its own, Zotero keeps only the source and the page in that citation:
+**Go to Page** opens the page, not the passage, and nothing at all for an EPUB
+highlight without a page number. Annota fills the gap:
+
+- **The highlight's key goes into the citation** when you drop it
+  (`annotationKey` and `annotationURI` in the citation data). The visible text
+  does not change.
+- **Go to Page opens the highlight itself**: selected and framed as if you had
+  clicked it, with the annotations sidebar open on it.
+- **An Open annotation button** joins the citation's menu, also where Zotero
+  shows no Go to Page (EPUB without page numbers).
+
+Citations dropped before this version carry no key: Annota then opens the
+source's highlight on that page if it is the only one, and otherwise leaves
+Zotero's behaviour unchanged. In Obsidian, **Ariane** uses the key to point the
+citation at the matching annotation note (`zotflow-anno-key`).
 
 ## 🔤 Spelling and grammar (macOS)
 

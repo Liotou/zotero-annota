@@ -79,6 +79,9 @@ pref("extensions.zotero.annota.chatCliEffort", "");
 pref("extensions.zotero.annota.chatMaxChars", 0);
 pref("extensions.zotero.annota.chatIncludeAnnotations", true);
 pref("extensions.zotero.annota.chatIncludeNotes", true);
+// La discussion peut proposer de modifier, compléter ou créer des notes ;
+// rien n'est écrit sans un clic sur « Appliquer ».
+pref("extensions.zotero.annota.chatEditNotes", true);
 // Portée « bibliothèque » : nombre d'items transmis au modèle.
 pref("extensions.zotero.annota.chatLibraryItems", 8);
 // Consignes ajoutées à celles d'Annota (ton, langue, format…).
