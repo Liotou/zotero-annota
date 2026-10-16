@@ -179,6 +179,7 @@ var AnnotaCardFields = {
 					if (native) native.style.removeProperty("display");
 					form.remove();
 				}
+				for (let hook of doc.querySelectorAll(".annota-card-hook")) hook.remove();
 			}
 			catch (e) {}
 		}
@@ -188,20 +189,30 @@ var AnnotaCardFields = {
 		if (getPref("cardFields", true) === false) return;
 		let annotation = params && params.annotation;
 		if (!annotation || !reader || !doc || !append) return;
-		if (!["highlight", "underline"].includes(annotation.type)) return;
+		if (!["highlight", "underline", "image"].includes(annotation.type)) return;
 		// Le document de l'évènement arrive sans vue Xray (wrappedJSObject) :
 		// la page ne lirait pas les objets transmis par le plugin (options
 		// de MutationObserver.observe, notamment). On reprend la vue Xray.
 		try { doc = Components.utils.unwaiveXrays(doc); }
 		catch (e) { /* déjà une vue Xray */ }
-		// Marqueur invisible : il situe la carte dans le document.
+		// Élément accroché à l'en-tête : il situe la carte dans le document et
+		// porte le bouton « Compléter avec l'IA » (masqué si la couleur
+		// n'appelle pas le modèle).
+		this.injectStyle(doc);
 		let mark = doc.createElement("span");
 		mark.className = "annota-card-hook";
 		mark.style.display = "none";
+		mark.appendChild(this.aiButton(doc));
 		append(mark);
 		let card = mark.closest(".preview");
 		if (!card) return;
+		// En tête des sections ajoutées par les plugins : avant le bouton de
+		// traduction, juste après l'auteur.
+		let section = mark.parentElement;
+		let host = section && section.parentElement;
+		if (host && host.firstChild !== section) host.insertBefore(section, host.firstChild);
 		card._annotaCtx = { reader, annotation };
+		card._annotaHook = mark;
 		if (!card._annotaObserver) {
 			let obs = new doc.defaultView.MutationObserver(() => {
 				if (card._annotaBusy) return;
@@ -220,10 +231,18 @@ var AnnotaCardFields = {
 		let doc = card.ownerDocument;
 		let form = card.querySelector(":scope > .annota-card-form");
 		let native = card.querySelector(":scope > .comment");
-		let cfg = this.entryFor(annotation.color);
+		let cfg = this.entryFor(Annota.colorKey(annotation.color, annotation.type));
 		let att = Zotero.Items.get(reader.itemID);
 		if (!this._store) await this.load();
 		let resolved = cfg && att ? this.resolve(cfg.entry, cfg.schema, att.libraryID, annotation) : null;
+
+		// Bouton de l'en-tête : visible même carte repliée, dès que la couleur
+		// a des champs que le modèle peut remplir.
+		let hook = card._annotaHook;
+		if (hook) {
+			let canFill = !!(cfg && resolved && !annotation.readOnly && Annota.entryUsesProvider(cfg.entry));
+			hook.style.display = canFill ? "inline-flex" : "none";
+		}
 
 		// Zotero n'affiche le commentaire que pour une carte sélectionnée ou
 		// commentée : sans lui, pas de formulaire non plus.
@@ -274,11 +293,14 @@ var AnnotaCardFields = {
 		+ ".annota-card-form .annota-card-foot{display:flex;align-items:center;justify-content:space-between;"
 		+ "gap:6px;min-height:16px;}"
 		+ ".annota-card-form .annota-card-status{font-size:10.5px;opacity:.55;}"
-		+ ".annota-card-form .annota-card-fill{appearance:none;margin:0;padding:1px 8px;font:inherit;"
-		+ "font-size:11px;color:inherit;border:1px solid rgba(128,128,128,.4);border-radius:4px;"
-		+ "background:transparent;cursor:pointer;}"
-		+ ".annota-card-form .annota-card-fill:hover{background:rgba(128,128,128,.12);}"
-		+ ".annota-card-form .annota-card-fill[disabled]{opacity:.5;cursor:default;}",
+		+ ".annota-card-hook{align-items:center;}"
+		+ ".annota-card-ai-btn{appearance:none;display:inline-flex;align-items:center;justify-content:center;"
+		+ "width:22px;height:22px;margin:0;padding:0;border:0;border-radius:5px;background:transparent;"
+		+ "color:inherit;opacity:.7;cursor:pointer;}"
+		+ ".annota-card-ai-btn:hover{opacity:1;background:rgba(128,128,128,.18);}"
+		+ ".annota-card-ai-btn[disabled]{cursor:default;}"
+		+ ".annota-card-ai-btn.annota-busy svg{animation:annota-ai-pulse 1s ease-in-out infinite;}"
+		+ "@keyframes annota-ai-pulse{0%,100%{opacity:.35;}50%{opacity:1;}}",
 
 	injectStyle(doc) {
 		Annota._ensureFormStyles(doc);
@@ -375,21 +397,46 @@ var AnnotaCardFields = {
 		status.className = "annota-card-status";
 		foot.appendChild(status);
 		form._status = status;
-		if (String(cfg.entry.prompt || "").trim()) {
-			let fill = doc.createElement("button");
-			fill.type = "button";
-			fill.className = "annota-card-fill";
-			fill.textContent = Annota.t("card.fill");
-			fill.title = Annota.t("card.fill.title");
-			fill.addEventListener("click", (e) => {
-				e.preventDefault();
-				e.stopPropagation();
-				this.fillWithAI(card, form, fill).catch(err => log("champs de carte : " + err));
-			});
-			foot.appendChild(fill);
-		}
 		form.appendChild(foot);
 		return form;
+	},
+
+	// Petit bouton à icône de l'en-tête de la carte, à côté de « … ».
+	aiButton(doc) {
+		let b = doc.createElement("button");
+		b.type = "button";
+		b.className = "annota-card-ai-btn";
+		b.title = Annota.t("card.fill") + " · " + Annota.t("card.fill.title");
+		b.setAttribute("aria-label", Annota.t("card.fill"));
+		let NS = "http://www.w3.org/2000/svg";
+		let svg = doc.createElementNS(NS, "svg");
+		svg.setAttribute("width", "16");
+		svg.setAttribute("height", "16");
+		svg.setAttribute("viewBox", "0 0 16 16");
+		svg.setAttribute("fill", "none");
+		// Deux étincelles : la grande à quatre branches, la petite en haut.
+		for (let d of ["M6.5 2.5 L7.6 6.4 L11.5 7.5 L7.6 8.6 L6.5 12.5 L5.4 8.6 L1.5 7.5 L5.4 6.4 Z",
+			"M12.5 1.5 L13 3 L14.5 3.5 L13 4 L12.5 5.5 L12 4 L10.5 3.5 L12 3 Z",
+			"M12 10 L12.4 11.1 L13.5 11.5 L12.4 11.9 L12 13 L11.6 11.9 L10.5 11.5 L11.6 11.1 Z"]) {
+			let p = doc.createElementNS(NS, "path");
+			p.setAttribute("d", d);
+			p.setAttribute("fill", "currentColor");
+			svg.appendChild(p);
+		}
+		b.appendChild(svg);
+		// L'en-tête sélectionne la carte et se glisse : le bouton garde ses
+		// clics pour lui.
+		for (let type of ["mousedown", "pointerdown", "dragstart"]) {
+			b.addEventListener(type, e => e.stopPropagation());
+		}
+		b.addEventListener("click", (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			let card = b.closest(".preview");
+			if (!card || b.disabled) return;
+			this.fillWithAI(card, b).catch(err => log("champs de carte : " + err));
+		});
+		return b;
 	},
 
 	grow(el) {
@@ -458,7 +505,7 @@ var AnnotaCardFields = {
 
 	// Commentaire recomposé selon la mise en page de la couleur.
 	compose(item, form, values) {
-		let entry = Annota.getColorEntry(item.annotationColor);
+		let entry = Annota.getColorEntry(Annota.keyForItem(item));
 		let ctx = Annota.getContext(item);
 		ctx.references = form._annotaRefs || "";
 		let vars = Annota.buildVars({ text: (item.annotationText || "").trim(), ctx,
@@ -485,7 +532,7 @@ var AnnotaCardFields = {
 
 	// Le modèle remplit les champs restés vides, comme à la création ; ce qui
 	// est tapé n'est jamais réécrit.
-	async fillWithAI(card, form, button) {
+	async fillWithAI(card, button) {
 		let notReady = Annota.providerReadyError();
 		if (notReady) {
 			toast("Annota", notReady, "error");
@@ -495,16 +542,31 @@ var AnnotaCardFields = {
 			card.ownerDocument.defaultView.clearTimeout(form._timer);
 			form._timer = null;
 		}
+		// Carte repliée : pas de formulaire, on part des valeurs connues.
+		let form = card.querySelector(":scope > .annota-card-form");
+		let setStatus = (msg) => { if (form && form._status) form._status.textContent = msg; };
+		if (form && form._timer) {
+			card.ownerDocument.defaultView.clearTimeout(form._timer);
+			form._timer = null;
+		}
 		let item = await this.item(card);
 		if (!item) return;
+		let cfg = this.entryFor(Annota.keyForItem(item));
+		if (!cfg) return;
+		let known = form ? null
+			: this.resolve(cfg.entry, cfg.schema, item.libraryID, card._annotaCtx.annotation);
+		if (!form && !known) return;
 		button.disabled = true;
-		form._status.textContent = Annota.t("card.filling");
+		button.classList.add("annota-busy");
+		setStatus(Annota.t("card.filling"));
 		try {
-			let text = (item.annotationText || "").trim();
-			let values = this.read(form);
+			// Zone encadrée : le texte qu'elle contient tient lieu de passage.
+			let text = item.annotationType === "image"
+				? await Annota.areaText(item) : (item.annotationText || "").trim();
+			let values = form ? this.read(form) : known.values;
 			let built = {};
 			let comment = await Annota.buildComment({
-				text, ctx: Annota.getContext(item), color: item.annotationColor,
+				text, ctx: Annota.getContext(item), color: Annota.keyForItem(item),
 				comment: "", fields: values,
 				getRefs: () => Annota.getReferences(item, text), out: built
 			});
@@ -513,18 +575,22 @@ var AnnotaCardFields = {
 			Annota.setFailedTag(item, false);
 			await item.saveTx();
 			let filled = built.values || values;
-			form._annotaRefs = built.refs || form._annotaRefs || "";
-			form._dirty = false;
-			this.fill(form, { values: filled });
-			this.remember(item, filled, form._annotaRefs, comment);
-			form._status.textContent = Annota.t("card.saved");
+			let refs = built.refs || (form && form._annotaRefs) || (known && known.references) || "";
+			if (form) {
+				form._annotaRefs = refs;
+				form._dirty = false;
+				this.fill(form, { values: filled });
+			}
+			this.remember(item, filled, refs, comment);
+			setStatus(Annota.t("card.saved"));
 		}
 		catch (e) {
-			form._status.textContent = Annota.t("card.error");
+			setStatus(Annota.t("card.error"));
 			toast("Annota", Annota.t("gen.failed", { msg: e.message || e }), "error");
 		}
 		finally {
 			button.disabled = false;
+			button.classList.remove("annota-busy");
 		}
 	}
 };

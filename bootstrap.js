@@ -115,6 +115,26 @@ Annota = {
 		}
 	},
 
+	// Les zones encadrées (images, tableaux, parties de page) ont leurs propres
+	// réglages par couleur, rangés dans le même JSON sous « image:#hex ».
+	// Toute fonction qui reçoit une « couleur » accepte aussi cette clé.
+	colorKey(color, type) {
+		let hex = String(color || "").toLowerCase();
+		return type === "image" ? "image:" + hex : hex;
+	},
+
+	isImageKey(color) {
+		return String(color || "").startsWith("image:");
+	},
+
+	keyForItem(item) {
+		return this.colorKey(item && item.annotationColor, item && item.annotationType);
+	},
+
+	hasImageEntries() {
+		return Object.keys(this.getColorPrompts()).some(k => this.isImageKey(k) && this.getColorEntry(k));
+	},
+
 	// Réglage d'une couleur, normalisé : { prompt, trigger, template } ou null.
 	// Rétrocompat : une valeur chaîne = { prompt, trigger: "auto", template: "" }.
 	// trigger  "auto"   = génère à la création du surlignage
@@ -580,6 +600,7 @@ Annota = {
 	targetTypes() {
 		let types = ["highlight"];
 		if (getPref("alsoUnderline", false)) types.push("underline");
+		if (this.hasImageEntries()) types.push("image");
 		return types;
 	},
 
@@ -601,13 +622,17 @@ Annota = {
 		// Bibliothèque en lecture seule ? on ignore.
 		if (item.library && item.library.editable === false) return;
 
-		let text = (item.annotationText || "").trim();
-		if (!text) return;
+		// Zone encadrée : pas de texte sélectionné, on lit celui que la zone
+		// contient (PDF ouvert dans le lecteur).
+		let isImage = item.annotationType === "image";
+		let key = this.keyForItem(item);
+		let text = isImage ? "" : (item.annotationText || "").trim();
+		if (!text && !isImage) return;
 
 		// Mode 1 (automatique) : ne se déclenche que si la couleur a un prompt
 		// ET que ce prompt est réglé sur « auto ». Les couleurs « manuel » ne
 		// réagissent qu'au menu contextuel. Couleur sans prompt = ignorée.
-		let entry = this.getColorEntry(item.annotationColor);
+		let entry = this.getColorEntry(key);
 		if (!entry) {
 			log("annotation " + id + " ignorée : couleur " + item.annotationColor
 				+ " sans prompt, gabarit ni champs");
@@ -615,12 +640,12 @@ Annota = {
 		}
 		// Sert de couleur par défaut au prochain formulaire de sélection : on
 		// surligne rarement une seule fois dans la même couleur.
-		this._lastColor = item.annotationColor;
+		if (!isImage) this._lastColor = item.annotationColor;
 
 		// Un formulaire rempli dans le popup de sélection VAUT demande explicite :
 		// on exécute même sur une couleur réglée sur « à la demande », sinon la
 		// saisie serait silencieusement perdue à la validation.
-		let pending = this.peekPendingFields(text);
+		let pending = isImage ? null : this.peekPendingFields(text);
 		let filled = this._hasFilledValues(pending);
 		if (entry.trigger !== "auto" && !filled) {
 			log("annotation " + id + " ignorée : couleur en mode « à la demande »"
@@ -639,6 +664,13 @@ Annota = {
 		// annotation (willCallProvider), pas sur la couleur en général, car un
 		// formulaire entièrement rempli ne laisse rien à demander.
 		let callsProvider = this.willCallProvider(entry, pending);
+		if (isImage && callsProvider) {
+			text = await this.areaText(item);
+			if (!text) {
+				log("zone " + id + " : aucun texte lisible, champs laissés à la saisie");
+				return;
+			}
+		}
 		if (callsProvider) {
 			let notReady = this.providerReadyError();
 			if (notReady) {
@@ -659,13 +691,13 @@ Annota = {
 			let tBuild = Date.now();
 			let ctx = this.getContext(item);
 			// Valeurs saisies dans le popup de sélection juste avant validation.
-			let fields = this.takePendingFields(text);
+			let fields = isImage ? {} : this.takePendingFields(text);
 			// Résolution des références différée : buildComment ne l'appelle que
 			// si le commentaire ou le modèle s'en sert. Elle ouvre le PDF et en
 			// parcourt les liens, ce qui se paie en secondes.
 			let built = {};
 			let comment = await this.buildComment({
-				text, ctx, color: item.annotationColor, comment: existing, fields,
+				text, ctx, color: key, comment: existing, fields,
 				getRefs: () => this.getReferences(item, text), out: built
 			});
 			if (comment === null) return;
@@ -1026,6 +1058,14 @@ Annota = {
 		}
 	},
 
+	// Objet de pdf.js sans vue Xray : celle-ci masque ses méthodes JS
+	// (getPage, getTextContent…) au code du plugin. Chaque résultat attendu
+	// d'une promesse de pdf.js repasse par ici.
+	_waive(o) {
+		try { return (o && o.wrappedJSObject) || o; }
+		catch (e) { return o; }
+	},
+
 	// Document pdf.js du lecteur (traverse l'iframe du visualiseur).
 	getPDFDocument(reader) {
 		try {
@@ -1035,7 +1075,7 @@ Annota = {
 			if (!win) return null;
 			let app = win.PDFViewerApplication
 				|| (win.wrappedJSObject && win.wrappedJSObject.PDFViewerApplication);
-			return (app && app.pdfDocument) || null;
+			return (app && this._waive(app.pdfDocument)) || null;
 		}
 		catch (e) {
 			log("getPDFDocument: " + e);
@@ -1056,7 +1096,7 @@ Annota = {
 	async _resolveDestination(pdfDoc, dest) {
 		try {
 			let d = dest;
-			if (typeof d === "string") d = await pdfDoc.getDestination(d);
+			if (typeof d === "string") d = this._waive(await pdfDoc.getDestination(d));
 			if (!Array.isArray(d) || !d.length) return null;
 			let pageIndex = await pdfDoc.getPageIndex(d[0]);
 			// [ref, {name:'XYZ'}, x, y, zoom] — y absent pour /Fit.
@@ -1072,8 +1112,8 @@ Annota = {
 	// Texte de la page à partir de la position de destination (vers le bas).
 	async _textAtDestination(pdfDoc, pageIndex, y, maxChars = 600) {
 		try {
-			let page = await pdfDoc.getPage(pageIndex + 1);
-			let content = await page.getTextContent();
+			let page = this._waive(await pdfDoc.getPage(pageIndex + 1));
+			let content = this._waive(await page.getTextContent());
 			let items = (content && content.items) || [];
 			let rows = [];
 			for (let it of items) {
@@ -1106,6 +1146,51 @@ Annota = {
 		}
 	},
 
+	// Texte contenu dans une zone encadrée (image, tableau), ligne par ligne.
+	// Lu dans pdf.js : le PDF doit être ouvert dans le lecteur, ce qui est le
+	// cas quand on vient de tracer la zone. Sinon, ou pour une image sans
+	// texte, chaîne vide.
+	async areaText(item, maxChars = 6000) {
+		try {
+			let pos = JSON.parse(item.annotationPosition || "{}");
+			let rects = (pos.rects || []).filter(r => Array.isArray(r) && r.length >= 4);
+			if (!rects.length || typeof pos.pageIndex !== "number") return "";
+			let reader = this.findReaderFor(item.parentID);
+			let pdfDoc = this.getPDFDocument(reader);
+			if (!pdfDoc) return "";
+			let page = this._waive(await pdfDoc.getPage(pos.pageIndex + 1));
+			let content = this._waive(await page.getTextContent());
+			let items = (content && content.items) || [];
+			let inside = (x, y) => rects.some(r => x >= Math.min(r[0], r[2]) && x <= Math.max(r[0], r[2])
+				&& y >= Math.min(r[1], r[3]) && y <= Math.max(r[1], r[3]));
+			let parts = [];
+			for (let it of items) {
+				let str = it.str;
+				let t = it.transform;
+				if (!str || !str.trim() || !t || t.length < 6) continue;
+				let h = Math.abs(it.height || t[3] || 0) || 8;
+				let x = t[4] + (it.width || 0) / 2, y = t[5] + h / 2;
+				if (!inside(x, y)) continue;
+				parts.push({ x: t[4], y: t[5], h, str });
+			}
+			// Lignes : même ordonnée à une demi-hauteur près, de haut en bas.
+			parts.sort((a, b) => b.y - a.y || a.x - b.x);
+			let lines = [];
+			for (let p of parts) {
+				let line = lines[lines.length - 1];
+				if (line && Math.abs(line.y - p.y) <= Math.max(line.h, p.h) / 2) line.items.push(p);
+				else lines.push({ y: p.y, h: p.h, items: [p] });
+			}
+			let out = lines.map(l => l.items.sort((a, b) => a.x - b.x).map(p => p.str.trim()).join(" "))
+				.join("\n");
+			return out.length > maxChars ? out.slice(0, maxChars) + "…" : out;
+		}
+		catch (e) {
+			log("areaText: " + e);
+			return "";
+		}
+	},
+
 	// Suit les liens internes chevauchant le surlignage. Renvoie [] si le PDF
 	// n'est pas ouvert ou ne contient pas de liens exploitables.
 	async getLinkedReferences(item) {
@@ -1121,8 +1206,8 @@ Annota = {
 			if (typeof pos === "string") pos = JSON.parse(pos);
 			if (!pos || typeof pos.pageIndex !== "number" || !Array.isArray(pos.rects)) return [];
 
-			let page = await pdfDoc.getPage(pos.pageIndex + 1);
-			let annots = await page.getAnnotations();
+			let page = this._waive(await pdfDoc.getPage(pos.pageIndex + 1));
+			let annots = this._waive(await page.getAnnotations());
 			if (!annots || !annots.length) return [];
 
 			let max = parseInt(getPref("maxRefs", 8), 10) || 8;
@@ -1743,7 +1828,9 @@ Annota = {
 		if (comment && String(comment).trim()) {
 			parts.push("Existing note:\n\"\"\"\n" + comment + "\n\"\"\"");
 		}
-		parts.push("Highlighted passage:\n\"\"\"\n" + text + "\n\"\"\"");
+		parts.push((this.isImageKey(color)
+			? "Text found inside the selected area of the page (figure, table or excerpt; layout lost):"
+			: "Highlighted passage:") + "\n\"\"\"\n" + text + "\n\"\"\"");
 
 		return { system: this.substitute(tpl, vars), user: parts.join("\n\n") };
 	},
@@ -2613,7 +2700,7 @@ Annota = {
 		if (!ann || !ann.isAnnotation || !ann.isAnnotation()) return false;
 		if (!this.targetTypes().includes(ann.annotationType)) return false;
 		if (ann.library && ann.library.editable === false) return false;
-		if (!(ann.annotationText || "").trim()) return false;
+		if (ann.annotationType !== "image" && !(ann.annotationText || "").trim()) return false;
 		// « Rejouer les échecs » ne regarde que les annotations marquées, et les
 		// reprend quel que soit leur commentaire — c'est bien un remplacement.
 		if (failedOnly) return this.hasFailedTag(ann);
@@ -2659,7 +2746,7 @@ Annota = {
 		for (let a of eligible) {
 			// getColorEntry, pas getPromptForColor : une couleur peut être active
 			// avec un gabarit ou des champs seuls (commentaire déterministe).
-			if (this.getColorEntry(a.annotationColor)) targets.push(a);
+			if (this.getColorEntry(this.keyForItem(a))) targets.push(a);
 			else noPrompt++;
 		}
 
@@ -2685,7 +2772,8 @@ Annota = {
 		for (let i = 0; i < targets.length; i++) {
 			let ann = targets[i];
 			try {
-				let annText = (ann.annotationText || "").trim();
+				let annText = ann.annotationType === "image"
+					? await this.areaText(ann) : (ann.annotationText || "").trim();
 				let ctx = this.getContext(ann);
 				// Le menu contextuel traite toutes les couleurs ayant un prompt,
 				// « auto » ou « manuel ». Le commentaire existant (paraphrase
@@ -2694,7 +2782,7 @@ Annota = {
 				let comment = await this.buildComment({
 					text: annText,
 					ctx,
-					color: ann.annotationColor,
+					color: this.keyForItem(ann),
 					comment: (ann.annotationComment || "").trim(),
 					fields: opts.fields,
 					getRefs: () => this.getReferences(ann, annText),

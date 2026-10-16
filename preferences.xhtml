@@ -29,12 +29,19 @@
   <!-- ============================ COULEURS ============================= -->
   <html:div id="annota-pane-colors" class="annota-pane" role="tabpanel">
 
-    <html:p class="annota-lead" data-i18n="colors.lead">Each highlight color has its own configuration. A color left empty is ignored.</html:p>
+    <html:p class="annota-lead" data-i18n="colors.lead">Each color has its own configuration, separately for highlights and for areas. A color left empty is ignored.</html:p>
     <html:div id="annota-idle-warning" class="annota-warn" hidden="hidden"
               data-i18n="colors.idle">No color is configured: Annota is inactive.</html:div>
 
     <html:section class="annota-card">
-      <html:div id="annota-swatches" role="radiogroup" aria-label="Highlight color"/>
+      <html:div id="annota-kind" class="annota-seg" role="group" aria-label="Annotation type">
+        <html:button type="button" class="annota-seg-btn" data-kind="text" aria-pressed="true"
+                     data-i18n="colors.kind.text">Highlights</html:button>
+        <html:button type="button" class="annota-seg-btn" data-kind="image" aria-pressed="false"
+                     data-i18n="colors.kind.image">Areas (images, tables)</html:button>
+      </html:div>
+      <html:p id="annota-kind-help" class="annota-help" hidden="hidden" data-i18n="colors.kind.image.help">Frame drawn around a figure, a table or part of a page. The model receives the text found inside the area (PDF open in the reader); the fields are shown in the annotation card.</html:p>
+      <html:div id="annota-swatches" role="radiogroup" aria-label="Color"/>
       <html:div class="annota-form">
         <html:span class="annota-field-label" data-i18n="colors.color">Color</html:span>
         <html:span id="annota-target-name" class="annota-target"/>
@@ -51,7 +58,7 @@
     <html:section class="annota-card">
       <html:h3 class="annota-card-title"><html:span class="annota-num">1</html:span>
         <html:span data-i18n="fields.title">Fields</html:span></html:h3>
-      <html:p class="annota-help" data-i18n="fields.help">Entered when highlighting, in the order of the comment. An empty field is filled by the model when a prompt is set.</html:p>
+      <html:p class="annota-help" data-i18n="fields.help">Entered when highlighting or in the annotation card, in the order of the comment. An empty field is filled by the model when a prompt is set.</html:p>
       <html:div id="annota-fields-editor">
         <html:textarea id="annota-fields" rows="5" class="annota-input annota-code"
                        aria-label="Fields (text)"/>
@@ -77,7 +84,7 @@ resume     | Résumé     | ai       | Résume le passage en une phrase. | itali
       <html:div class="annota-choices" role="radiogroup">
         <html:label class="annota-check">
           <html:input type="radio" name="annota-trigger" value="auto"/>
-          <html:span data-i18n="trigger.auto">When the highlight is created</html:span>
+          <html:span data-i18n="trigger.auto">When the annotation is created</html:span>
         </html:label>
         <html:label class="annota-check">
           <html:input type="radio" name="annota-trigger" value="manual"/>

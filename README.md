@@ -301,13 +301,21 @@ line, adding fixed text, or switching to a single free-form answer with `{{ai}}`
 **The fields also live in the annotation sidebar.** In the reader's list of
 annotations, a card whose color has fields shows them in place of the single
 *Add comment* box: edit a field and the comment is rewritten at once, each
-field in its own format; **Fill with AI** has the model complete the empty
-ones, keeping what you typed. Annota remembers the values of every annotation
+field in its own format; the sparkle button in the card's header (next to
+*…*, before any other plugin's buttons) has the model complete the empty
+ones, keeping what you typed — even with the card collapsed. Annota remembers the values of every annotation
 it writes (`annota-fields.json` in the Zotero data directory), so an empty
 field keeps its place; older comments are read back line by line from the
 fields' formats. A comment written by hand, or one built with a custom
 layout Annota cannot read back, keeps Zotero's own comment box — nothing is
 rewritten that Annota did not understand. Turn it off in Settings → General.
+
+**Areas (images, tables) have their own colors.** Settings → Colors →
+*Areas (images, tables)* configures, color by color, the fields, trigger and
+prompt used for a frame drawn around a figure, a table or part of a page.
+The model receives the text found inside the area (the PDF must be open in
+the reader, which it is when you draw the frame); an image without text
+leaves its fields for you to fill in the card.
 
 **Give each color a name.** Optional, set in the settings next to the swatches:
 “Objection”, “Method”, “Quote”. It appears **above the fields** in the popup, so

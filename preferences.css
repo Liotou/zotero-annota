@@ -626,6 +626,25 @@ textarea.annota-fe-extra {
   line-height: 1.4;
 }
 
+.annota-fe-annot-area {
+  margin: 8px 9px 0;
+  padding: 14px 8px;
+  border: 1.5px dashed var(--annota-hl);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--annota-hl) 10%, transparent);
+  color: var(--fill-secondary, inherit);
+  font-size: 0.88em;
+  text-align: center;
+}
+
+#annota-kind {
+  margin-bottom: 10px;
+}
+
+#annota-kind-help {
+  margin: -4px 0 10px;
+}
+
 .annota-fe-annot-comment {
   padding: 7px 9px 9px;
   line-height: 1.45;

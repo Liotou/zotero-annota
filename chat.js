@@ -651,12 +651,12 @@ var AnnotaChat = {
 		try {
 			let n = Math.min(pdfDoc.numPages || 0, this.MAX_PAGES);
 			let labels = null;
-			try { labels = await pdfDoc.getPageLabels(); }
+			try { labels = Annota._waive(await pdfDoc.getPageLabels()); }
 			catch (e) { /* pas de numérotation imprimée */ }
 			let pages = [];
 			for (let i = 0; i < n; i++) {
-				let page = await pdfDoc.getPage(i + 1);
-				let content = await page.getTextContent();
+				let page = Annota._waive(await pdfDoc.getPage(i + 1));
+				let content = Annota._waive(await page.getTextContent());
 				let items = (content && content.items) || [];
 				let out = "";
 				for (let it of items) {
@@ -1151,7 +1151,7 @@ var AnnotaChat = {
 		let text = String(a.annotationText || "").replace(/\s+/g, " ").trim();
 		let comment = this.htmlToText(a.annotationComment || "").replace(/\s+/g, " ");
 		if (!text && !comment) return "";
-		let label = Annota.labelForColor(a.annotationColor);
+		let label = Annota.labelForColor(Annota.keyForItem(a));
 		return "- " + (a.annotationPageLabel ? "p. " + a.annotationPageLabel + " " : "")
 			+ (label ? "[" + label + "] " : "")
 			+ (text ? "“" + text + "”" : "")

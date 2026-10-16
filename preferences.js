@@ -2,7 +2,8 @@
 // Script du panneau de préférences.
 //
 // Chaque couleur de surlignage a son propre réglage, stocké dans le JSON
-// annota.colorPrompts sous la forme { "#hex": { prompt, trigger } }.
+// annota.colorPrompts sous la forme { "#hex": { prompt, trigger } }. Les
+// zones encadrées (images, tableaux) ont leurs entrées sous « image:#hex ».
 // (Rétrocompat : une ancienne valeur chaîne est lue comme trigger "auto".)
 // trigger "auto"   = génère à la création du surlignage.
 // trigger "manual" = uniquement via le menu contextuel.
@@ -547,7 +548,9 @@
 			if (c.label || c.name) head.appendChild(el("span", "annota-fe-annot-tag", c.label || c.name));
 			card.appendChild(head);
 
-			card.appendChild(el("div", "annota-fe-annot-text", T("fe.preview.passage")));
+			card.appendChild(c.kind === "image"
+				? el("div", "annota-fe-annot-area", T("fe.preview.area"))
+				: el("div", "annota-fe-annot-text", T("fe.preview.passage")));
 
 			let body = el("div", "annota-fe-annot-comment");
 			if (templateArea && templateArea.value.trim()) {
@@ -780,6 +783,8 @@
 		let lintBox = document.getElementById("annota-lint");
 		let labelInput = document.getElementById("annota-label");
 		let editorHost = document.getElementById("annota-fields-editor");
+		let kindBox = document.getElementById("annota-kind");
+		let kindHelp = document.getElementById("annota-kind-help");
 		if (!textarea || !swatchBox || triggerRadios.length < 2 || !templateArea || !fieldsArea
 				|| !labelInput) {
 			retry(setup, tries);
@@ -792,8 +797,11 @@
 			return;
 		}
 
-		// Couleur en cours d'édition.
+		// Couleur en cours d'édition, et type d'annotation réglé : passages
+		// surlignés (« text ») ou zones encadrées (« image »).
 		let current = palette[0].hex;
+		let kind = "text";
+		let keyOf = (hex) => kind === "image" ? "image:" + hex : hex;
 
 		let flashTimer = null;
 		function flashStatus(msg) {
@@ -820,12 +828,12 @@
 			// Actif si prompt OU gabarit OU champs.
 			if ((prompt && prompt.trim()) || (template && template.trim())
 					|| (fields && fields.trim())) {
-				map[current] = { prompt, template, fields,
+				map[keyOf(current)] = { prompt, template, fields,
 					label: String(labelInput.value || "").trim(),
 					trigger: currentTrigger() };
 			}
 			else {
-				delete map[current];
+				delete map[keyOf(current)];
 			}
 			writeColorMap(map);
 			flashStatus(T("p.saved"));
@@ -861,7 +869,7 @@
 
 		function load(hex) {
 			current = hex;
-			let entry = normalize(readColorMap()[hex]);
+			let entry = normalize(readColorMap()[keyOf(hex)]);
 			textarea.value = entry ? entry.prompt : "";
 			templateArea.value = entry ? (entry.template || "") : "";
 			fieldsArea.value = entry ? (entry.fields || "") : "";
@@ -879,12 +887,13 @@
 		// Reflète l'état des pastilles + avertissement si rien n'est configuré.
 		function refreshSwatches() {
 			let map = readColorMap();
-			let anyPrompt = false;
+			// L'avertissement porte sur les deux types : des zones seules
+			// suffisent à rendre Annota actif.
+			let anyPrompt = Object.keys(map).some(k => normalize(map[k]));
 			for (let el of swatchBox.children) {
 				let hex = el.getAttribute("data-color");
 				let name = el.getAttribute("data-name") || hex;
-				let entry = normalize(map[hex]);
-				if (entry) anyPrompt = true;
+				let entry = normalize(map[keyOf(hex)]);
 				el.setAttribute("data-selected", hex === current ? "true" : "false");
 				el.setAttribute("data-has-prompt", entry ? "true" : "false");
 				let tip = entry
@@ -940,7 +949,7 @@
 		if (clearBtn) {
 			let clearColor = () => {
 				let map = readColorMap();
-				delete map[current];
+				delete map[keyOf(current)];
 				writeColorMap(map);
 				textarea.value = "";
 				templateArea.value = "";
@@ -959,7 +968,7 @@
 			host: editorHost,
 			getColor: () => {
 				let c = palette.find(x => x.hex === current);
-				return { hex: current, name: c ? c.name : "",
+				return { hex: current, name: c ? c.name : "", kind,
 					label: String(labelInput.value || "").trim() };
 			},
 			textarea: fieldsArea,
@@ -967,6 +976,23 @@
 			onChange: scheduleSave,
 			onCommit: () => { lintNow(); saveNow(); }
 		}) : null;
+
+		// --- Type d'annotation ---
+		if (kindBox) {
+			for (let b of kindBox.querySelectorAll("[data-kind]")) {
+				b.addEventListener("click", () => {
+					let k = b.getAttribute("data-kind") === "image" ? "image" : "text";
+					if (k === kind) return;
+					saveNow();          // l'édition en cours appartient à l'ancien type
+					kind = k;
+					for (let x of kindBox.querySelectorAll("[data-kind]")) {
+						x.setAttribute("aria-pressed", x === b ? "true" : "false");
+					}
+					if (kindHelp) kindHelp.hidden = kind !== "image";
+					load(current);
+				});
+			}
+		}
 
 		load(current);
 		relocalizers.push(() => { lintNow(); refreshSwatches(); });
