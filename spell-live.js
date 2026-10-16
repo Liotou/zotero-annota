@@ -17,6 +17,9 @@ var AnnotaSpellLive = {
 	SCAN: 2000,            // recherche de nouveaux éditeurs, en ms
 	MAX: 50000,            // au-delà, le texte n'est pas vérifié en direct
 	BLOCKS: /^(P|DIV|LI|H[1-6]|BLOCKQUOTE|PRE|TD|TH|TR|UL|OL|TABLE|SECTION|ARTICLE|HEADER|FOOTER)$/,
+	// Citations, passages surlignés et formules d'une note : texte de la
+	// source, ni souligné ni corrigé (voir AnnotaSpell.OPAQUE).
+	OPAQUE: ".citation, .highlight, .underline, .math, [contenteditable=\"false\"]",
 
 	_docs: new Map(),      // document → { states, timers, handlers, popover, badge }
 	_timer: null,
@@ -203,10 +206,22 @@ var AnnotaSpellLive = {
 	snapshot(el) {
 		let doc = el.ownerDocument;
 		let walker = doc.createTreeWalker(el, 4 /* SHOW_TEXT */);
-		let text = "", segs = [], lastBlock = null, node;
+		let text = "", segs = [], gaps = [], lastBlock = null, lastOpaque = null, node;
 		while ((node = walker.nextNode())) {
 			let data = node.data;
 			if (!data) continue;
+			let opaque = node.parentElement && node.parentElement.closest(this.OPAQUE);
+			if (opaque && opaque !== el && el.contains(opaque)) {
+				// Une espace par élément, hors des segments : aucune plage
+				// ne peut la contenir.
+				if (opaque !== lastOpaque) {
+					gaps.push(text.length);
+					text += " ";
+				}
+				lastOpaque = opaque;
+				continue;
+			}
+			lastOpaque = null;
 			let block = node.parentElement;
 			while (block && block !== el && !this.BLOCKS.test(block.tagName)) block = block.parentElement;
 			if (lastBlock && block !== lastBlock && text && !text.endsWith("\n")) text += "\n";
@@ -214,11 +229,12 @@ var AnnotaSpellLive = {
 			segs.push({ node, start: text.length, end: text.length + data.length });
 			text += data;
 		}
-		return { text, segs };
+		return { text, segs, gaps };
 	},
 
 	toRange(doc, snap, a, b) {
 		if (b <= a || snap.text.slice(a, b).includes("\n")) return null;
+		if ((snap.gaps || []).some(g => g >= a && g < b)) return null;
 		let s = snap.segs.find(x => a >= x.start && a < x.end);
 		let e = snap.segs.find(x => b - 1 >= x.start && b - 1 < x.end);
 		if (!s || !e) return null;

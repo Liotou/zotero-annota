@@ -81,6 +81,23 @@ var AnnotaSpell = {
 
 	ENTITIES: { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " " },
 
+	// Éléments de Zotero dans une note (citation, passage surligné ou
+	// souligné, formule) : leur texte vient de la source, pas de l'auteur de
+	// la note. Ni vérifié ni corrigé ; remplacé par une espace virtuelle.
+	OPAQUE: /^<span\b(?=[^>]*\bclass="[^"]*\b(?:citation|highlight|underline|math)\b)[^>]*>/i,
+
+	// Indice qui suit le </span> fermant le span ouvert juste avant « from ».
+	spanEnd(raw, from) {
+		let re = /<span\b[^>]*>|<\/span>/gi;
+		re.lastIndex = from;
+		let depth = 1, m;
+		while ((m = re.exec(raw)) !== null) {
+			depth += m[0].toLowerCase() === "</span>" ? -1 : 1;
+			if (depth === 0) return m.index + m[0].length;
+		}
+		return raw.length;
+	},
+
 	available() {
 		try { return !!Zotero.isMac; } catch (e) { return false; }
 	},
@@ -88,8 +105,9 @@ var AnnotaSpell = {
 	// ---- Texte visible ↔ chaîne d'origine ----
 
 	// starts[i] / ends[i] : position, dans la chaîne d'origine, du caractère
-	// visible i. virt[i] : saut de ligne ajouté pour une balise de bloc (il
-	// n'existe pas dans l'original ; une correction ne peut pas le traverser).
+	// visible i. virt[i] : saut de ligne ajouté pour une balise de bloc, ou
+	// espace tenant lieu d'un élément opaque (il n'existe pas dans
+	// l'original ; une correction ne peut pas le traverser).
 	visible(raw) {
 		raw = String(raw || "");
 		let text = "", starts = [], ends = [], virt = [];
@@ -108,6 +126,12 @@ var AnnotaSpell = {
 				let j = raw.indexOf(">", i);
 				let m = j > i && raw.slice(i + 1, j).match(/^\/?\s*([a-z][a-z0-9]*)/i);
 				if (m) {
+					let opaque = m[1].toLowerCase() === "span" && raw.slice(i, j + 1).match(this.OPAQUE);
+					if (opaque) {
+						push(" ", i, i, true);
+						i = this.spanEnd(raw, j + 1);
+						continue;
+					}
 					if (this.BLOCK_TAGS.test(m[1]) && text && !text.endsWith("\n")) push("\n", i, i, true);
 					i = j + 1;
 					continue;
@@ -306,7 +330,11 @@ var AnnotaSpell = {
 		try {
 			for (let t of targets) t.vis = this.visible(t.raw);
 			let res = await this.check(targets.map(t => t.vis.text));
-			targets.forEach((t, k) => { t.issues = this.normalize(t.vis.text, res[k]); });
+			// Une faute qui chevauche un saut ou une citation n'est pas corrigeable.
+			targets.forEach((t, k) => {
+				t.issues = this.normalize(t.vis.text, res[k])
+					.filter(x => this.rawRange(t.vis, x.start, x.start + x.length));
+			});
 		}
 		catch (e) {
 			session.error = String(e.message || e);
