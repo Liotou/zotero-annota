@@ -101,3 +101,7 @@ pref("extensions.zotero.annota.spellLanguage", "auto");
 pref("extensions.zotero.annota.spellGrammar", true);
 // Vérification pendant la frappe : notes et commentaires d'annotation.
 pref("extensions.zotero.annota.spellLive", true);
+
+// Champs de la couleur dans la carte d'annotation de la barre latérale du
+// lecteur, à la place du champ « Ajouter un commentaire ».
+pref("extensions.zotero.annota.cardFields", true);

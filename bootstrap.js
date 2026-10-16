@@ -663,9 +663,10 @@ Annota = {
 			// Résolution des références différée : buildComment ne l'appelle que
 			// si le commentaire ou le modèle s'en sert. Elle ouvre le PDF et en
 			// parcourt les liens, ce qui se paie en secondes.
+			let built = {};
 			let comment = await this.buildComment({
 				text, ctx, color: item.annotationColor, comment: existing, fields,
-				getRefs: () => this.getReferences(item, text)
+				getRefs: () => this.getReferences(item, text), out: built
 			});
 			if (comment === null) return;
 			// Un commentaire vide signifie que rien n'a pu être produit (champs
@@ -687,6 +688,7 @@ Annota = {
 			let tSave = Date.now();
 			await fresh.saveTx();
 			tSave = Date.now() - tSave;
+			this.rememberFields(fresh, built, comment);
 
 			// Relevé complet : c'est la seule façon de distinguer ce qu'Annota
 			// consomme de ce qu'elle attend. « notif » = délai entre l'événement
@@ -1546,7 +1548,9 @@ Annota = {
 	// Produit le commentaire final d'une annotation : réponse de l'IA seule, ou
 	// gabarit mêlant cette réponse ({{ai}}) et des entrées déterministes.
 	// Renvoie null si la couleur n'a rien à produire.
-	async buildComment({ text, ctx, color, comment, fields, getRefs }) {
+	// out (facultatif) reçoit les valeurs finales des champs et les références
+	// résolues : la carte d'annotation du lecteur les réaffiche (card-fields.js).
+	async buildComment({ text, ctx, color, comment, fields, getRefs, out }) {
 		let entry = this.getColorEntry(color);
 		if (!entry) return null;
 
@@ -1638,6 +1642,11 @@ Annota = {
 		// Publié pour le relevé de handleItem : « refs » = ouverture du PDF et
 		// résolution des citations, « ia » = attente du modèle.
 		this._timings = { refs: tRefs, ai: tAI, build: Date.now() - t0 };
+
+		if (out) {
+			out.values = values;
+			out.refs = ctx.references || "";
+		}
 
 		let tpl = this.effectiveTemplate(entry);
 		if (!tpl) return ai;
@@ -2184,13 +2193,15 @@ Annota = {
 				// Le menu contextuel traite toutes les couleurs ayant un prompt,
 				// « auto » ou « manuel ». Le commentaire existant (paraphrase
 				// manuelle) est transmis via {{comment}}.
+				let built = {};
 				let comment = await this.buildComment({
 					text: annText,
 					ctx,
 					color: ann.annotationColor,
 					comment: (ann.annotationComment || "").trim(),
 					fields: opts.fields,
-					getRefs: () => this.getReferences(ann, annText)
+					getRefs: () => this.getReferences(ann, annText),
+					out: built
 				});
 				if (comment === null || !String(comment).trim()) {
 					failed++;
@@ -2202,6 +2213,7 @@ Annota = {
 					fresh.annotationComment = comment;
 					this.setFailedTag(fresh, false);
 					await fresh.saveTx();
+					this.rememberFields(fresh, built, comment);
 					ok++;
 				}
 			}
@@ -2728,6 +2740,15 @@ Annota = {
 		this._readerListener = null;
 	},
 
+	// Valeurs des champs d'une annotation écrite par Annota, pour les
+	// réafficher dans sa carte du lecteur (card-fields.js).
+	rememberFields(item, built, comment) {
+		if (!AnnotaCardFields || !built || !built.values) return;
+		if (!Object.keys(built.values).length) return;
+		try { AnnotaCardFields.remember(item, built.values, built.refs, comment); }
+		catch (e) { log("rememberFields: " + e); }
+	},
+
 	// ---- Orthographe et grammaire (spell.js) ----
 
 	async spellSelection(window) {
@@ -2931,6 +2952,9 @@ var AnnotaI18n = null;
 // frappe dans les notes et les commentaires (spell-live.js).
 var AnnotaSpell = null;
 var AnnotaSpellLive = null;
+
+// Champs de la couleur dans la carte d'annotation du lecteur (card-fields.js).
+var AnnotaCardFields = null;
 var annotaLangObserver = null;
 
 function install() {}
@@ -2955,6 +2979,14 @@ async function startup({ id, version, rootURI }) {
 	catch (e) {
 		log("orthographe indisponible : " + e);
 		AnnotaSpell = null;
+	}
+	try {
+		Services.scriptloader.loadSubScript(rootURI + "card-fields.js");
+		AnnotaCardFields.register();
+	}
+	catch (e) {
+		log("champs de carte indisponibles : " + e);
+		AnnotaCardFields = null;
 	}
 	try {
 		Services.scriptloader.loadSubScript(rootURI + "spell-live.js");
@@ -3014,6 +3046,10 @@ function onMainWindowUnload({ window }) {
 }
 
 function shutdown() {
+	if (AnnotaCardFields) {
+		try { AnnotaCardFields.unregister(); } catch (e) {}
+	}
+	AnnotaCardFields = null;
 	if (AnnotaSpellLive) {
 		try { AnnotaSpellLive.stop(); } catch (e) {}
 	}

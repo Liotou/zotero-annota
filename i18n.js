@@ -12,6 +12,12 @@
 
 var AnnotaI18n = {
 	en: {
+		"card.fill": "Fill with AI",
+		"card.fill.title": "The model fills the empty fields; what you typed is kept.",
+		"card.saved": "Saved",
+		"card.error": "Not saved (see the debug output)",
+		"card.filling": "Writing…",
+		"behav.cardfields": "Show the color's fields in the annotation sidebar, instead of the comment",
 		"spell.live": "Check while typing (notes and annotation comments)",
 		"sp.badge.title": "Spelling and grammar issues in this text: click to review them.",
 		"sp.badge": "{n} issue(s)",
@@ -373,6 +379,12 @@ var AnnotaI18n = {
 	},
 
 	fr: {
+		"card.fill": "Compléter avec l'IA",
+		"card.fill.title": "Le modèle remplit les champs vides ; ce qui est saisi est conservé.",
+		"card.saved": "Enregistré",
+		"card.error": "Non enregistré (voir la sortie de débogage)",
+		"card.filling": "Rédaction…",
+		"behav.cardfields": "Afficher les champs de la couleur dans la barre des annotations, à la place du commentaire",
 		"spell.live": "Vérifier pendant la frappe (notes et commentaires d'annotation)",
 		"sp.badge.title": "Fautes d'orthographe et de grammaire dans ce texte : cliquer pour les revoir.",
 		"sp.badge": "{n} faute(s)",
