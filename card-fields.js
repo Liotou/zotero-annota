@@ -189,6 +189,11 @@ var AnnotaCardFields = {
 		let annotation = params && params.annotation;
 		if (!annotation || !reader || !doc || !append) return;
 		if (!["highlight", "underline"].includes(annotation.type)) return;
+		// Le document de l'évènement arrive sans vue Xray (wrappedJSObject) :
+		// la page ne lirait pas les objets transmis par le plugin (options
+		// de MutationObserver.observe, notamment). On reprend la vue Xray.
+		try { doc = Components.utils.unwaiveXrays(doc); }
+		catch (e) { /* déjà une vue Xray */ }
 		// Marqueur invisible : il situe la carte dans le document.
 		let mark = doc.createElement("span");
 		mark.className = "annota-card-hook";
