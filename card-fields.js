@@ -538,10 +538,6 @@ var AnnotaCardFields = {
 			toast("Annota", notReady, "error");
 			return;
 		}
-		if (form._timer) {
-			card.ownerDocument.defaultView.clearTimeout(form._timer);
-			form._timer = null;
-		}
 		// Carte repliée : pas de formulaire, on part des valeurs connues.
 		let form = card.querySelector(":scope > .annota-card-form");
 		let setStatus = (msg) => { if (form && form._status) form._status.textContent = msg; };
