@@ -226,7 +226,10 @@ var AnnotaChat = {
 		if (rec.timer) { try { win.clearInterval(rec.timer); } catch (e) {} }
 		try { win.removeEventListener("keydown", rec.onKey); } catch (e) {}
 		try { if (rec.button) rec.button.remove(); } catch (e) {}
-		for (let p of Object.values(rec.panes)) { try { p.box.remove(); } catch (e) {} }
+		for (let p of Object.values(rec.panes)) {
+			try { if (p.inst && p.inst.copyPopup) p.inst.copyPopup.remove(); } catch (e) {}
+			try { p.box.remove(); } catch (e) {}
+		}
 		try {
 			let st = win.document.getElementById("annota-chat-style");
 			if (st) st.remove();
@@ -1648,6 +1651,10 @@ var AnnotaChat = {
 		let scroller = this.el(doc, "div", "annota-chat-scroll");
 		let thread = this.el(doc, "div", "annota-chat-thread");
 		scroller.appendChild(thread);
+		// Focalisable : un clic dans la discussion lui donne le focus. Sans
+		// cela, le focus restait au lecteur PDF et ⌘C (ou Édition > Copier)
+		// copiait la sélection du lecteur, vide, au lieu de celle d'ici.
+		scroller.setAttribute("tabindex", "-1");
 
 		// Zone de saisie : une carte, comme celle de Beaver.
 		let dock = this.el(doc, "div", "annota-chat-dock");
@@ -1707,6 +1714,20 @@ var AnnotaChat = {
 				e.stopPropagation();
 			});
 		}
+		// ⌘C sur du texte sélectionné dans la discussion : copié à coup sûr,
+		// texte et mise en forme, quel que soit le cheminement du raccourci.
+		root.addEventListener("keydown", (e) => {
+			let accel = Zotero.isMac ? e.metaKey : e.ctrlKey;
+			if (!accel || e.shiftKey || e.altKey || String(e.key).toLowerCase() !== "c") return;
+			if (e.target === input) return;
+			if (this.copySelection(inst)) e.preventDefault();
+		}, true);
+		// Clic droit sur une sélection : « Copier ».
+		scroller.addEventListener("contextmenu", (e) => {
+			if (!this.selectionIn(inst)) return;
+			e.preventDefault();
+			this.copyMenu(inst).openPopupAtScreen(e.screenX, e.screenY, true);
+		});
 		input.addEventListener("keydown", (e) => {
 			if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
 				e.preventDefault();
@@ -1727,6 +1748,52 @@ var AnnotaChat = {
 
 		this.fillModels(inst);
 		return inst;
+	},
+
+	// Texte sélectionné dans les messages de la discussion, ou "".
+	selectionIn(inst) {
+		try {
+			let sel = inst.win.getSelection();
+			if (!sel || sel.isCollapsed || !sel.rangeCount) return "";
+			let r = sel.getRangeAt(0);
+			if (!inst.thread.contains(r.commonAncestorContainer)) return "";
+			return sel.toString();
+		}
+		catch (e) {
+			return "";
+		}
+	},
+
+	// Copie la sélection : la commande native d'abord (texte et mise en
+	// forme), le texte seul à défaut.
+	copySelection(inst) {
+		let text = this.selectionIn(inst);
+		if (!text) return false;
+		try {
+			let ctrl = inst.doc.commandDispatcher.getControllerForCommand("cmd_copy");
+			if (ctrl && inst.doc.commandDispatcher.focusedWindow === inst.win) {
+				ctrl.doCommand("cmd_copy");
+				return true;
+			}
+		}
+		catch (e) { log("copie : " + e); }
+		try { Zotero.Utilities.Internal.copyTextToClipboard(text); }
+		catch (e) { log("copie : " + e); return false; }
+		return true;
+	},
+
+	copyMenu(inst) {
+		if (inst.copyPopup && inst.copyPopup.isConnected) return inst.copyPopup;
+		let doc = inst.doc;
+		let popup = doc.createXULElement("menupopup");
+		popup.id = "annota-chat-copy-menu-" + inst.location;
+		let item = doc.createXULElement("menuitem");
+		item.setAttribute("label", Annota.t("c.copy"));
+		item.addEventListener("command", () => this.copySelection(inst));
+		popup.appendChild(item);
+		(doc.getElementById("mainPopupSet") || doc.documentElement).appendChild(popup);
+		inst.copyPopup = popup;
+		return popup;
 	},
 
 	openSettings() {
@@ -2568,6 +2635,7 @@ var AnnotaChat = {
 .annota-icon-btn.annota-icon-sm svg { width: 14px; height: 14px; }
 
 .annota-chat-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.annota-chat-scroll:focus, .annota-chat-scroll:focus-visible { outline: none; }
 .annota-chat-thread { display: flex; flex-direction: column; gap: 14px; padding: 14px 14px 8px;
   box-sizing: border-box; user-select: text; -moz-user-select: text; }
 .annota-chat[data-empty="true"] .annota-chat-thread { min-height: 100%; justify-content: center; }
