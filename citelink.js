@@ -55,6 +55,8 @@ var AnnotaCiteLink = {
 		};
 
 		this._patched = { U, origSerialize, EI, origInit };
+		try { this.wrapQuickCopy(); }
+		catch (e) { log("citations : glisser hors de Zotero non intercepté : " + e); }
 		for (let inst of this.instances()) {
 			try { this.adopt(inst); }
 			catch (e) { log("citations : éditeur ouvert non intercepté : " + e); }
@@ -78,6 +80,119 @@ var AnnotaCiteLink = {
 			p.EI.prototype.init = p.origInit;
 		}
 		this._patched = null;
+		if (this._quickCopy) {
+			try { Zotero.QuickCopy.getContentFromItems = this._quickCopy; }
+			catch (e) { /* Zotero en cours d'arrêt */ }
+			this._quickCopy = null;
+		}
+	},
+
+	// ---- 5. Glisser ou copier un surlignage hors de Zotero ----
+	//
+	// Le lecteur traduit les surlignages glissés ou copiés en Markdown et en
+	// HTML, par une note temporaire (QuickCopy.annotationsToNote) qui passe
+	// par serializeAnnotations : ses citations portent donc la clé du
+	// surlignage. Les traducteurs « Note Markdown » et « Note HTML » n'en
+	// gardent rien et lient la citation à la référence (zotero://select/…).
+	// Avec le gabarit « {{citation}} » seul, plus rien ne désigne alors le
+	// surlignage. On réécrit donc, dans le texte produit, le lien de chaque
+	// citation vers son surlignage, dans la forme même de Zotero :
+	// zotero://open-pdf/…/items/PIÈCE?page=N&annotation=CLÉ. Le libellé ne
+	// change pas. Ariane, dans Obsidian, y lit la clé.
+
+	_quickCopy: null,
+
+	wrapQuickCopy() {
+		let QC = Zotero.QuickCopy;
+		if (!QC || typeof QC.getContentFromItems !== "function") {
+			throw new Error("QuickCopy.getContentFromItems introuvable");
+		}
+		let self = this;
+		let orig = QC.getContentFromItems;
+		QC.getContentFromItems = function (items, format, callback, modified) {
+			let links = null;
+			try { links = self.annotationLinksFor(items); }
+			catch (e) { log("citations : glisser : " + e); }
+			if (links && links.length && typeof callback === "function") {
+				let cb = callback;
+				callback = function (obj, worked) {
+					try {
+						if (worked && obj && typeof obj.string === "string") {
+							obj.string = self.rewriteLinks(obj.string, links);
+						}
+					}
+					catch (e) { log("citations : glisser : " + e); }
+					return cb.apply(this, arguments);
+				};
+			}
+			return orig.call(this, items, format, callback, modified);
+		};
+		this._quickCopy = orig;
+	},
+
+	// Citations à clé d'une note temporaire de surlignages, dans l'ordre :
+	// [{ itemKey, href }]. null s'il ne s'agit pas d'une telle note.
+	annotationLinksFor(items) {
+		if (!Array.isArray(items) || items.length !== 1) return null;
+		let note = items[0];
+		if (!note || !(note.isNote && note.isNote()) || note.id) return null;
+		let html = note.getNote();
+		if (!html || !html.includes("annotationKey")) return null;
+		let out = [], m;
+		let re = /<span\b(?=[^>]*\bclass="citation")[^>]*\bdata-citation="([^"]*)"/g;
+		while ((m = re.exec(html)) !== null) {
+			let ci = null;
+			try { ci = (JSON.parse(decodeURIComponent(m[1])).citationItems || [])[0]; }
+			catch (e) { ci = null; }
+			let uri = ci && ci.uris && ci.uris[0];
+			let itemKey = uri && (String(uri).match(/items\/([A-Z0-9]{8})$/) || [])[1];
+			let href = ci && ci.annotationKey ? this.annotationOpenURI(ci) : null;
+			out.push({ itemKey: itemKey || null, href });
+		}
+		return out.some(l => l.href) ? out : null;
+	},
+
+	// Lien d'ouverture d'un surlignage, construit comme le font les
+	// traducteurs de Zotero pour un passage cité.
+	annotationOpenURI(ci) {
+		let ann = null;
+		try {
+			let lk = ci.annotationURI ? Zotero.URI.getURIItemLibraryKey(String(ci.annotationURI)) : null;
+			if (lk) ann = Zotero.Items.getByLibraryAndKey(lk.libraryID, lk.key);
+		}
+		catch (e) { ann = null; }
+		if (!this.isAnnotation(ann) || !ann.parentItem) return null;
+		let att = ann.parentItem;
+		let lib = Zotero.Libraries.get(att.libraryID);
+		let path = lib && lib.libraryType === "group"
+			? "groups/" + Zotero.Groups.getGroupIDFromLibraryID(att.libraryID) : "library";
+		let pos = ann.annotationPosition;
+		try { if (typeof pos === "string") pos = JSON.parse(pos); }
+		catch (e) { pos = null; }
+		let href = "zotero://open-pdf/" + path + "/items/" + att.key;
+		if (pos && pos.type === "FragmentSelector") href += "?cfi=" + encodeURIComponent(pos.value);
+		else if (pos && pos.type === "CssSelector") href += "?sel=" + encodeURIComponent(pos.value);
+		else if (pos && typeof pos.pageIndex === "number") href += "?page=" + (pos.pageIndex + 1);
+		else href += "?";
+		return href + (href.endsWith("?") ? "" : "&") + "annotation=" + ann.key;
+	},
+
+	// Remplace, dans l'ordre, le lien zotero://select de chaque citation par
+	// celui de son surlignage. Un lien qui ne correspond pas à la citation
+	// attendue (autre référence) est laissé tel quel.
+	rewriteLinks(text, links) {
+		let i = 0;
+		let src = String(text);
+		return src.replace(/zotero:\/\/select\/(?:library|groups\/\d+)\/items\/([A-Z0-9]{8})/g, (m, key, at) => {
+			while (i < links.length && links[i].itemKey && links[i].itemKey !== key) i++;
+			let l = links[i++];
+			if (!l || !l.href) return m;
+			// Parenthèses encodées : un lien Markdown s'arrêterait à celle
+			// d'une position EPUB (epubcfi(…)). Dans un attribut HTML, le &
+			// s'écrit &amp;, comme Zotero le fait.
+			let href = l.href.replace(/\(/g, "%28").replace(/\)/g, "%29");
+			return /href="$/.test(src.slice(Math.max(0, at - 6), at)) ? href.replace(/&/g, "&amp;") : href;
+		});
 	},
 
 	instances() {
