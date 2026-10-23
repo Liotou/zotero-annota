@@ -228,6 +228,7 @@ var AnnotaChat = {
 		try { if (rec.button) rec.button.remove(); } catch (e) {}
 		for (let p of Object.values(rec.panes)) {
 			try { if (p.inst && p.inst.copyPopup) p.inst.copyPopup.remove(); } catch (e) {}
+			try { if (p.inst && p.inst.colPopup) p.inst.colPopup.remove(); } catch (e) {}
 			try { p.box.remove(); } catch (e) {}
 		}
 		try {
@@ -457,6 +458,7 @@ var AnnotaChat = {
 			id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
 			key, itemID: top ? top.id : null, itemKey: top ? top.key : "",
 			libraryID: ctx.libraryID, scope: ctx.item ? "document" : "library",
+			...this.collectionDefault(ctx.libraryID),
 			title: "", created: Date.now(), updated: Date.now(), messages: [],
 			busy: false, cancel: null, error: null, status: ""
 		};
@@ -553,6 +555,7 @@ var AnnotaChat = {
 			conversations: keep.map(c => ({
 				id: c.id, itemKey: c.itemKey || "", libraryID: c.libraryID, key: c.key,
 				scope: c.scope, title: c.title, created: c.created, updated: c.updated,
+				collections: c.collections || [], subcollections: c.subcollections !== false,
 				messages: c.messages
 			}))
 		};
@@ -1294,18 +1297,29 @@ var AnnotaChat = {
 		}
 	},
 
-	async buildLibraryContext(libraryID, terms, budget) {
+	async buildLibraryContext(libraryID, terms, budget, conv) {
 		libraryID = libraryID || Zotero.Libraries.userLibraryID;
-		let head = "LIBRARY SEARCH\nSearched the researcher's Zotero library for: "
+		let cols = conv ? this.chosenCollections(conv) : [];
+		let sub = !conv || conv.subcollections !== false;
+		let within = cols.length
+			? ", only within the collection(s): " + cols.map(c => c.name).join("; ")
+				+ (sub ? " (subcollections included)" : " (subcollections excluded)")
+			: "";
+		let head = "LIBRARY SEARCH\nSearched the researcher's Zotero library" + within + ", for: "
 			+ (terms.length ? terms.join(", ") : "(no usable keyword)");
 		if (!terms.length) {
 			return { text: head + "\nNothing searched: ask the researcher for keywords.", sources: [] };
 		}
 		let max = parseInt(getPref("chatLibraryItems", 8), 10);
 		if (isNaN(max) || max < 1) max = 8;
-		let hits = (await this.searchLibrary(libraryID, terms)).slice(0, Math.min(max, 30));
+		let hits = await this.searchLibrary(libraryID, terms);
+		if (cols.length) {
+			let allowed = this.itemsInCollections(cols, sub);
+			hits = hits.filter(h => allowed.has(h.item.id));
+		}
+		hits = hits.slice(0, Math.min(max, 30));
 		if (!hits.length) {
-			return { text: head + "\nNo matching item.", sources: [] };
+			return { text: head + "\nNo matching item" + (cols.length ? " in these collections." : "."), sources: [] };
 		}
 		let per = Math.floor((budget - head.length) / hits.length);
 		let folded = terms.map(t => this.fold(t));
@@ -1438,7 +1452,7 @@ var AnnotaChat = {
 
 			let ctx, extra = { scope: conv.scope };
 			if (conv.scope === "library") {
-				ctx = await this.buildLibraryContext(conv.libraryID, terms, Math.floor(budget * 0.8));
+				ctx = await this.buildLibraryContext(conv.libraryID, terms, Math.floor(budget * 0.8), conv);
 				extra.notes = ctx.notes;
 				extra.sources = ctx.sources;
 				extra.note = ctx.sources.length
@@ -1528,6 +1542,7 @@ var AnnotaChat = {
 		stop: ["#r4.5 4.5 7 7"],
 		doc: ["M4 1.75h5.25l2.75 2.75v9.75H4z", "M9.25 1.75V4.5H12"],
 		library: ["M3 2.5v11", "M6 2.5v11", "M8.75 3.1l3.25 10.4"],
+		folder: ["M2.5 4V12.5h11V5.5H7.5L6 4z"],
 		chat: ["M3 2.5h10a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 13 11.5H8.5L5 14v-2.5H3A1.5 1.5 0 0 1 1.5 10V4A1.5 1.5 0 0 1 3 2.5z"],
 		retry: ["M13 8a5 5 0 1 1-1.46-3.54", "M13 2.5v3h-3"],
 		check: ["M3.5 8.5l3 3 6-7"],
@@ -1668,8 +1683,14 @@ var AnnotaChat = {
 		libChip.appendChild(this.icon(doc, "library", 13));
 		let libLabel = this.el(doc, "span", "annota-chip-label", Annota.t("c.lib"));
 		libChip.appendChild(libLabel);
+		// Collections où chercher, dans la portée « bibliothèque ».
+		let colChip = this.button(doc, null, "annota-chip", () => this.openCollectionMenu(inst));
+		colChip.appendChild(this.icon(doc, "folder", 13));
+		let colLabel = this.el(doc, "span", "annota-chip-label", Annota.t("c.col.all"));
+		colChip.appendChild(colLabel);
 		chips.appendChild(docChip);
 		chips.appendChild(libChip);
+		chips.appendChild(colChip);
 
 		let input = this.el(doc, "textarea", "annota-composer-input");
 		input.setAttribute("rows", "1");
@@ -1699,7 +1720,7 @@ var AnnotaChat = {
 		box.appendChild(root);
 
 		let inst = { win, doc, box, root, location, thread, scroller, input, send, modelSel,
-			docChip, docLabel, libChip, libLabel, newBtn, saveBtn, histBtn, dock,
+			docChip, docLabel, libChip, libLabel, colChip, colLabel, newBtn, saveBtn, histBtn, dock,
 			key: null, ctx: null, conv: null, historyOpen: false, historyQuery: "" };
 
 		// Le lecteur et la fenêtre principale ont leurs raccourcis : la frappe
@@ -1819,6 +1840,148 @@ var AnnotaChat = {
 		inst.send.disabled = !busy && !inst.input.value.trim();
 	},
 
+	// ---- Collections où chercher ----
+	//
+	// La portée « bibliothèque » peut se limiter à des collections choisies,
+	// avec ou sans leurs sous-collections. Le choix suit la conversation ; le
+	// dernier fait sert aux nouvelles conversations de la même bibliothèque
+	// (préférence chatCollections : { libraryID: { keys, sub } }).
+
+	collectionPrefs() {
+		try { return JSON.parse(String(getPref("chatCollections", "") || "{}")) || {}; }
+		catch (e) { return {}; }
+	},
+
+	collectionDefault(libraryID) {
+		let d = this.collectionPrefs()[String(libraryID)] || {};
+		return { collections: Array.isArray(d.keys) ? d.keys.slice() : [], subcollections: d.sub !== false };
+	},
+
+	saveCollectionDefault(conv) {
+		let all = this.collectionPrefs();
+		all[String(conv.libraryID)] = { keys: conv.collections || [], sub: conv.subcollections !== false };
+		try { Zotero.Prefs.set("annota.chatCollections", JSON.stringify(all)); }
+		catch (e) { log("collections : " + e); }
+	},
+
+	// Collections choisies encore existantes : [{ key, name, collection }].
+	chosenCollections(conv) {
+		let out = [];
+		for (let key of conv.collections || []) {
+			let c = null;
+			try { c = Zotero.Collections.getByLibraryAndKey(conv.libraryID, key); }
+			catch (e) { c = null; }
+			if (c && !c.deleted) out.push({ key, name: c.name, collection: c });
+		}
+		return out;
+	},
+
+	collectionLabel(cols) {
+		if (!cols.length) return Annota.t("c.col.all");
+		let first = cols[0].name.length > 24 ? cols[0].name.slice(0, 22).trim() + "…" : cols[0].name;
+		return cols.length > 1 ? first + " +" + (cols.length - 1) : first;
+	},
+
+	// Identifiants des éléments des collections (et de leurs sous-collections).
+	itemsInCollections(cols, sub) {
+		let ids = new Set();
+		let walk = (c) => {
+			for (let id of c.getChildItems(true)) ids.add(id);
+			if (sub) for (let child of c.getChildCollections()) walk(child);
+		};
+		for (let { collection } of cols) {
+			try { walk(collection); }
+			catch (e) { log("collections : " + e); }
+		}
+		return ids;
+	},
+
+	// Arbre des collections : [{ collection, depth }], dans l'ordre de Zotero.
+	collectionTree(libraryID) {
+		let out = [];
+		let byName = (a, b) => Zotero.localeCompare(a.name, b.name);
+		let walk = (list, depth) => {
+			for (let c of list.slice().sort(byName)) {
+				if (c.deleted) continue;
+				out.push({ collection: c, depth });
+				walk(c.getChildCollections(), depth + 1);
+			}
+		};
+		try { walk(Zotero.Collections.getByLibrary(libraryID), 0); }
+		catch (e) { log("collections : " + e); }
+		return out;
+	},
+
+	openCollectionMenu(inst) {
+		let conv = this.conversationOf(inst);
+		if (!conv || conv.busy) return;
+		let doc = inst.doc;
+		if (inst.colPopup) { try { inst.colPopup.remove(); } catch (e) {} }
+		let popup = doc.createXULElement("menupopup");
+		popup.id = "annota-chat-collections-" + inst.location;
+		popup.setAttribute("class", "annota-col-menu");
+		let changed = () => {
+			this.saveCollectionDefault(conv);
+			if (conv.messages.length) this.scheduleSave();
+			this.updateChips(inst);
+		};
+		let all = doc.createXULElement("menuitem");
+		all.setAttribute("type", "checkbox");
+		all.setAttribute("label", Annota.t("c.col.all.menu"));
+		if (!(conv.collections || []).length) all.setAttribute("checked", "true");
+		all.addEventListener("command", () => {
+			conv.collections = [];
+			for (let mi of popup.querySelectorAll("menuitem[data-key]")) mi.removeAttribute("checked");
+			all.setAttribute("checked", "true");
+			changed();
+		});
+		all.setAttribute("closemenu", "none");
+		popup.appendChild(all);
+		popup.appendChild(doc.createXULElement("menuseparator"));
+
+		let tree = this.collectionTree(conv.libraryID);
+		if (!tree.length) {
+			let none = doc.createXULElement("menuitem");
+			none.setAttribute("label", Annota.t("c.col.none"));
+			none.setAttribute("disabled", "true");
+			popup.appendChild(none);
+		}
+		for (let { collection, depth } of tree) {
+			let mi = doc.createXULElement("menuitem");
+			mi.setAttribute("type", "checkbox");
+			mi.setAttribute("label", collection.name);
+			mi.setAttribute("data-key", collection.key);
+			mi.setAttribute("closemenu", "none");
+			mi.style.paddingInlineStart = (depth * 16) + "px";
+			if ((conv.collections || []).includes(collection.key)) mi.setAttribute("checked", "true");
+			mi.addEventListener("command", () => {
+				let keys = new Set(conv.collections || []);
+				if (keys.has(collection.key)) keys.delete(collection.key);
+				else keys.add(collection.key);
+				conv.collections = Array.from(keys);
+				if (keys.size) all.removeAttribute("checked");
+				else all.setAttribute("checked", "true");
+				changed();
+			});
+			popup.appendChild(mi);
+		}
+		popup.appendChild(doc.createXULElement("menuseparator"));
+		let sub = doc.createXULElement("menuitem");
+		sub.setAttribute("type", "checkbox");
+		sub.setAttribute("label", Annota.t("c.col.sub"));
+		sub.setAttribute("closemenu", "none");
+		if (conv.subcollections !== false) sub.setAttribute("checked", "true");
+		sub.addEventListener("command", () => {
+			conv.subcollections = sub.getAttribute("checked") === "true";
+			changed();
+		});
+		popup.appendChild(sub);
+
+		(doc.getElementById("mainPopupSet") || doc.documentElement).appendChild(popup);
+		inst.colPopup = popup;
+		popup.openPopup(inst.colChip, "before_start", 0, -2, false, false);
+	},
+
 	conversationOf(inst) {
 		return (inst && inst.conv) || null;
 	},
@@ -1901,6 +2064,14 @@ var AnnotaChat = {
 		inst.docChip.hidden = !conv.itemID;
 		inst.docChip.setAttribute("data-active", conv.scope === "document" ? "true" : "false");
 		inst.libChip.setAttribute("data-active", conv.scope === "library" ? "true" : "false");
+		inst.colChip.hidden = conv.scope !== "library";
+		let cols = this.chosenCollections(conv);
+		inst.colLabel.textContent = this.collectionLabel(cols);
+		inst.colChip.setAttribute("data-active", cols.length ? "true" : "false");
+		inst.colChip.setAttribute("title", cols.length
+			? Annota.t(conv.subcollections !== false ? "c.col.title.sub" : "c.col.title",
+				{ names: cols.map(c => c.name).join(", ") })
+			: Annota.t("c.col.title.all"));
 		inst.input.setAttribute("placeholder", Annota.t(conv.scope === "library" ? "c.ph.lib" : "c.ph.doc"));
 		inst.newBtn.disabled = (!conv.messages.length && !inst.historyOpen) || conv.busy;
 		inst.saveBtn.disabled = !conv.messages.length;

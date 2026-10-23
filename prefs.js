@@ -82,6 +82,9 @@ pref("extensions.zotero.annota.chatIncludeNotes", true);
 // La discussion peut proposer de modifier, compléter ou créer des notes ;
 // rien n'est écrit sans un clic sur « Appliquer ».
 pref("extensions.zotero.annota.chatEditNotes", true);
+// Collections où la discussion cherche, par bibliothèque (dernier choix) :
+// JSON { "libraryID": { "keys": [...], "sub": true } }. Vide = toute la bibliothèque.
+pref("extensions.zotero.annota.chatCollections", "");
 // Portée « bibliothèque » : nombre d'items transmis au modèle.
 pref("extensions.zotero.annota.chatLibraryItems", 8);
 // Consignes ajoutées à celles d'Annota (ton, langue, format…).
