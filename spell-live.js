@@ -90,7 +90,7 @@ var AnnotaSpellLive = {
 		let h = {
 			input: (e) => this.onInput(doc, rec, e),
 			focusin: (e) => {
-				let el = this.editableRoot(e.target);
+				let el = this.targetOf(e.target);
 				if (el && !rec.states.has(el)) this.schedule(doc, rec, el, 300);
 				if (el) this.showBadge(doc, rec, el);
 			},
@@ -98,7 +98,7 @@ var AnnotaSpellLive = {
 				let w = doc.defaultView;
 				w.setTimeout(() => {
 					if (rec.popover) return;
-					let el = this.editableRoot(doc.activeElement);
+					let el = this.targetOf(doc.activeElement);
 					if (!el) this.hideBadge(rec);
 				}, 200);
 			},
@@ -110,6 +110,7 @@ var AnnotaSpellLive = {
 			keyup: (e) => {
 				if (e.key === "Escape") { this.closePopover(rec); return; }
 				if (/^Arrow|^Home$|^End$/.test(e.key)) this.onCaret(doc, rec);
+				else if (this.fieldRoot(e.target)) this.closePopover(rec);
 			},
 			mousedown: (e) => {
 				if (rec.popover && !rec.popover.contains(e.target)) this.closePopover(rec);
@@ -130,7 +131,7 @@ var AnnotaSpellLive = {
 		this.injectStyle(doc);
 		this._docs.set(doc, rec);
 		// Éditeur déjà focalisé (note ouverte avant l'activation) : on vérifie.
-		let el = this.editableRoot(doc.activeElement);
+		let el = this.targetOf(doc.activeElement);
 		if (el) this.schedule(doc, rec, el, 300);
 	},
 
@@ -156,6 +157,30 @@ var AnnotaSpellLive = {
 		for (let doc of Array.from(this._docs.keys())) this.detach(doc);
 	},
 
+	// Champs de la carte d'annotation d'Annota (titre, paraphrase…) : des
+	// zones de texte. Le correcteur intégré y souligne les fautes, mais ne
+	// propose ses corrections qu'au clic droit, absent du panneau du lecteur.
+	// On les vérifie donc aussi ; faute de soulignement possible dans un
+	// champ, la bulle s'ouvre sur le mot fautif sous le curseur.
+	FIELD: "textarea.annota-card-input",
+
+	fieldRoot(t) {
+		try {
+			if (t && t.nodeType !== 1) t = t.parentElement;
+			return t && t.matches && t.matches(this.FIELD) ? t : null;
+		}
+		catch (e) { return null; }
+	},
+
+	isField(el) {
+		return !!el && el.tagName === "TEXTAREA";
+	},
+
+	// Zone surveillée : une zone éditable ou un champ de la carte.
+	targetOf(t) {
+		return this.editableRoot(t) || this.fieldRoot(t);
+	},
+
 	// Racine éditable d'un élément : la plus haute zone contenteditable, hors
 	// champs de formulaire (le formulaire de champs d'Annota en a).
 	editableRoot(t) {
@@ -179,7 +204,7 @@ var AnnotaSpellLive = {
 	// ---- Vérification ----
 
 	onInput(doc, rec, e) {
-		let el = this.editableRoot(e.target);
+		let el = this.targetOf(e.target);
 		if (!el) return;
 		// Le texte a bougé : les soulignements d'avant seraient décalés.
 		let st = rec.states.get(el);
@@ -254,6 +279,7 @@ var AnnotaSpellLive = {
 			this.refreshHighlights(doc, rec);
 			return;
 		}
+		if (this.isField(el)) return this.checkField(doc, rec, el);
 		let snap = this.snapshot(el);
 		if (!snap.text.trim() || snap.text.length > this.MAX) {
 			rec.states.set(el, { text: snap.text, issues: [] });
@@ -281,6 +307,29 @@ var AnnotaSpellLive = {
 		this.showBadge(doc, rec, el);
 	},
 
+	// Champ de la carte : le texte est sa valeur ; les fautes n'ont que des
+	// positions, sans plage à souligner.
+	async checkField(doc, rec, el) {
+		let text = String(el.value || "");
+		if (!text.trim() || text.length > this.MAX) {
+			rec.states.set(el, { text, issues: [] });
+			this.showBadge(doc, rec, el);
+			return;
+		}
+		let res;
+		try { res = await AnnotaSpell.check([text]); }
+		catch (e) {
+			this._broken = true;
+			log("orthographe en direct désactivée : " + e);
+			this.detachAll();
+			return;
+		}
+		if (!el.isConnected || String(el.value || "") !== text) return;
+		let issues = AnnotaSpell.normalize(text, res[0]).filter(x => !this.ignored.has(x.word));
+		rec.states.set(el, { text, issues });
+		this.showBadge(doc, rec, el);
+	},
+
 	// ---- Soulignement ----
 
 	registry(doc) {
@@ -297,7 +346,7 @@ var AnnotaSpellLive = {
 		if (!reg) return;
 		let sp = [], gr = [];
 		for (let st of rec.states.values()) {
-			for (let x of st.issues) (x.type === "grammar" ? gr : sp).push(x.range);
+			for (let x of st.issues) if (x.range) (x.type === "grammar" ? gr : sp).push(x.range);
 		}
 		try {
 			let w = doc.defaultView;
@@ -312,6 +361,15 @@ var AnnotaSpellLive = {
 	// ---- Bulle de correction ----
 
 	onCaret(doc, rec) {
+		let field = this.fieldRoot(doc.activeElement);
+		if (field) {
+			let st = rec.states.get(field);
+			let a = field.selectionStart, b = field.selectionEnd;
+			let hit = st && st.text === field.value && st.issues.find(x => a >= x.start && b <= x.start + x.length);
+			if (hit) this.openPopover(doc, rec, field, [hit], field.getBoundingClientRect());
+			else this.closePopover(rec);
+			return;
+		}
 		let sel = doc.getSelection();
 		if (!sel || !sel.rangeCount || !sel.isCollapsed) return;
 		let el = this.editableRoot(sel.anchorNode);
@@ -421,6 +479,7 @@ var AnnotaSpellLive = {
 	replace(doc, rec, el, edits) {
 		this.closePopover(rec);
 		edits.sort((p, q) => q.issue.start - p.issue.start);
+		if (this.isField(el)) return this.replaceInField(doc, el, edits);
 		let done = 0;
 		for (let { issue, text } of edits) {
 			let snap = this.snapshot(el);
@@ -440,12 +499,37 @@ var AnnotaSpellLive = {
 		// La frappe simulée déclenche « input » : la vérification suivra.
 	},
 
+	// Dans un champ : sélection du mot puis frappe simulée, qui garde ⌘Z et
+	// déclenche « input », donc l'enregistrement de la carte. À défaut,
+	// remplacement direct et « input » envoyé à la main.
+	replaceInField(doc, el, edits) {
+		let done = 0;
+		for (let { issue, text } of edits) {
+			let a = issue.start, b = issue.start + issue.length;
+			if (String(el.value).slice(a, b) !== issue.word) continue;
+			try {
+				el.focus();
+				el.setSelectionRange(a, b);
+				let ok = false;
+				try { ok = doc.execCommand("insertText", false, text); }
+				catch (e) { ok = false; }
+				if (!ok || String(el.value).slice(a, a + text.length) !== text) {
+					el.setRangeText(text, a, b, "end");
+					el.dispatchEvent(new doc.defaultView.Event("input", { bubbles: true }));
+				}
+				done++;
+			}
+			catch (e) { log("orthographe en direct, remplacement : " + e); }
+		}
+		if (done < edits.length) toast("Annota", Annota.t("sp.err.some", { n: edits.length - done }), "error");
+	},
+
 	// ---- Badge : nombre de fautes de la zone en cours ----
 
 	showBadge(doc, rec, el) {
 		let st = rec.states.get(el);
 		let n = st ? st.issues.length : 0;
-		let focused = this.editableRoot(doc.activeElement) === el;
+		let focused = this.targetOf(doc.activeElement) === el;
 		if (!n || !focused) {
 			if (rec.badgeFor === el || !n) this.hideBadge(rec);
 			return;
