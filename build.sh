@@ -18,6 +18,7 @@ zip -r -X "$OUT" \
     i18n.js \
     chat.js \
     citelink.js \
+    review.js \
     spell.js \
     spell-live.js \
     card-fields.js \

@@ -3475,14 +3475,44 @@ Annota = {
 				}
 			}
 
+			// Défilé des annotations sans champ, relance de l'IA sur des champs.
+			if (AnnotaReview && AnnotaCardFields) {
+				popup.appendChild(doc.createXULElement("menuseparator"));
+				for (let [key, run] of [
+					["menu.review", () => AnnotaReview.startReview(window, false)],
+					["menu.refill", () => AnnotaReview.startRefill(window)],
+					["menu.refill.undo", () => AnnotaReview.undoRefill(window)]
+				]) {
+					let mi = doc.createXULElement("menuitem");
+					mi.setAttribute("label", this.t(key));
+					mi.addEventListener("command", () => {
+						Promise.resolve().then(run).catch(e => log("défilé : " + e));
+					});
+					popup.appendChild(mi);
+				}
+			}
+
 			menu.appendChild(popup);
 			itemmenu.appendChild(menu);
+
+			// Menu Outils : le défilé sur toute la bibliothèque.
+			let tools = doc.getElementById("menu_ToolsPopup");
+			let toolsItem = null;
+			if (tools && AnnotaReview && AnnotaCardFields) {
+				toolsItem = doc.createXULElement("menuitem");
+				toolsItem.id = "annota-tools-review";
+				toolsItem.setAttribute("label", this.t("menu.review.lib"));
+				toolsItem.addEventListener("command", () => {
+					AnnotaReview.startReview(window, true).catch(e => log("défilé : " + e));
+				});
+				tools.appendChild(toolsItem);
+			}
 
 			// Masquer l'entrée quand la sélection ne peut porter aucune annotation.
 			let onShowing = () => { menu.hidden = !Annota.selectionIsRelevant(window); };
 			itemmenu.addEventListener("popupshowing", onShowing);
 
-			this._windows.set(window, { menu, itemmenu, onShowing });
+			this._windows.set(window, { menu, itemmenu, onShowing, toolsItem });
 			log("Menu ajouté à la fenêtre");
 		}
 		catch (e) {
@@ -3495,6 +3525,8 @@ Annota = {
 		if (!rec) return;
 		try { rec.itemmenu.removeEventListener("popupshowing", rec.onShowing); } catch (e) {}
 		try { rec.menu.remove(); } catch (e) {}
+		try { if (rec.toolsItem) rec.toolsItem.remove(); } catch (e) {}
+		try { if (AnnotaReview) AnnotaReview.close(window); } catch (e) {}
 		this._windows.delete(window);
 	},
 
@@ -3564,6 +3596,9 @@ var AnnotaSpellLive = null;
 var AnnotaCardFields = null;
 // Lien d'une citation glissée dans une note vers son surlignage (citelink.js).
 var AnnotaCiteLink = null;
+
+// Défilé des annotations sans champ et relance de l'IA (review.js).
+var AnnotaReview = null;
 var annotaLangObserver = null;
 
 function install() {}
@@ -3591,6 +3626,11 @@ async function startup({ id, version, rootURI }) {
 	catch (e) {
 		log("lien citation → surlignage indisponible : " + e);
 		AnnotaCiteLink = null;
+	}
+	try { Services.scriptloader.loadSubScript(rootURI + "review.js"); }
+	catch (e) {
+		log("défilé et relance indisponibles : " + e);
+		AnnotaReview = null;
 	}
 	try { Services.scriptloader.loadSubScript(rootURI + "spell.js"); }
 	catch (e) {
@@ -3663,6 +3703,7 @@ function onMainWindowUnload({ window }) {
 }
 
 function shutdown() {
+	AnnotaReview = null;
 	if (AnnotaCardFields) {
 		try { AnnotaCardFields.unregister(); } catch (e) {}
 	}
