@@ -300,6 +300,9 @@ var AnnotaCiteLink = {
 			this.watchPopups(inst);
 			return false;
 		}
+		if (msg.action === "insertObject" && msg.type === "zotero/annotation") {
+			return this.interceptDrop(inst, e, orig, msg);
+		}
 		if (msg.action !== "openCitationPage" || !msg.citation) return false;
 		this.openCitation(msg.citation).then(done => {
 			if (!done) orig(e);
@@ -308,6 +311,98 @@ var AnnotaCiteLink = {
 			orig(e);
 		});
 		return true;
+	},
+
+	// ---- 6. Dépôt d'un surlignage dans le texte d'une note ----
+	//
+	// Avec le gabarit « {{citation}} », Zotero insère un paragraphe : la
+	// citation part à la ligne. Un surlignage déposé seul dans un paragraphe
+	// non vide y est inséré dans la ligne ; déposé juste après le point final
+	// d'une phrase, il se place avant ce point, espace compris :
+	// « …composantes (Milliken, 1987, p. 136). ». Plusieurs surlignages, une
+	// ligne vide ou un autre gabarit gardent le comportement de Zotero.
+
+	interceptDrop(inst, e, orig, msg) {
+		let anns = null;
+		try { anns = JSON.parse(msg.data); }
+		catch (err) { return false; }
+		if (!Array.isArray(anns) || anns.length !== 1
+			|| !["highlight", "underline"].includes(anns[0] && anns[0].type)) {
+			return false;
+		}
+		if (inst._readOnly) return true;
+		(async () => {
+			await inst._ensureNoteCreated();
+			let { html } = Zotero.EditorInstanceUtilities.serializeAnnotations(anns);
+			if (!html) return;
+			let plan = null;
+			try { plan = this.inlinePlan(this.editorView(inst), msg.pos, html); }
+			catch (err) { log("citations : dépôt dans la ligne : " + err); }
+			if (!plan) {
+				inst._postMessage({ action: "insertHTML", pos: msg.pos, html });
+				return;
+			}
+			if (plan.spaces) {
+				let view = this.editorView(inst);
+				view.dispatch(view.state.tr.insertText(plan.spaces, plan.at));
+			}
+			inst._postMessage({ action: "insertHTML", pos: plan.pos, html: plan.html });
+		})().catch(err => {
+			log("citations : dépôt : " + err);
+			orig(e);
+		});
+		return true;
+	},
+
+	// Vue ProseMirror de l'éditeur de notes (dans son cadre), ou null.
+	editorView(inst) {
+		try {
+			let w = inst._iframeWindow && inst._iframeWindow.wrappedJSObject;
+			let cur = w && w._currentEditorInstance;
+			return (cur && cur._editorCore && cur._editorCore.view) || null;
+		}
+		catch (e) { return null; }
+	},
+
+	// Insertion dans la ligne : { html, pos, spaces, at }, ou null pour laisser
+	// faire Zotero. La citation ne doit pas être accompagnée d'autre chose
+	// (passage, commentaire) : sinon le paragraphe de Zotero reste de mise.
+	inlinePlan(view, pos, html) {
+		if (!view || !Number.isInteger(pos) || pos < 0) return null;
+		let m = String(html).trim().match(/^<p>([\s\S]*)<\/p>$/i);
+		if (!m || /<\/?(p|div|h\d|ul|ol|li|blockquote|table|pre)\b/i.test(m[1])) return null;
+		let inner = m[1].trim();
+		// Ce qui reste une fois les citations ôtées (spans imbriqués appariés).
+		let rest = "", last = 0, found = 0, c;
+		let open = /<span\b(?=[^>]*\bclass="citation")[^>]*>/g;
+		while ((c = open.exec(inner)) !== null) {
+			let end = this._endOfSpan(inner, c.index + c[0].length);
+			if (end < 0) return null;
+			rest += inner.slice(last, c.index);
+			last = end;
+			open.lastIndex = end;
+			found++;
+		}
+		rest += inner.slice(last);
+		if (!found || rest.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim()) return null;
+
+		let doc = view.state.doc;
+		let $p = doc.resolve(Math.min(pos, doc.content.size));
+		let block = $p.parent;
+		if (!block || !block.isTextblock || !block.content.size) return null;
+		let before = block.textBetween(0, $p.parentOffset, null, "\ufffc");
+		let after = block.textBetween($p.parentOffset, block.content.size, null, "\ufffc");
+		let at = pos;
+		// Juste après le point final : la citation passe avant lui.
+		let dot = before.match(/(^|[^.])\.(\s*)$/);
+		if (dot) {
+			at = pos - 1 - dot[2].length;
+			before = before.slice(0, before.length - 1 - dot[2].length);
+			after = "." + after;
+		}
+		let lead = before && !/\s$/.test(before) ? " " : "";
+		let trail = after && /^[\p{L}\p{N}(«“]/u.test(after) ? " " : "";
+		return { html: inner, at, spaces: lead + trail, pos: at + lead.length };
 	},
 
 	async openCitation(citation) {
