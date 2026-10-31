@@ -285,7 +285,7 @@ var AnnotaCardFields = {
 		+ ".annota-card-form .annota-card-input{width:100%;max-width:100%;box-sizing:border-box;"
 		+ "font:inherit;font-size:12px;line-height:1.35;padding:3px 6px;margin:0;color:inherit;"
 		+ "border:1px solid rgba(128,128,128,.35);border-radius:4px;background:rgba(128,128,128,.08);"
-		+ "outline:none;resize:none;overflow:hidden;}"
+		+ "outline:none;resize:none;overflow:hidden;min-height:calc(1.35em + 8px);}"
 		+ ".annota-card-form .annota-card-input:focus{border-color:rgba(128,128,128,.7);"
 		+ "background:transparent;}"
 		+ ".annota-card-form .annota-card-check{display:flex;align-items:center;gap:6px;font-size:12px;}"
@@ -442,7 +442,33 @@ var AnnotaCardFields = {
 	grow(el) {
 		if (el.tagName !== "TEXTAREA") return;
 		el.style.height = "auto";
-		el.style.height = el.scrollHeight + "px";
+		let h = el.scrollHeight;
+		if (h > 0) {
+			el.style.height = h + "px";
+			return;
+		}
+		// Carte dessinée avant d'être affichée (ouverture d'une référence) :
+		// la hauteur mesurée vaut zéro et le champ restait écrasé jusqu'au
+		// premier clic. On garde la hauteur naturelle et on recalcule dès que
+		// le champ prend sa taille.
+		el.style.height = "";
+		this.growWhenShown(el);
+	},
+
+	growWhenShown(el) {
+		if (el._annotaSizeWatch) return;
+		let w = el.ownerDocument && el.ownerDocument.defaultView;
+		if (!w || typeof w.ResizeObserver !== "function") return;
+		let ro = new w.ResizeObserver(() => {
+			if (!el.isConnected) { ro.disconnect(); el._annotaSizeWatch = null; return; }
+			if (el.scrollHeight > 0) {
+				ro.disconnect();
+				el._annotaSizeWatch = null;
+				this.grow(el);
+			}
+		});
+		el._annotaSizeWatch = ro;
+		ro.observe(el);
 	},
 
 	// Valeur d'un champ pour la saisie : sans balises ni entités.
