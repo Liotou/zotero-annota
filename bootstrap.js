@@ -3512,12 +3512,120 @@ Annota = {
 			let onShowing = () => { menu.hidden = !Annota.selectionIsRelevant(window); };
 			itemmenu.addEventListener("popupshowing", onShowing);
 
-			this._windows.set(window, { menu, itemmenu, onShowing, toolsItem });
+			let collToggle = null;
+			try { collToggle = this.addCollectionToggle(window); }
+			catch (e) { log("bouton replier les collections : " + e); }
+
+			this._windows.set(window, { menu, itemmenu, onShowing, toolsItem, collToggle });
 			log("Menu ajouté à la fenêtre");
 		}
 		catch (e) {
 			log("addToWindow: " + e);
 		}
+	},
+
+	// ---- Replier ou déplier toutes les collections ----
+	//
+	// Bouton à deux chevrons dans la barre au-dessus des collections. S'il y a
+	// des collections ouvertes dans la bibliothèque en cours, il les replie
+	// toutes (la bibliothèque reste ouverte) ; sinon, il déplie tout, comme
+	// la touche « + » de Zotero.
+
+	COLL_ICONS: {
+		// Chevrons qui se rejoignent : replier.
+		collapse: "M5 3.5 8 6.5 11 3.5M5 12.5 8 9.5 11 12.5",
+		// Chevrons qui s'écartent : déplier.
+		expand: "M5 6.5 8 3.5 11 6.5M5 9.5 8 12.5 11 9.5"
+	},
+
+	collIcon(kind) {
+		let svg = "<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'>"
+			+ "<path d='" + this.COLL_ICONS[kind] + "' fill='none' stroke='context-fill'"
+			+ " stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>";
+		return "url(\"data:image/svg+xml," + encodeURIComponent(svg) + "\")";
+	},
+
+	addCollectionToggle(window) {
+		let doc = window.document;
+		let bar = doc.getElementById("zotero-collections-toolbar");
+		let add = doc.getElementById("zotero-tb-collection-add");
+		if (!bar || doc.getElementById("annota-tb-collections-toggle")) return null;
+		let b = doc.createXULElement("toolbarbutton");
+		b.id = "annota-tb-collections-toggle";
+		b.className = "zotero-tb-button";
+		b.setAttribute("tabindex", "-1");
+		b.style.setProperty("-moz-context-properties", "fill");
+		b.style.setProperty("fill", "var(--fill-secondary)");
+		let refresh = () => {
+			let open = this.collectionsOpen(window);
+			b.style.listStyleImage = this.collIcon(open ? "collapse" : "expand");
+			let label = this.t(open ? "coll.collapse" : "coll.expand");
+			b.setAttribute("tooltiptext", label);
+			b.setAttribute("aria-label", label);
+		};
+		b.addEventListener("mouseenter", refresh);
+		b.addEventListener("command", () => {
+			this.toggleCollections(window).then(refresh, e => log("replier les collections : " + e));
+		});
+		if (add && add.nextSibling) bar.insertBefore(b, add.nextSibling);
+		else bar.appendChild(b);
+		refresh();
+		return b;
+	},
+
+	// Arbre des collections et rang de la bibliothèque en cours.
+	_collScope(window) {
+		let tree = window.ZoteroPane && window.ZoteroPane.collectionsView;
+		if (!tree || !tree._rowMap) return null;
+		let libraryID = null;
+		try {
+			let r = tree.getRow(tree.selection.focused);
+			libraryID = r && r.ref && r.ref.libraryID;
+		}
+		catch (e) {}
+		if (!libraryID) libraryID = Zotero.Libraries.userLibraryID;
+		let row = tree._rowMap["L" + libraryID];
+		return row === undefined ? null : { tree, libraryID, row };
+	},
+
+	collectionsOpen(window) {
+		let sc = this._collScope(window);
+		if (!sc) return false;
+		let { tree, libraryID, row } = sc;
+		for (let i = row + 1; i < tree.rowCount; i++) {
+			let r = tree.getRow(i);
+			if (!r || !r.ref || r.ref.libraryID !== libraryID) break;
+			if (tree.isContainer(i) && tree.isContainerOpen(i)) return true;
+		}
+		return false;
+	},
+
+	async toggleCollections(window) {
+		let sc = this._collScope(window);
+		if (!sc) return;
+		let { tree, libraryID, row } = sc;
+		if (!this.collectionsOpen(window)) {
+			await tree.expandLibrary(libraryID, true);
+			return;
+		}
+		// Comme collapseLibrary de Zotero, mais sans refermer la bibliothèque :
+		// du bas vers le haut, pour que les rangs restent valables.
+		let last = row;
+		while (last + 1 < tree.rowCount) {
+			let r = tree.getRow(last + 1);
+			if (!r || !r.ref || r.ref.libraryID !== libraryID) break;
+			last++;
+		}
+		let closed = [];
+		for (let i = last; i > row; i--) {
+			if (tree.isContainer(i) && tree.isContainerOpen(i)) {
+				closed.push(tree.getRow(i).id);
+				await tree._closeContainer(i);
+			}
+		}
+		closed.forEach(id => { delete tree._containerState[id]; });
+		tree.tree.invalidate();
+		tree._saveOpenStates();
 	},
 
 	removeFromWindow(window) {
@@ -3526,6 +3634,7 @@ Annota = {
 		try { rec.itemmenu.removeEventListener("popupshowing", rec.onShowing); } catch (e) {}
 		try { rec.menu.remove(); } catch (e) {}
 		try { if (rec.toolsItem) rec.toolsItem.remove(); } catch (e) {}
+		try { if (rec.collToggle) rec.collToggle.remove(); } catch (e) {}
 		try { if (AnnotaReview) AnnotaReview.close(window); } catch (e) {}
 		this._windows.delete(window);
 	},
