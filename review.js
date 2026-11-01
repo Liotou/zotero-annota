@@ -131,10 +131,10 @@ var AnnotaReview = {
 	async save(ann, values, refs) {
 		let comment = AnnotaCardFields.compose(ann, { _annotaRefs: refs || "" }, values);
 		if (comment === String(ann.annotationComment || "")) return false;
+		AnnotaCardFields.remember(ann, values, refs || "", comment);
 		ann.annotationComment = comment;
 		Annota.setFailedTag(ann, false);
 		await ann.saveTx();
-		AnnotaCardFields.remember(ann, values, refs || "", comment);
 		return true;
 	},
 

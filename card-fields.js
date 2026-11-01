@@ -66,14 +66,18 @@ var AnnotaCardFields = {
 	},
 
 	// Appelé après chaque écriture d'un commentaire par Annota.
+	// Appelé AVANT l'enregistrement : la carte est redessinée pendant saveTx,
+	// et doit alors trouver ce commentaire en mémoire.
 	remember(item, values, references, comment) {
 		if (!item || !values) return;
-		this.load().then(store => {
+		let put = store => {
 			store[this.keyOf(item.libraryID, item.key)] = {
 				color: item.annotationColor, values, references: references || "", comment: comment || ""
 			};
 			this.persist();
-		}).catch(e => log("champs de carte : " + e));
+		};
+		if (this._store) { put(this._store); return; }
+		this.load().then(put).catch(e => log("champs de carte : " + e));
 	},
 
 	// ---- Valeurs d'une annotation ----
@@ -95,27 +99,34 @@ var AnnotaCardFields = {
 	},
 
 	// Relit un commentaire écrit avec la mise en page par défaut (une ligne
-	// par champ non vide, dans l'ordre). null si les lignes ne s'y prêtent pas.
+	// par champ non vide, dans l'ordre). Une valeur peut s'étendre sur
+	// plusieurs lignes (retour à la ligne tapé dans le champ) : on préfère
+	// toujours une ligne par champ, et l'on n'élargit qu'à défaut. null si les
+	// lignes ne s'y prêtent pas.
 	parse(schema, comment) {
-		let lines = String(comment || "").split("\n").map(l => l.trim()).filter(Boolean);
+		let lines = String(comment || "").split("\n").map(l => l.trim());
+		let n = lines.length;
 		let values = {};
 		for (let f of schema) values[f.name] = "";
-		let j = 0;
-		for (let line of lines) {
-			let found = false;
-			for (; j < schema.length; j++) {
-				let v = this.unwrap(line, schema[j].format);
-				if (v !== null) {
-					values[schema[j].name] = schema[j].type === "check"
+		let failed = new Set();
+		let match = (i, j) => {
+			while (i < n && !lines[i]) i++;
+			if (i >= n) return true;
+			if (failed.has(i + "/" + j)) return false;
+			for (let k = j; k < schema.length; k++) {
+				for (let e = i + 1; e <= n; e++) {
+					if (!lines[e - 1]) continue;
+					let v = this.unwrap(lines.slice(i, e).join("\n"), schema[k].format);
+					if (v === null || !match(e, k + 1)) continue;
+					values[schema[k].name] = schema[k].type === "check"
 						? (/^(true|yes|oui|1|x|✓)$/i.test(v) ? "true" : "") : v;
-					j++;
-					found = true;
-					break;
+					return true;
 				}
 			}
-			if (!found) return null;
-		}
-		return values;
+			failed.add(i + "/" + j);
+			return false;
+		};
+		return match(0, 0) ? values : null;
 	},
 
 	// { values, references } ou null (commentaire non structuré).
@@ -547,11 +558,11 @@ var AnnotaCardFields = {
 		let comment = this.compose(item, form, values);
 		form._dirty = false;
 		if (comment === String(item.annotationComment || "")) return;
+		this.remember(item, values, form._annotaRefs, comment);
 		item.annotationComment = comment;
 		Annota.setFailedTag(item, false);
 		await item.saveTx();
 		form._raw = Object.assign({}, values);
-		this.remember(item, values, form._annotaRefs, comment);
 		form._status.textContent = Annota.t("card.saved");
 		card.ownerDocument.defaultView.setTimeout(() => { form._status.textContent = ""; }, 1500);
 	},
@@ -593,17 +604,17 @@ var AnnotaCardFields = {
 				getRefs: () => Annota.getReferences(item, text), out: built
 			});
 			if (comment === null) return;
+			let filled = built.values || values;
+			let refs = built.refs || (form && form._annotaRefs) || (known && known.references) || "";
+			this.remember(item, filled, refs, comment);
 			item.annotationComment = comment;
 			Annota.setFailedTag(item, false);
 			await item.saveTx();
-			let filled = built.values || values;
-			let refs = built.refs || (form && form._annotaRefs) || (known && known.references) || "";
 			if (form) {
 				form._annotaRefs = refs;
 				form._dirty = false;
 				this.fill(form, { values: filled });
 			}
-			this.remember(item, filled, refs, comment);
 			setStatus(Annota.t("card.saved"));
 		}
 		catch (e) {

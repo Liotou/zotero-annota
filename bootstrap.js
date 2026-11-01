@@ -715,12 +715,12 @@ Annota = {
 			// Recharger l'item au cas où il aurait changé pendant l'appel réseau.
 			let fresh = await Zotero.Items.getAsync(id);
 			if (!fresh) return;
+			this.rememberFields(fresh, built, comment);
 			fresh.annotationComment = comment;
 			this.setFailedTag(fresh, false);   // succès : l'échec précédent s'efface
 			let tSave = Date.now();
 			await fresh.saveTx();
 			tSave = Date.now() - tSave;
-			this.rememberFields(fresh, built, comment);
 
 			// Relevé complet : c'est la seule façon de distinguer ce qu'Annota
 			// consomme de ce qu'elle attend. « notif » = délai entre l'événement
@@ -2795,10 +2795,10 @@ Annota = {
 				}
 				let fresh = await Zotero.Items.getAsync(ann.id);
 				if (fresh) {
+					this.rememberFields(fresh, built, comment);
 					fresh.annotationComment = comment;
 					this.setFailedTag(fresh, false);
 					await fresh.saveTx();
-					this.rememberFields(fresh, built, comment);
 					ok++;
 				}
 			}
