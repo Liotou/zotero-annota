@@ -203,6 +203,19 @@ Annota = {
 		return Object.keys(this.fieldPrompts(entry)).length > 0;
 	},
 
+	// Champs que le modèle sait remplir un par un (bouton IA de chaque champ
+	// dans la carte) : ceux qui ont leur consigne, ou, avec un ancien prompt
+	// général, tous les champs saisissables.
+	aiFillableFields(entry) {
+		if (!entry) return [];
+		let fp = this.fieldPrompts(entry);
+		if (Object.keys(fp).length) return Object.keys(fp);
+		if (this.entryFillsFields(entry)) {
+			return this.parseFieldSchema(entry.fields).filter(f => f.type !== "ai").map(f => f.name);
+		}
+		return [];
+	},
+
 	// Un champ « ai » est-il rempli à la création ? Oui, sauf case décochée.
 	_aiFieldAuto(entry, f) {
 		let c = entry && entry.fieldAI && entry.fieldAI[f.name];
@@ -2200,8 +2213,17 @@ Annota = {
 	// passage ne cite rien d'identifiable, le modèle se rabat parfois sur
 	// « (Lahire, 2026) » en lisant un livre de Lahire paru en 2026. Seule une
 	// valeur faite uniquement de citations est touchée.
-	stripSelfCitations(value, ctx) {
+	// « (A, 1999) ; (B, 2001) » → « (A, 1999 ; B, 2001) » : une seule forme à
+	// contrôler, et celle qu'attend le champ référence.
+	mergeCitationGroups(value) {
 		let s = String(value || "");
+		let t = s.trim().replace(/\.$/, "");
+		if (!/^\([^()]+\)(\s*[;,]\s*\([^()]+\))+$/.test(t)) return s;
+		return "(" + t.match(/\(([^()]+)\)/g).map(g => g.slice(1, -1).trim()).join(" ; ") + ")";
+	},
+
+	stripSelfCitations(value, ctx) {
+		let s = this.mergeCitationGroups(value);
 		let year = ctx && String(ctx.year || "");
 		let first = ctx && String(ctx.authors || "").split(",")[0];
 		if (!year || !first || !first.trim()) return s;
@@ -2247,12 +2269,42 @@ Annota = {
 		return kept.length ? "(" + kept.join(" ; ") + ")" : "";
 	},
 
-	// Consigne d'un seul champ : le préambule commun de la couleur (facultatif),
-	// la consigne du champ, et les champs déjà écrits comme contexte.
+	// Consigne d'un seul champ : un préambule fixe, la consigne du champ, et
+	// les champs déjà écrits comme contexte. Le prompt général de la couleur
+	// n'y entre pas : chaque champ porte désormais tout ce qui le concerne.
+	FIELD_PREAMBLE: "You write one field of a reading note about a passage highlighted"
+		+ " in an academic document. Answer in {{language}}. The document context"
+		+ " (title, authors, year, abstract, page) only helps you understand the"
+		+ " passage: never cite the document being read as a source, and never use"
+		+ " its page.",
+
+	// Découpe un ancien prompt général selon ses intitulés « CHAMP nom » (ou
+	// « FIELD nom ») : { preamble, sections: { nom: texte } }. Sert au bouton
+	// « Répartir dans les champs » des réglages.
+	splitPromptByFields(prompt, schema) {
+		let bare = x => String(x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+			.toLowerCase().replace(/[^a-z0-9]/g, "");
+		let byKey = {};
+		for (let f of schema || []) {
+			byKey[bare(f.name)] = f.name;
+			byKey[bare(f.label)] = f.name;
+		}
+		let preamble = [], sections = {}, current = null;
+		for (let line of String(prompt || "").split("\n")) {
+			let m = line.match(/^\s*(?:#+\s*)?\**\s*(?:champ|field)\s+[«"“]?\s*([^:»"”*]+?)\s*[»"”]?\s*\**\s*:?\s*$/i);
+			let name = m && byKey[bare(m[1])];
+			if (name) { current = name; sections[name] = sections[name] || []; continue; }
+			(current ? sections[current] : preamble).push(line);
+		}
+		let out = {};
+		for (let k of Object.keys(sections)) {
+			let t = sections[k].join("\n").trim();
+			if (t) out[k] = t;
+		}
+		return { preamble: preamble.join("\n").trim(), sections: out };
+	},
 	buildSingleFieldPrompt(entry, f, cfg, schema, values) {
-		let parts = [];
-		let common = String(entry.prompt || "").trim();
-		if (common) parts.push(common);
+		let parts = [this.FIELD_PREAMBLE];
 		let head = "Write the field \"" + (f.label || f.name) + "\".";
 		if (f.type === "select" && f.options.length) {
 			head += " Answer with exactly one of: " + f.options.join(", ") + ".";
@@ -2304,13 +2356,17 @@ Annota = {
 	// résolues : la carte d'annotation du lecteur les réaffiche (card-fields.js).
 	// trigger : « auto » à la création de l'annotation (seuls les champs réglés
 	// sur « automatique » sont demandés au modèle), sinon demande explicite.
-	async buildComment({ text, ctx, color, comment, fields, getRefs, out, trigger }) {
+	// only : noms des champs à (re)demander au modèle, et eux seuls, même
+	// s'ils sont remplis (bouton IA d'un champ dans la carte).
+	async buildComment({ text, ctx, color, comment, fields, getRefs, out, trigger, only }) {
 		let entry = this.getColorEntry(color);
 		if (!entry) return null;
 
 		ctx = ctx || {};
 		let schema = this.parseFieldSchema(entry.fields);
 		let values = Object.assign({}, fields || {});
+		if (Array.isArray(only)) for (let n of only) values[n] = "";
+		let wanted = f => !Array.isArray(only) || only.includes(f.name);
 
 		// 0. Références citées : leur résolution ouvre le PDF et parcourt ses
 		//    liens internes, soit plusieurs secondes sur un gros document. On ne
@@ -2331,7 +2387,7 @@ Annota = {
 		//    que lui. Les champs saisis à la main sont déjà disponibles pour
 		//    servir de contexte à ces consignes.
 		for (let f of schema) {
-			if (f.type !== "ai" || !f.prompt.trim()) continue;
+			if (f.type !== "ai" || !f.prompt.trim() || !wanted(f)) continue;
 			if (String(values[f.name] || "").trim()) continue;
 			if (trigger === "auto" && !this._aiFieldAuto(entry, f)) continue;
 			try {
@@ -2353,7 +2409,7 @@ Annota = {
 		//    vous avez tapé à la main n'est jamais réécrit ; si vous avez tout
 		//    rempli, aucun appel n'est fait.
 		if (this.entryFillsFields(entry)) {
-			let toFill = this.fieldsToFill(schema, values);
+			let toFill = this.fieldsToFill(schema, values).filter(wanted);
 			if (toFill.length) {
 				try {
 					let t = Date.now();
@@ -2399,7 +2455,7 @@ Annota = {
 		let firstError = null, anyDone = false;
 		for (let f of schema) {
 			let cfg = fp[f.name];
-			if (!cfg || String(values[f.name] || "").trim()) continue;
+			if (!cfg || !wanted(f) || String(values[f.name] || "").trim()) continue;
 			if (trigger === "auto" && !cfg.auto) continue;
 			try {
 				let t = Date.now();

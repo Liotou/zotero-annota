@@ -903,19 +903,73 @@
 
 		// Consignes propres aux champs de la couleur en cours d'édition.
 		let fieldAI = {};
-		let triggerNote = document.getElementById("annota-trigger-perfield");
-		let promptNote = document.getElementById("annota-prompt-perfield");
+		let triggerCard = document.getElementById("annota-trigger-card");
+		let promptCard = document.getElementById("annota-prompt-card");
+		let legacyBox = document.getElementById("annota-prompt-legacy");
+		let legacyState = document.getElementById("annota-prompt-legacy-state");
+		let splitBtn = document.getElementById("annota-prompt-split");
 		function perField() {
 			return Object.keys(fieldAI).some(k => String(fieldAI[k].prompt || "").trim());
 		}
-		// Une consigne par champ : le déclenchement se règle champ par champ,
-		// et le prompt de la couleur devient un préambule commun.
-		function syncPerField() {
-			let on = perField();
-			for (let r of triggerRadios) r.disabled = on;
-			if (triggerNote) triggerNote.hidden = !on;
-			if (promptNote) promptNote.hidden = !on;
+		function schemaNow() {
+			let a = api();
+			return a ? a.parseFieldSchema(fieldsArea.value) : [];
 		}
+		// Sections affichées selon la couleur. Avec des champs, chacun porte sa
+		// consigne et son déclenchement : le prompt général et le déclenchement
+		// de la couleur disparaissent. Ils restent pour une couleur sans champ
+		// (la réponse EST le commentaire), pour une disposition avec {{ai}}, et,
+		// avec le bouton de répartition, pour un ancien prompt général encore
+		// rempli.
+		function syncSections() {
+			let a = api();
+			let schema = schemaNow();
+			let hasFields = schema.length > 0;
+			let wantsAI = /\{\{\s*ai\s*\}\}/.test(templateArea.value || "");
+			let needsPrompt = !hasFields || wantsAI;
+			let legacy = hasFields && !wantsAI && !!String(textarea.value || "").trim();
+			if (promptCard) promptCard.hidden = !(needsPrompt || legacy);
+			if (triggerCard) triggerCard.hidden = !(needsPrompt || (legacy && !perField()));
+			if (legacyBox) legacyBox.hidden = !legacy;
+			if (!legacy || !a || !legacyState) return;
+			let split = a.splitPromptByFields(textarea.value, schema);
+			let names = Object.keys(split.sections);
+			let msg = names.length
+				? T("prompt.legacy.split", { names: schema.filter(f => names.includes(f.name))
+					.map(f => f.label || f.name).join(", ") })
+				: T("prompt.legacy.nosplit");
+			if (perField()) msg = T("prompt.legacy.ignored") + " " + msg;
+			legacyState.textContent = msg;
+			if (splitBtn) splitBtn.hidden = !names.length;
+		}
+		// Ancien prompt général → consigne de chaque champ, selon ses intitulés.
+		// Un champ qui a déjà sa consigne la garde. Le déclenchement de la
+		// couleur devient celui de chaque champ.
+		function splitPrompt() {
+			let a = api();
+			if (!a) return;
+			let schema = schemaNow();
+			let split = a.splitPromptByFields(textarea.value, schema);
+			let auto = currentTrigger() === "auto";
+			let n = 0;
+			let next = Object.assign({}, fieldAI);
+			for (let f of schema) {
+				let body = split.sections[f.name];
+				if (!body || f.type === "ai") continue;
+				if (next[f.name] && String(next[f.name].prompt || "").trim()) continue;
+				next[f.name] = { prompt: (split.preamble ? split.preamble + "\n\n" : "") + body, auto };
+				n++;
+			}
+			if (!n) return;
+			fieldAI = next;
+			textarea.value = "";
+			saveNow();
+			if (editor) editor.refresh();
+			syncSections();
+			flashStatus(T("prompt.split.done", { n }));
+		}
+		if (splitBtn) splitBtn.addEventListener("click", splitPrompt);
+		let syncPerField = syncSections;
 
 		function save() {
 			let map = readColorMap();
@@ -1024,12 +1078,12 @@
 		}
 
 		// --- Textarea ---
-		textarea.addEventListener("input", scheduleSave);
+		textarea.addEventListener("input", () => { scheduleSave(); syncSections(); });
 		textarea.addEventListener("blur", saveNow);
-		templateArea.addEventListener("input", scheduleSave);
+		templateArea.addEventListener("input", () => { scheduleSave(); syncSections(); });
 		templateArea.addEventListener("blur", saveNow);
 		fieldsArea.setAttribute("placeholder", "name | Label | type | options");
-		fieldsArea.addEventListener("input", scheduleSave);
+		fieldsArea.addEventListener("input", () => { scheduleSave(); syncSections(); });
 		fieldsArea.addEventListener("blur", saveNow);
 		labelInput.addEventListener("input", () => {
 			scheduleSave();
@@ -1080,7 +1134,7 @@
 			getFieldAI: () => fieldAI,
 			setFieldAI: (m) => { fieldAI = m; syncPerField(); },
 			onChange: scheduleSave,
-			onCommit: () => { lintNow(); saveNow(); }
+			onCommit: () => { lintNow(); saveNow(); syncSections(); }
 		}) : null;
 
 		// --- Type d'annotation ---

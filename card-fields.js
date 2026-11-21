@@ -311,6 +311,12 @@ var AnnotaCardFields = {
 		+ ".annota-card-ai-btn:hover{opacity:1;background:rgba(128,128,128,.18);}"
 		+ ".annota-card-ai-btn[disabled]{cursor:default;}"
 		+ ".annota-card-ai-btn.annota-busy svg{animation:annota-ai-pulse 1s ease-in-out infinite;}"
+		+ ".annota-card-form .annota-card-labrow{display:flex;align-items:center;justify-content:space-between;"
+		+ "gap:4px;margin-bottom:1px;}"
+		+ ".annota-card-form .annota-card-labrow .annota-card-label{margin-bottom:0;}"
+		+ ".annota-card-ai-btn.annota-card-ai-mini{width:18px;height:18px;border-radius:4px;opacity:.45;}"
+		+ ".annota-card-ai-btn.annota-card-ai-mini:hover{opacity:1;}"
+		+ ".annota-card-check .annota-card-ai-mini{margin-left:auto;}"
 		+ "@keyframes annota-ai-pulse{0%,100%{opacity:.35;}50%{opacity:1;}}",
 
 	injectStyle(doc) {
@@ -330,6 +336,9 @@ var AnnotaCardFields = {
 		form.className = Annota.FORM_CLASS + " annota-card-form";
 		form._fields = {};
 		form._schema = cfg.schema;
+		// Champs que le modèle sait remplir : chacun a son propre bouton IA,
+		// qui le (re)demande seul ; celui de l'en-tête remplit tous les vides.
+		let fillable = Annota.aiFillableFields(cfg.entry);
 
 		// La carte réagit aux clics (sélection) et au glisser : le formulaire
 		// garde les siens pour lui, mais laisse la carte se sélectionner.
@@ -359,12 +368,20 @@ var AnnotaCardFields = {
 				lab.textContent = f.label;
 				row.appendChild(el);
 				row.appendChild(lab);
+				if (fillable.includes(f.name)) row.appendChild(this.aiButton(doc, [f.name], f.label));
 			}
 			else {
 				let lab = doc.createElement("div");
 				lab.className = "annota-card-label";
 				lab.textContent = f.label;
-				row.appendChild(lab);
+				if (fillable.includes(f.name)) {
+					let head = doc.createElement("div");
+					head.className = "annota-card-labrow";
+					head.appendChild(lab);
+					head.appendChild(this.aiButton(doc, [f.name], f.label));
+					row.appendChild(head);
+				}
+				else row.appendChild(lab);
 				if (f.type === "select") {
 					el = doc.createElement("select");
 					for (let o of [""].concat(f.options)) {
@@ -412,17 +429,20 @@ var AnnotaCardFields = {
 		return form;
 	},
 
-	// Petit bouton à icône de l'en-tête de la carte, à côté de « … ».
-	aiButton(doc) {
+	// Petit bouton à icône de l'en-tête de la carte, à côté de « … » : il
+	// remplit tous les champs vides. Avec « only », le même bouton en plus
+	// petit, à côté d'un champ : il redemande ce champ seul, même rempli.
+	aiButton(doc, only, label) {
 		let b = doc.createElement("button");
 		b.type = "button";
-		b.className = "annota-card-ai-btn";
-		b.title = Annota.t("card.fill") + " · " + Annota.t("card.fill.title");
-		b.setAttribute("aria-label", Annota.t("card.fill"));
+		b.className = "annota-card-ai-btn" + (only ? " annota-card-ai-mini" : "");
+		let name = only ? Annota.t("card.fill.one", { field: label || only[0] }) : Annota.t("card.fill");
+		b.title = name + " · " + Annota.t(only ? "card.fill.one.title" : "card.fill.title");
+		b.setAttribute("aria-label", name);
 		let NS = "http://www.w3.org/2000/svg";
 		let svg = doc.createElementNS(NS, "svg");
-		svg.setAttribute("width", "16");
-		svg.setAttribute("height", "16");
+		svg.setAttribute("width", only ? "13" : "16");
+		svg.setAttribute("height", only ? "13" : "16");
 		svg.setAttribute("viewBox", "0 0 16 16");
 		svg.setAttribute("fill", "none");
 		// Deux étincelles : la grande à quatre branches, la petite en haut.
@@ -445,7 +465,7 @@ var AnnotaCardFields = {
 			e.stopPropagation();
 			let card = b.closest(".preview");
 			if (!card || b.disabled) return;
-			this.fillWithAI(card, b).catch(err => log("champs de carte : " + err));
+			this.fillWithAI(card, b, only).catch(err => log("champs de carte : " + err));
 		});
 		return b;
 	},
@@ -568,8 +588,9 @@ var AnnotaCardFields = {
 	},
 
 	// Le modèle remplit les champs restés vides, comme à la création ; ce qui
-	// est tapé n'est jamais réécrit.
-	async fillWithAI(card, button) {
+	// est tapé n'est jamais réécrit. Avec « only », seuls ces champs sont
+	// redemandés, et leur valeur actuelle est remplacée.
+	async fillWithAI(card, button, only) {
 		let notReady = Annota.providerReadyError();
 		if (notReady) {
 			toast("Annota", notReady, "error");
@@ -600,7 +621,7 @@ var AnnotaCardFields = {
 			let built = {};
 			let comment = await Annota.buildComment({
 				text, ctx: Annota.getContext(item), color: Annota.keyForItem(item),
-				comment: "", fields: values,
+				comment: "", fields: values, only,
 				getRefs: () => Annota.getReferences(item, text), out: built
 			});
 			if (comment === null) return;

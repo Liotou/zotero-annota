@@ -58,7 +58,7 @@
     <html:section class="annota-card">
       <html:h3 class="annota-card-title"><html:span class="annota-num">1</html:span>
         <html:span data-i18n="fields.title">Fields</html:span></html:h3>
-      <html:p class="annota-help" data-i18n="fields.help">Entered when highlighting or in the annotation card, in the order of the comment. An empty field is filled by the model when a prompt is set.</html:p>
+      <html:p class="annota-help" data-i18n="fields.help">Entered when highlighting or in the annotation card, in the order of the comment. An empty field is filled by the model when it has an AI instruction.</html:p>
       <html:div id="annota-fields-editor">
         <html:textarea id="annota-fields" rows="5" class="annota-input annota-code"
                        aria-label="Fields (text)"/>
@@ -76,32 +76,6 @@ resume     | Résumé     | ai       | Résume le passage en une phrase. | itali
           <html:p data-i18n="fields.ref.vars">The comment has one line per field, in order and in its format. Each field is also a variable (<html:code>{{name}}</html:code>) usable in the prompt and the layout.</html:p>
         </html:div>
       </html:details>
-    </html:section>
-
-    <html:section class="annota-card">
-      <html:h3 class="annota-card-title"><html:span class="annota-num">2</html:span>
-        <html:span data-i18n="trigger.title">Trigger</html:span></html:h3>
-      <html:div class="annota-choices" role="radiogroup">
-        <html:label class="annota-check">
-          <html:input type="radio" name="annota-trigger" value="auto"/>
-          <html:span data-i18n="trigger.auto">When the annotation is created</html:span>
-        </html:label>
-        <html:label class="annota-check">
-          <html:input type="radio" name="annota-trigger" value="manual"/>
-          <html:span data-i18n="trigger.manual">On request only (context menu, or when fields are filled in)</html:span>
-        </html:label>
-      </html:div>
-      <html:p id="annota-trigger-perfield" class="annota-help annota-note" hidden="hidden" data-i18n="trigger.perfield">Fields have their own AI instruction: each one is triggered according to its “Fill automatically” box.</html:p>
-    </html:section>
-
-    <html:section class="annota-card">
-      <html:h3 class="annota-card-title"><html:span class="annota-num">3</html:span>
-        <html:span data-i18n="prompt.title">Prompt</html:span>
-        <html:span class="annota-optional" data-i18n="optional">optional</html:span></html:h3>
-      <html:p class="annota-help" data-i18n="prompt.help">Without a prompt, the comment is built from the fields alone. With fields, the model fills only the empty ones; entered values are never rewritten. When every field is filled, no request is sent.</html:p>
-      <html:p id="annota-prompt-perfield" class="annota-help annota-note" hidden="hidden" data-i18n="prompt.perfield">Fields have their own AI instruction: this prompt becomes a shared preamble.</html:p>
-      <html:textarea id="annota-prompt" rows="8" class="annota-input annota-code"
-                     aria-label="Prompt" placeholder="Empty: highlights of this color are not sent to the model." data-i18n-ph="prompt.ph"/>
 
       <html:details class="annota-details">
         <html:summary data-i18n="layout.title">Custom layout</html:summary>
@@ -120,6 +94,38 @@ resume     | Résumé     | ai       | Résume le passage en une phrase. | itali
           <html:p data-i18n="vars.settings"><html:b>Settings</html:b>: <html:code>{{language}}</html:code>, <html:code>{{maxWords}}</html:code>. <html:b>Layout only</html:b>: <html:code>{{ai}}</html:code>. These names are reserved for fields. Prompt examples: PROMPT-EXAMPLES.txt in the repository.</html:p>
         </html:div>
       </html:details>
+    </html:section>
+
+    <html:section id="annota-trigger-card" class="annota-card">
+      <html:h3 class="annota-card-title"><html:span class="annota-num">2</html:span>
+        <html:span data-i18n="trigger.title">Trigger</html:span></html:h3>
+      <html:div class="annota-choices" role="radiogroup">
+        <html:label class="annota-check">
+          <html:input type="radio" name="annota-trigger" value="auto"/>
+          <html:span data-i18n="trigger.auto">When the annotation is created</html:span>
+        </html:label>
+        <html:label class="annota-check">
+          <html:input type="radio" name="annota-trigger" value="manual"/>
+          <html:span data-i18n="trigger.manual">On request only (context menu, or when fields are filled in)</html:span>
+        </html:label>
+      </html:div>
+      <html:p id="annota-trigger-perfield" class="annota-help annota-note" hidden="hidden" data-i18n="trigger.perfield">Fields have their own AI instruction: each one is triggered according to its “Fill automatically” box.</html:p>
+    </html:section>
+
+    <html:section id="annota-prompt-card" class="annota-card">
+      <html:h3 class="annota-card-title"><html:span class="annota-num">3</html:span>
+        <html:span data-i18n="prompt.title">Prompt</html:span>
+        <html:span class="annota-optional" data-i18n="optional">optional</html:span></html:h3>
+      <html:p class="annota-help" data-i18n="prompt.help">Without a prompt, the comment is built from the fields alone. With fields, the model fills only the empty ones; entered values are never rewritten. When every field is filled, no request is sent.</html:p>
+      <html:div id="annota-prompt-legacy" class="annota-legacy" hidden="hidden">
+        <html:p class="annota-help" data-i18n="prompt.legacy">This color has fields: each one now takes its own AI instruction (“AI instruction” under the field). This general prompt is no longer needed.</html:p>
+        <html:p id="annota-prompt-legacy-state" class="annota-help annota-note"/>
+        <html:button id="annota-prompt-split" type="button" class="annota-button"
+                     data-i18n="prompt.split">Spread into the fields</html:button>
+      </html:div>
+      <html:textarea id="annota-prompt" rows="8" class="annota-input annota-code"
+                     aria-label="Prompt" placeholder="Empty: highlights of this color are not sent to the model." data-i18n-ph="prompt.ph"/>
+
     </html:section>
 
     <html:div class="annota-actions">
