@@ -3,9 +3,9 @@
     "annota@equiriconi": {
       "updates": [
         {
-          "version": "2.44.0",
-          "update_link": "https://github.com/Liotou/zotero-annota/releases/download/v2.44.0/annota.xpi",
-          "update_hash": "sha256:7bf134c1c0a732deb969e895c90267b5f107472fc3b9953087892fc0081c9a33",
+          "version": "2.44.1",
+          "update_link": "https://github.com/Liotou/zotero-annota/releases/download/v2.44.1/annota.xpi",
+          "update_hash": "sha256:b9e5f42119a7d8686b9ce53e81bbcdee76167ed09a00904492d41e2ac3412a08",
           "applications": {
             "zotero": {
               "strict_min_version": "7.0",
