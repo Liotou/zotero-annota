@@ -2243,29 +2243,57 @@ Annota = {
 		return kept.length ? "(" + kept.join(" ; ") + ")" : "";
 	},
 
-	// Retire d'une liste de citations celles dont l'auteur ne figure ni dans
-	// le passage ni dans les références résolues : un petit modèle reprend
-	// volontiers les exemples du prompt (« Dyllick et Hockerts, 2002 »). Une
-	// citation réelle a toujours son auteur dans l'un ou l'autre. Seule une
-	// valeur faite uniquement de citations est touchée.
+	// Retire d'une liste de citations celles que le passage n'appelle pas : un
+	// petit modèle reprend volontiers les exemples du prompt, ou un auteur
+	// voisin dans la bibliographie résolue. Quand le passage cite à la manière
+	// auteur-année (une année y figure), l'auteur ET l'année doivent s'y lire ;
+	// sinon (appel numérique, note de bas de page), l'auteur peut venir des
+	// références résolues. Une page qui ne figure ni dans le passage ni dans
+	// ces références est ôtée. Seule une valeur faite uniquement de citations
+	// est touchée.
 	stripUnfoundCitations(value, text, ctx) {
-		let s = String(value || "");
+		let s = this.mergeCitationGroups(value);
 		let m = s.trim().match(/^\(([^()]+)\)\.?$/);
 		if (!m) return s;
 		let norm = x => String(x).normalize("NFD").replace(/[\u0300-\u036f]/g, "")
 			.toLowerCase();
-		let pool = norm(String(text || "") + "\n" + String((ctx && ctx.references) || ""));
+		let passage = norm(text || "");
+		let nominal = /(^|[^\d])(1[5-9]\d\d|20\d\d)[a-z]?(?!\d)/.test(passage);
+		let pool = nominal ? passage : passage + "\n" + norm((ctx && ctx.references) || "");
+		let digits = new Set((pool.match(/\d+/g) || []));
 		let PARTICLES = /^(de|du|des|d|van|von|der|den|le|la|les|di|da|del|dos|mc|st)$/;
+		let changed = false;
 		let parts = m[1].split(/\s*;\s*/).filter(Boolean);
-		let kept = parts.filter(p => {
-			let names = norm(p.split(",")[0]).split(/[^a-z]+/)
-				.filter(w => w.length >= 3 && !PARTICLES.test(w) && w !== "et" && w !== "and" && w !== "al");
-			// Rien d'identifiable : on ne juge pas.
-			if (!names.length) return true;
-			return pool.includes(names[0]);
-		});
-		if (kept.length === parts.length) return s;
-		log("citation absente du passage et des références retirée : " + s.trim());
+		let kept = [];
+		let isName = w => w.length >= 3 && !PARTICLES.test(norm(w)) && !/^(et|and|al)$/i.test(w);
+		for (let p of parts) {
+			let ym = p.match(/(^|[^\d])(\d{4})[a-z]?(?!\d)/);
+			let year = ym && ym[2];
+			// Auteurs : ce qui précède l'année. On garde ceux que la source
+			// contient ; un nom parasite (« Eminescu, Nadin, M. ») est ôté sans
+			// emporter les autres.
+			let authorStr = (ym ? p.slice(0, ym.index + ym[1].length) : p.split(",")[0])
+				.replace(/[,\s]+$/, "");
+			let names = authorStr.split(/[^A-Za-z\u00C0-\u024F'\u2019-]+/).filter(isName);
+			let present = names.filter(n => pool.includes(norm(n)));
+			if (names.length && !present.length) { changed = true; continue; }
+			if (nominal && year && !digits.has(year)) { changed = true; continue; }
+			if (present.length < names.length) {
+				changed = true;
+				let etal = /\bet al\b/i.test(authorStr) ? " et al." : "";
+				p = present.join(" et ") + etal + ", " + p.slice(ym ? ym.index + ym[1].length : authorStr.length)
+					.replace(/^[,\s]+/, "");
+			}
+			// Page citée : chacun de ses nombres doit se lire dans la source.
+			let q = p.replace(/,?\s*pp?\.\s*([\d\s,\-\u2013]+)$/, (all, nums) => {
+				let ok = (nums.match(/\d+/g) || []).every(n => digits.has(n));
+				if (!ok) changed = true;
+				return ok ? all : "";
+			});
+			kept.push(q.trim());
+		}
+		if (!changed) return s;
+		log("citations absentes du passage retirées : " + s.trim() + " → " + kept.join(" ; "));
 		return kept.length ? "(" + kept.join(" ; ") + ")" : "";
 	},
 
@@ -2278,31 +2306,6 @@ Annota = {
 		+ " passage: never cite the document being read as a source, and never use"
 		+ " its page.",
 
-	// Découpe un ancien prompt général selon ses intitulés « CHAMP nom » (ou
-	// « FIELD nom ») : { preamble, sections: { nom: texte } }. Sert au bouton
-	// « Répartir dans les champs » des réglages.
-	splitPromptByFields(prompt, schema) {
-		let bare = x => String(x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-			.toLowerCase().replace(/[^a-z0-9]/g, "");
-		let byKey = {};
-		for (let f of schema || []) {
-			byKey[bare(f.name)] = f.name;
-			byKey[bare(f.label)] = f.name;
-		}
-		let preamble = [], sections = {}, current = null;
-		for (let line of String(prompt || "").split("\n")) {
-			let m = line.match(/^\s*(?:#+\s*)?\**\s*(?:champ|field)\s+[«"“]?\s*([^:»"”*]+?)\s*[»"”]?\s*\**\s*:?\s*$/i);
-			let name = m && byKey[bare(m[1])];
-			if (name) { current = name; sections[name] = sections[name] || []; continue; }
-			(current ? sections[current] : preamble).push(line);
-		}
-		let out = {};
-		for (let k of Object.keys(sections)) {
-			let t = sections[k].join("\n").trim();
-			if (t) out[k] = t;
-		}
-		return { preamble: preamble.join("\n").trim(), sections: out };
-	},
 	buildSingleFieldPrompt(entry, f, cfg, schema, values) {
 		let parts = [this.FIELD_PREAMBLE];
 		let head = "Write the field \"" + (f.label || f.name) + "\".";

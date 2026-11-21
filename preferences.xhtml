@@ -117,12 +117,6 @@ resume     | Résumé     | ai       | Résume le passage en une phrase. | itali
         <html:span data-i18n="prompt.title">Prompt</html:span>
         <html:span class="annota-optional" data-i18n="optional">optional</html:span></html:h3>
       <html:p class="annota-help" data-i18n="prompt.help">Without a prompt, the comment is built from the fields alone. With fields, the model fills only the empty ones; entered values are never rewritten. When every field is filled, no request is sent.</html:p>
-      <html:div id="annota-prompt-legacy" class="annota-legacy" hidden="hidden">
-        <html:p class="annota-help" data-i18n="prompt.legacy">This color has fields: each one now takes its own AI instruction (“AI instruction” under the field). This general prompt is no longer needed.</html:p>
-        <html:p id="annota-prompt-legacy-state" class="annota-help annota-note"/>
-        <html:button id="annota-prompt-split" type="button" class="annota-button"
-                     data-i18n="prompt.split">Spread into the fields</html:button>
-      </html:div>
       <html:textarea id="annota-prompt" rows="8" class="annota-input annota-code"
                      aria-label="Prompt" placeholder="Empty: highlights of this color are not sent to the model." data-i18n-ph="prompt.ph"/>
 
