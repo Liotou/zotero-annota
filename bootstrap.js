@@ -2326,17 +2326,18 @@ Annota = {
 	},
 
 	// Le modèle ouvre parfois sa réponse par le nom du champ, seul sur sa
-	// ligne (« Paraphrase. ») : cette ligne n'est pas la valeur.
+	// ligne (« Paraphrase. ») ou collé au texte (« Paraphrase. La quête… ») :
+	// ce nom n'est pas la valeur.
 	dropLabelLine(reply, f) {
-		let lines = String(reply || "").replace(/^\s+/, "").split("\n");
-		if (lines.length < 2) return String(reply || "");
+		let text = String(reply || "").replace(/^\s+/, "");
 		let bare = x => String(x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
 			.toLowerCase().replace(/[^a-z0-9]/g, "");
-		let first = bare(lines[0]);
-		if (first && (first === bare(f.name) || first === bare(f.label))) {
-			return lines.slice(1).join("\n");
+		let m = text.match(/^\**\s*([^.:\n*]{1,60}?)\s*\**\s*(?:[.:\u2013\u2014-]\s*|\n|$)/);
+		if (m) {
+			let k = bare(m[1]);
+			if (k && (k === bare(f.name) || k === bare(f.label))) return text.slice(m[0].length);
 		}
-		return String(reply || "");
+		return text;
 	},
 
 	// Champs à remplir, décrits pour une sortie imposée : nom, et consigne
