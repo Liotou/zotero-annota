@@ -91,6 +91,7 @@ resume     | Résumé     | ai       | Résume le passage en une phrase. | itali
           <html:span data-i18n="trigger.manual">On request only (context menu, or when fields are filled in)</html:span>
         </html:label>
       </html:div>
+      <html:p id="annota-trigger-perfield" class="annota-help annota-note" hidden="hidden" data-i18n="trigger.perfield">Fields have their own AI instruction: each one is triggered according to its “Fill automatically” box.</html:p>
     </html:section>
 
     <html:section class="annota-card">
@@ -98,6 +99,7 @@ resume     | Résumé     | ai       | Résume le passage en une phrase. | itali
         <html:span data-i18n="prompt.title">Prompt</html:span>
         <html:span class="annota-optional" data-i18n="optional">optional</html:span></html:h3>
       <html:p class="annota-help" data-i18n="prompt.help">Without a prompt, the comment is built from the fields alone. With fields, the model fills only the empty ones; entered values are never rewritten. When every field is filled, no request is sent.</html:p>
+      <html:p id="annota-prompt-perfield" class="annota-help annota-note" hidden="hidden" data-i18n="prompt.perfield">Fields have their own AI instruction: this prompt becomes a shared preamble.</html:p>
       <html:textarea id="annota-prompt" rows="8" class="annota-input annota-code"
                      aria-label="Prompt" placeholder="Empty: highlights of this color are not sent to the model." data-i18n-ph="prompt.ph"/>
 

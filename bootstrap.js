@@ -163,9 +163,50 @@ Annota = {
 			prompt,
 			template,
 			fields,
+			fieldAI: this.normFieldAI(raw.fieldAI),
 			label: String(raw.label || "").trim(),
 			trigger: raw.trigger === "manual" ? "manual" : "auto"
 		};
+	},
+
+	// Consigne propre à chaque champ : { nom: { prompt, auto } }. « auto » :
+	// le champ est rempli dès la création de l'annotation ; sinon seulement à
+	// la demande (bouton IA de la carte, menu contextuel).
+	normFieldAI(raw) {
+		let out = {};
+		if (!raw || typeof raw !== "object") return out;
+		for (let k of Object.keys(raw)) {
+			let v = raw[k];
+			if (!v || typeof v !== "object") continue;
+			out[k] = { prompt: String(v.prompt || ""), auto: v.auto !== false };
+		}
+		return out;
+	},
+
+	// Champs dotés d'une consigne propre (hors type « ai », qui porte la sienne
+	// dans la définition du champ) : { nom: { prompt, auto } }.
+	fieldPrompts(entry) {
+		let fa = (entry && entry.fieldAI) || {};
+		let out = {};
+		for (let f of this.parseFieldSchema(entry && entry.fields)) {
+			if (f.type === "ai") continue;
+			let c = fa[f.name];
+			if (c && String(c.prompt || "").trim()) out[f.name] = c;
+		}
+		return out;
+	},
+
+	// Mode « une consigne par champ » : dès qu'un champ a la sienne. Le prompt
+	// de la couleur n'est plus alors qu'un préambule commun, et un champ sans
+	// consigne n'est jamais rempli par le modèle.
+	perFieldMode(entry) {
+		return Object.keys(this.fieldPrompts(entry)).length > 0;
+	},
+
+	// Un champ « ai » est-il rempli à la création ? Oui, sauf case décochée.
+	_aiFieldAuto(entry, f) {
+		let c = entry && entry.fieldAI && entry.fieldAI[f.name];
+		return !c || c.auto !== false;
 	},
 
 	// ---- Champs personnalisés par couleur ----
@@ -321,6 +362,12 @@ Annota = {
 		let schema = this.parseFieldSchema(entry.fields);
 		out = out.concat(this.validateVariables(this.t("lint.where.prompt"), entry.prompt, schema));
 		out = out.concat(this.validateVariables(this.t("lint.where.layout"), entry.template, schema));
+		let fa = entry.fieldAI || {};
+		for (let f of schema) {
+			if (fa[f.name] && fa[f.name].prompt) {
+				out = out.concat(this.validateVariables(f.label || f.name, fa[f.name].prompt, schema));
+			}
+		}
 
 		// {{ai}} n'a de sens que dans la disposition.
 		if (/\{\{\s*ai\s*\}\}/.test(String(entry.prompt || ""))) {
@@ -432,6 +479,7 @@ Annota = {
 	entryFillsFields(entry) {
 		if (!entry || !String(entry.prompt || "").trim()) return false;
 		if (this.entryNeedsAI(entry)) return false;   // la réponse EST le commentaire
+		if (this.perFieldMode(entry)) return false;   // chaque champ a sa consigne
 		return this.parseFieldSchema(entry.fields).some(f => f.type !== "ai");
 	},
 
@@ -445,18 +493,24 @@ Annota = {
 	// Le fournisseur est-il sollicité, à un titre ou à un autre ?
 	entryUsesProvider(entry) {
 		return this.entryNeedsAI(entry) || this.entryHasAIFields(entry)
-			|| this.entryFillsFields(entry);
+			|| this.entryFillsFields(entry) || this.perFieldMode(entry);
 	},
 
 	// Sera-t-il sollicité POUR CETTE annotation ? entryUsesProvider décrit la
 	// couleur en général ; ici on tient compte de ce qui a déjà été saisi, car
 	// un formulaire entièrement rempli ne laisse rien à demander au modèle.
-	willCallProvider(entry, values) {
+	// trigger « auto » : à la création de l'annotation, seuls comptent les
+	// champs réglés sur « automatique ».
+	willCallProvider(entry, values, trigger) {
 		if (!entry) return false;
 		if (this.entryNeedsAI(entry)) return true;
 		let schema = this.parseFieldSchema(entry.fields);
-		if (schema.some(f => f.type === "ai" && f.prompt.trim()
-				&& !String((values && values[f.name]) || "").trim())) return true;
+		let empty = f => !String((values && values[f.name]) || "").trim();
+		if (schema.some(f => f.type === "ai" && f.prompt.trim() && empty(f)
+				&& (trigger !== "auto" || this._aiFieldAuto(entry, f)))) return true;
+		let fp = this.fieldPrompts(entry);
+		if (schema.some(f => fp[f.name] && empty(f)
+				&& (trigger !== "auto" || fp[f.name].auto))) return true;
 		return this.entryFillsFields(entry)
 			&& this.fieldsToFill(schema, values).length > 0;
 	},
@@ -647,7 +701,14 @@ Annota = {
 		// saisie serait silencieusement perdue à la validation.
 		let pending = isImage ? null : this.peekPendingFields(text);
 		let filled = this._hasFilledValues(pending);
-		if (entry.trigger !== "auto" && !filled) {
+		// Une consigne par champ : chaque champ porte son propre déclenchement,
+		// celui de la couleur ne s'applique plus.
+		let perField = this.perFieldMode(entry);
+		if (perField && !filled && !this.willCallProvider(entry, pending, "auto")) {
+			log("annotation " + id + " ignorée : aucun champ en remplissage automatique");
+			return;
+		}
+		if (!perField && entry.trigger !== "auto" && !filled) {
 			log("annotation " + id + " ignorée : couleur en mode « à la demande »"
 				+ " et aucun champ saisi");
 			return;
@@ -663,7 +724,7 @@ Annota = {
 		// d'exiger une clé API ou le CLI dans ce cas. On raisonne sur CETTE
 		// annotation (willCallProvider), pas sur la couleur en général, car un
 		// formulaire entièrement rempli ne laisse rien à demander.
-		let callsProvider = this.willCallProvider(entry, pending);
+		let callsProvider = this.willCallProvider(entry, pending, "auto");
 		if (isImage && callsProvider) {
 			text = await this.areaText(item);
 			if (!text) {
@@ -697,7 +758,7 @@ Annota = {
 			// parcourt les liens, ce qui se paie en secondes.
 			let built = {};
 			let comment = await this.buildComment({
-				text, ctx, color: key, comment: existing, fields,
+				text, ctx, color: key, comment: existing, fields, trigger: "auto",
 				getRefs: () => this.getReferences(item, text), out: built
 			});
 			if (comment === null) return;
@@ -2014,6 +2075,8 @@ Annota = {
 		// réponse sera identique au second essai.
 		let st = (e && typeof e.status === "number") ? e.status : 0;
 		if ([400, 401, 403, 404].includes(st)) return false;
+		// Réponse vide : le modèle n'avait rien à écrire, il redira la même chose.
+		if (e && e.empty) return false;
 		// Fournisseurs sans statut (CLI, Apple) : il ne reste que le libellé.
 		let m = String((e && e.message) || e || "");
 		return !/api key|unauthorized|forbidden|not found|introuvable/i.test(m);
@@ -2184,6 +2247,43 @@ Annota = {
 		return kept.length ? "(" + kept.join(" ; ") + ")" : "";
 	},
 
+	// Consigne d'un seul champ : le préambule commun de la couleur (facultatif),
+	// la consigne du champ, et les champs déjà écrits comme contexte.
+	buildSingleFieldPrompt(entry, f, cfg, schema, values) {
+		let parts = [];
+		let common = String(entry.prompt || "").trim();
+		if (common) parts.push(common);
+		let head = "Write the field \"" + (f.label || f.name) + "\".";
+		if (f.type === "select" && f.options.length) {
+			head += " Answer with exactly one of: " + f.options.join(", ") + ".";
+		}
+		else if (f.type === "check") head += " Answer true or false.";
+		parts.push(head + "\n" + String(cfg.prompt).trim());
+		let given = schema.filter(g => g !== f && String((values && values[g.name]) || "").trim());
+		if (given.length) {
+			parts.push("Other fields of this note, already written (context only,"
+				+ " do not repeat them):\n" + given.map(g =>
+					"- " + (g.label || g.name) + ": " + values[g.name]).join("\n"));
+		}
+		parts.push("Answer with the value of this field only: no field name, no"
+			+ " preamble, no quotation marks.");
+		return parts.join("\n\n");
+	},
+
+	// Le modèle ouvre parfois sa réponse par le nom du champ, seul sur sa
+	// ligne (« Paraphrase. ») : cette ligne n'est pas la valeur.
+	dropLabelLine(reply, f) {
+		let lines = String(reply || "").replace(/^\s+/, "").split("\n");
+		if (lines.length < 2) return String(reply || "");
+		let bare = x => String(x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+			.toLowerCase().replace(/[^a-z0-9]/g, "");
+		let first = bare(lines[0]);
+		if (first && (first === bare(f.name) || first === bare(f.label))) {
+			return lines.slice(1).join("\n");
+		}
+		return String(reply || "");
+	},
+
 	// Champs à remplir, décrits pour une sortie imposée : nom, et consigne
 	// courte tirée du libellé et du type.
 	describeFields(toFill) {
@@ -2202,7 +2302,9 @@ Annota = {
 	// Renvoie null si la couleur n'a rien à produire.
 	// out (facultatif) reçoit les valeurs finales des champs et les références
 	// résolues : la carte d'annotation du lecteur les réaffiche (card-fields.js).
-	async buildComment({ text, ctx, color, comment, fields, getRefs, out }) {
+	// trigger : « auto » à la création de l'annotation (seuls les champs réglés
+	// sur « automatique » sont demandés au modèle), sinon demande explicite.
+	async buildComment({ text, ctx, color, comment, fields, getRefs, out, trigger }) {
 		let entry = this.getColorEntry(color);
 		if (!entry) return null;
 
@@ -2217,7 +2319,7 @@ Annota = {
 		let t0 = Date.now(), tRefs = 0, tAI = 0;
 		if (getRefs && !ctx.references) {
 			let tplWantsRefs = /\{\{\s*references\s*\}\}/.test(this.effectiveTemplate(entry));
-			let promptWantsRefs = this.willCallProvider(entry, values);
+			let promptWantsRefs = this.willCallProvider(entry, values, trigger);
 			if (tplWantsRefs || promptWantsRefs) {
 				let t = Date.now();
 				ctx.references = await getRefs();
@@ -2231,6 +2333,7 @@ Annota = {
 		for (let f of schema) {
 			if (f.type !== "ai" || !f.prompt.trim()) continue;
 			if (String(values[f.name] || "").trim()) continue;
+			if (trigger === "auto" && !this._aiFieldAuto(entry, f)) continue;
 			try {
 				let t = Date.now();
 				values[f.name] = await this.generateComment({
@@ -2287,6 +2390,42 @@ Annota = {
 				}
 			}
 		}
+
+		// 2 bis. Une consigne par champ : une requête courte et ciblée par champ
+		//    vide, dans l'ordre des champs ; chacune voit ce qui précède. Un
+		//    petit modèle (Apple) s'y retrouve bien mieux que dans une longue
+		//    consigne qui décrit tous les champs à la fois.
+		let fp = this.fieldPrompts(entry);
+		let firstError = null, anyDone = false;
+		for (let f of schema) {
+			let cfg = fp[f.name];
+			if (!cfg || String(values[f.name] || "").trim()) continue;
+			if (trigger === "auto" && !cfg.auto) continue;
+			try {
+				let t = Date.now();
+				let reply = await this.generateComment({
+					text, ctx, color, comment, fields: values,
+					promptOverride: this.buildSingleFieldPrompt(entry, f, cfg, schema, values)
+				});
+				tAI += Date.now() - t;
+				let v = this.parseFieldReply(this.dropLabelLine(reply, f), [f])[f.name] || "";
+				// « - » (ou « aucune ») : rien à écrire dans ce champ.
+				if (/^[\s\-\u2013\u2014.]*$|^(aucune?|none|n\/a|néant|rien)\.?$/i.test(v.trim())) v = "";
+				values[f.name] = this.stripUnfoundCitations(
+					this.stripSelfCitations(v, ctx), text, ctx);
+				anyDone = true;
+			}
+			catch (e) {
+				if (e && e.cancelled) throw e;
+				// Réponse vide : le modèle n'a rien trouvé à écrire, ce n'est
+				// pas une panne (une référence absente, typiquement).
+				if (e && e.empty) { anyDone = true; continue; }
+				log("consigne du champ « " + f.name + " » : " + e);
+				if (!firstError) firstError = e;
+			}
+		}
+		// Tout a échoué : on le dit, plutôt que d'écrire un commentaire vide.
+		if (firstError && !anyDone) throw firstError;
 
 		// 3. Réponse d'IA pour le commentaire ENTIER : uniquement si la
 		//    disposition la réclame ({{ai}}) ou s'il n'y a ni champs ni gabarit.
@@ -2549,7 +2688,11 @@ Annota = {
 				if (exitCode >= 2 && exitCode <= 4) err.status = 400;   // pas de nouvel essai
 				throw err;
 			}
-			if (!out.trim()) throw new Error("Réponse vide d'Apple Intelligence");
+			if (!out.trim()) {
+				let err = new Error("Réponse vide d'Apple Intelligence");
+				err.empty = true;
+				throw err;
+			}
 			if (req.fields) return out.trim();
 			return opts.raw ? out.trim() : this.sanitize(out);
 		}
@@ -2748,7 +2891,11 @@ Annota = {
 				throw new Error("CLI code " + exitCode + " : "
 					+ (errText.trim() || "(pas de sortie d'erreur)").slice(0, 300));
 			}
-			if (!out.trim()) throw new Error("Réponse vide du CLI");
+			if (!out.trim()) {
+				let err = new Error("Réponse vide du CLI");
+				err.empty = true;
+				throw err;
+			}
 			return opts.raw ? out.trim() : this.sanitize(out);
 		}
 		finally {

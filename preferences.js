@@ -119,10 +119,20 @@
 		// Un libellé seul n'active pas une couleur (voir getColorEntry) : il la
 		// nomme, il ne la configure pas.
 		if (!prompt.trim() && !template.trim() && !fields.trim()) return null;
+		let fieldAI = {};
+		if (raw.fieldAI && typeof raw.fieldAI === "object") {
+			for (let k of Object.keys(raw.fieldAI)) {
+				let v = raw.fieldAI[k];
+				if (v && typeof v === "object") {
+					fieldAI[k] = { prompt: String(v.prompt || ""), auto: v.auto !== false };
+				}
+			}
+		}
 		return {
 			prompt,
 			template,
 			fields,
+			fieldAI,
 			label: String(raw.label || "").trim(),
 			trigger: raw.trigger === "manual" ? "manual" : "auto"
 		};
@@ -441,7 +451,11 @@
 		return String(s || "").replace(/\|/g, "/").replace(/\s*\n\s*/g, " ").trim();
 	}
 
-	function createFieldEditor({ host, textarea, templateArea, onChange, onCommit, getColor }) {
+	// getFieldAI / setFieldAI : consignes propres aux champs, { nom: { prompt,
+	// auto } }, conservées à part du texte des champs (une consigne tient sur
+	// plusieurs lignes, la syntaxe « | » non).
+	function createFieldEditor({ host, textarea, templateArea, onChange, onCommit, getColor,
+			getFieldAI, setFieldAI }) {
 		let a = api();
 		let rows = [];
 		// preferred : le choix de l'utilisateur ; mode : ce qui est affiché
@@ -473,7 +487,8 @@
 		let addBtn = btn(T("fe.add"), "annota-button annota-fe-add", T("fe.add.title"), () => {
 			let base = T("fe.base", { n: rows.length + 1 });
 			rows.push({ name: uniqueName(slug(base, a)), label: base, type: "text",
-				format: "plain", options: "", prompt: "", nameEdited: false });
+				format: "plain", options: "", prompt: "", nameEdited: false,
+				ai: { prompt: "", auto: true } });
 			write(true);
 			render();
 			let inputs = list.querySelectorAll(".annota-fe-label");
@@ -498,7 +513,9 @@
 
 		function parse(text) {
 			if (!a) return [];
+			let fa = (getFieldAI && getFieldAI()) || {};
 			return a.parseFieldSchema(text).map(f => ({
+				ai: Object.assign({ prompt: "", auto: true }, fa[f.name] || {}),
 				name: f.name,
 				label: f.label,
 				type: f.type,
@@ -524,6 +541,18 @@
 		// une frappe, enregistrée après une pause (onChange).
 		function write(commit) {
 			textarea.value = serialize();
+			if (setFieldAI) {
+				let map = {};
+				for (let r of rows) {
+					let ai = r.ai || {};
+					let p = String(ai.prompt || "");
+					// Un champ « ai » garde sa consigne dans sa définition : seule
+					// sa case « automatique » est retenue ici.
+					if (r.type === "ai") { if (ai.auto === false) map[r.name] = { prompt: "", auto: false }; }
+					else if (p.trim()) map[r.name] = { prompt: p, auto: ai.auto !== false };
+				}
+				setFieldAI(map);
+			}
 			renderPreview();
 			if (commit) onCommit(); else onChange();
 		}
@@ -574,7 +603,7 @@
 						let u = el("u"); node.appendChild(u); node = u;
 					}
 					node.textContent = sample;
-					if (r.type === "ai") {
+					if (r.type === "ai" || (r.ai && String(r.ai.prompt || "").trim())) {
 						line.setAttribute("class", "annota-fe-annot-ai");
 						line.setAttribute("title", T("fe.type.ai"));
 					}
@@ -665,6 +694,7 @@
 				pr.addEventListener("input", () => { r.prompt = pr.value; write(false); });
 				row.appendChild(pr);
 			}
+			row.appendChild(aiBlock(r));
 
 			// Nom de variable : déduit du libellé tant qu'on ne l'a pas modifié.
 			let varLine = el("label", "annota-fe-var");
@@ -713,6 +743,57 @@
 			return row;
 		}
 
+		// Consigne propre au champ et déclenchement automatique. Repliée tant
+		// que le champ n'a pas de consigne : la plupart n'en ont pas besoin.
+		function aiBlock(r) {
+			r.ai = r.ai || { prompt: "", auto: true };
+			let box = el("div", "annota-fe-ai");
+			let auto = el("label", "annota-check annota-fe-auto");
+			let cb = el("input");
+			cb.setAttribute("type", "checkbox");
+			cb.checked = r.ai.auto !== false;
+			cb.addEventListener("change", () => { r.ai.auto = cb.checked; write(true); });
+			auto.appendChild(cb);
+			auto.appendChild(el("span", null, T("fe.ai.auto")));
+
+			if (r.type === "ai") {
+				box.appendChild(auto);
+				return box;
+			}
+			let has = () => !!String(r.ai.prompt || "").trim();
+			let body = el("div", "annota-fe-ai-body");
+			let pr = el("textarea", "annota-input annota-fe-ai-prompt");
+			pr.setAttribute("rows", "3");
+			pr.setAttribute("placeholder", T("fe.ai.field.ph"));
+			pr.setAttribute("aria-label", T("fe.ai.field.aria", { name: r.label || r.name }));
+			pr.value = r.ai.prompt || "";
+			body.appendChild(pr);
+			body.appendChild(auto);
+			let toggle = btn("", "annota-link annota-fe-ai-toggle", "", () => {
+				r._aiOpen = body.hidden;
+				body.hidden = !r._aiOpen;
+				label();
+				if (r._aiOpen) pr.focus();
+			});
+			let label = () => {
+				toggle.textContent = (body.hidden ? "▸ " : "▾ ")
+					+ T(has() ? "fe.ai.toggle.on" : "fe.ai.toggle");
+				box.setAttribute("data-on", has() ? "true" : "false");
+				auto.hidden = !has();
+			};
+			body.hidden = !(has() || r._aiOpen);
+			pr.addEventListener("input", () => {
+				let before = has();
+				r.ai.prompt = pr.value;
+				if (before !== has()) { label(); write(true); }
+				else write(false);
+			});
+			box.appendChild(toggle);
+			box.appendChild(body);
+			label();
+			return box;
+		}
+
 		function render() {
 			list.textContent = "";
 			rows.forEach((r, i) => list.appendChild(renderRow(r, i)));
@@ -724,7 +805,7 @@
 				for (let p of fieldPresets()) {
 					chips.appendChild(btn(p.label, "annota-fe-preset", T("fe.preset.title"), () => {
 						rows = p.rows.map(x => Object.assign(
-							{ options: "", prompt: "", nameEdited: true }, x));
+							{ options: "", prompt: "", nameEdited: true, ai: { prompt: "", auto: true } }, x));
 						write(true);
 						render();
 					}));
@@ -820,6 +901,22 @@
 			for (let r of triggerRadios) r.checked = (r.value === (v === "manual" ? "manual" : "auto"));
 		}
 
+		// Consignes propres aux champs de la couleur en cours d'édition.
+		let fieldAI = {};
+		let triggerNote = document.getElementById("annota-trigger-perfield");
+		let promptNote = document.getElementById("annota-prompt-perfield");
+		function perField() {
+			return Object.keys(fieldAI).some(k => String(fieldAI[k].prompt || "").trim());
+		}
+		// Une consigne par champ : le déclenchement se règle champ par champ,
+		// et le prompt de la couleur devient un préambule commun.
+		function syncPerField() {
+			let on = perField();
+			for (let r of triggerRadios) r.disabled = on;
+			if (triggerNote) triggerNote.hidden = !on;
+			if (promptNote) promptNote.hidden = !on;
+		}
+
 		function save() {
 			let map = readColorMap();
 			let prompt = textarea.value;
@@ -831,6 +928,7 @@
 				map[keyOf(current)] = { prompt, template, fields,
 					label: String(labelInput.value || "").trim(),
 					trigger: currentTrigger() };
+				if (Object.keys(fieldAI).length) map[keyOf(current)].fieldAI = fieldAI;
 			}
 			else {
 				delete map[keyOf(current)];
@@ -850,7 +948,8 @@
 			renderLint(lintBox, {
 				fields: fieldsArea.value,
 				prompt: textarea.value,
-				template: templateArea.value
+				template: templateArea.value,
+				fieldAI
 			});
 		}
 
@@ -874,7 +973,9 @@
 			templateArea.value = entry ? (entry.template || "") : "";
 			fieldsArea.value = entry ? (entry.fields || "") : "";
 			labelInput.value = entry ? (entry.label || "") : "";
+			fieldAI = entry ? (entry.fieldAI || {}) : {};
 			setTrigger(entry ? entry.trigger : "auto");
+			syncPerField();
 			lintNow();
 			if (editor) editor.refresh();
 			if (targetName) {
@@ -898,7 +999,8 @@
 				el.setAttribute("data-has-prompt", entry ? "true" : "false");
 				let tip = entry
 					? name + (entry.label ? " · " + entry.label : "") + ": "
-						+ T(entry.trigger === "manual" ? "p.sw.manual" : "p.sw.auto")
+						+ T(Object.keys(entry.fieldAI || {}).some(k => String(entry.fieldAI[k].prompt || "").trim())
+							? "p.sw.perfield" : entry.trigger === "manual" ? "p.sw.manual" : "p.sw.auto")
 					: name + ": " + T("p.sw.inactive");
 				el.setAttribute("title", tip);
 			}
@@ -955,6 +1057,8 @@
 				templateArea.value = "";
 				fieldsArea.value = "";
 				labelInput.value = "";
+				fieldAI = {};
+				syncPerField();
 				setTrigger("auto");
 				lintNow();
 				if (editor) editor.refresh();
@@ -973,6 +1077,8 @@
 			},
 			textarea: fieldsArea,
 			templateArea,
+			getFieldAI: () => fieldAI,
+			setFieldAI: (m) => { fieldAI = m; syncPerField(); },
 			onChange: scheduleSave,
 			onCommit: () => { lintNow(); saveNow(); }
 		}) : null;
