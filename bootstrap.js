@@ -1828,11 +1828,21 @@ Annota = {
 		if (comment && String(comment).trim()) {
 			parts.push("Existing note:\n\"\"\"\n" + comment + "\n\"\"\"");
 		}
-		parts.push((this.isImageKey(color)
+		let passage = (this.isImageKey(color)
 			? "Text found inside the selected area of the page (figure, table or excerpt; layout lost):"
-			: "Highlighted passage:") + "\n\"\"\"\n" + text + "\n\"\"\"");
+			: "Highlighted passage:") + "\n\"\"\"\n" + text + "\n\"\"\"";
+		parts.push(passage);
 
-		return { system: this.substitute(tpl, vars), user: parts.join("\n\n") };
+		// Version allégée, pour un modèle à petite fenêtre (Apple) : le passage
+		// et ses références, sans résumé ni note existante.
+		let compact = [];
+		if (vars.references) {
+			compact.push("Works cited in the passage:\n" + String(vars.references).slice(0, 2500));
+		}
+		compact.push(passage);
+
+		return { system: this.substitute(tpl, vars), user: parts.join("\n\n"),
+			compact: compact.join("\n\n") };
 	},
 
 	// Consigne ajoutée au prompt de la couleur pour que la réponse épouse
@@ -1925,7 +1935,11 @@ Annota = {
 			let v = obj[k];
 			if (v === null || v === undefined) v = "";
 			if (typeof v === "boolean") v = v ? "true" : "";
-			else if (Array.isArray(v)) v = v.filter(x => x != null).join(", ");
+			else if (Array.isArray(v)) {
+				v = v.filter(x => x != null).map(x => (x && typeof x === "object")
+					? Object.values(x).filter(y => y != null && typeof y !== "object").join(", ")
+					: String(x)).filter(Boolean).join(" ; ");
+			}
 			else if (typeof v === "object") continue;
 			// Le JSON n'est pas passé par sanitize : le Markdown y survit.
 			v = this.unwrapWholeTag(this.demarkdown(String(v)).trim());
@@ -1944,16 +1958,35 @@ Annota = {
 		let byName = {};
 		for (let f of toFill) byName[f.name] = f;
 
+		// Le modèle écrit parfois le libellé (« Référence ») ou une variante
+		// accentuée, en capitales, ou précédée de « CHAMP » : on ramène tout à
+		// une forme nue avant de comparer.
+		let bare = x => String(x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+			.toLowerCase().replace(/^\s*(champ|field)\s+/, "").replace(/[^a-z0-9]/g, "");
+		let fieldOf = key => {
+			let k = bare(key);
+			if (!k) return null;
+			for (let f of toFill) if (k === bare(f.name) || k === bare(f.label)) return f.name;
+			for (let f of toFill) {
+				let n = bare(f.name);
+				if (n.length >= 4 && (k.startsWith(n) || (k.length >= 4 && n.startsWith(k)))) return f.name;
+			}
+			return null;
+		};
+
 		let out = {}, current = null;
 		for (let raw of String(reply || "").split("\n")) {
-			let m = raw.match(/^\s*(?:[-*]\s*)?\**\s*(\w+)\s*\**\s*:\s*(.*)$/);
-			if (m && names.includes(m[1])) {
-				current = m[1];
-				out[current] = m[2].trim();
+			// « nom : valeur », ou un intitulé seul sur sa ligne (« CHAMP paraphrase »)
+			let m = raw.match(/^\s*(?:[-*#]+\s*)?\**\s*([^:*\n]{1,60}?)\s*\**\s*:\s*(.*)$/)
+				|| raw.match(/^\s*(?:[-*#]+\s*)?\**\s*((?:champ|field)\s+[^:*\n]{1,50}?)\s*\**\s*$/i);
+			let name = m && fieldOf(m[1]);
+			if (name) {
+				current = name;
+				out[current] = (m[2] || "").trim();
 				continue;
 			}
 			if (current !== null && raw.trim()) {
-				out[current] += (out[current] ? "\n" : "") + raw.trim();
+				out[current] += (out[current] ? "\n" : "") + raw.trim().replace(/^[-*•]\s+/, "");
 			}
 		}
 
@@ -1986,16 +2019,19 @@ Annota = {
 		return !/api key|unauthorized|forbidden|not found|introuvable/i.test(m);
 	},
 
-	// Les fournisseurs HTTP acceptent response_format ; le CLI et Apple n'ont
-	// pas d'équivalent, on y reste sur la lecture « nom: valeur ».
+	// Les fournisseurs HTTP acceptent response_format, et Apple Intelligence
+	// impose les champs eux-mêmes (génération guidée) ; le CLI n'a pas
+	// d'équivalent, on y reste sur la lecture « nom: valeur ».
 	supportsJSON() {
 		let p = this.provider();
-		return (p === "openai" || p === "ollama") && getPref("structuredOutput", true);
+		return (p === "openai" || p === "ollama" || p === "apple") && getPref("structuredOutput", true);
 	},
 
-	async generateComment({ text, ctx, color, comment, fields, promptOverride, json }) {
+	// jsonFields : champs attendus, pour les fournisseurs qui savent imposer
+	// la forme de la réponse (Apple).
+	async generateComment({ text, ctx, color, comment, fields, promptOverride, json, jsonFields }) {
 		let prompt = this.buildPrompt({ text, ctx, color, comment, fields, promptOverride });
-		return this.complete(prompt, { json: !!json });
+		return this.complete(prompt, { json: !!json, jsonFields });
 	},
 
 	// Appel générique à un fournisseur, avec reprise. Options :
@@ -2122,6 +2158,45 @@ Annota = {
 		return kept.length ? "(" + kept.join(" ; ") + ")" : "";
 	},
 
+	// Retire d'une liste de citations celles dont l'auteur ne figure ni dans
+	// le passage ni dans les références résolues : un petit modèle reprend
+	// volontiers les exemples du prompt (« Dyllick et Hockerts, 2002 »). Une
+	// citation réelle a toujours son auteur dans l'un ou l'autre. Seule une
+	// valeur faite uniquement de citations est touchée.
+	stripUnfoundCitations(value, text, ctx) {
+		let s = String(value || "");
+		let m = s.trim().match(/^\(([^()]+)\)\.?$/);
+		if (!m) return s;
+		let norm = x => String(x).normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+			.toLowerCase();
+		let pool = norm(String(text || "") + "\n" + String((ctx && ctx.references) || ""));
+		let PARTICLES = /^(de|du|des|d|van|von|der|den|le|la|les|di|da|del|dos|mc|st)$/;
+		let parts = m[1].split(/\s*;\s*/).filter(Boolean);
+		let kept = parts.filter(p => {
+			let names = norm(p.split(",")[0]).split(/[^a-z]+/)
+				.filter(w => w.length >= 3 && !PARTICLES.test(w) && w !== "et" && w !== "and" && w !== "al");
+			// Rien d'identifiable : on ne juge pas.
+			if (!names.length) return true;
+			return pool.includes(names[0]);
+		});
+		if (kept.length === parts.length) return s;
+		log("citation absente du passage et des références retirée : " + s.trim());
+		return kept.length ? "(" + kept.join(" ; ") + ")" : "";
+	},
+
+	// Champs à remplir, décrits pour une sortie imposée : nom, et consigne
+	// courte tirée du libellé et du type.
+	describeFields(toFill) {
+		return toFill.map(f => {
+			let d = f.label || f.name;
+			if (f.type === "select" && f.options && f.options.length) {
+				d += ". One of: " + f.options.join(", ");
+			}
+			else if (f.type === "check") d += ". \"true\" or \"\"";
+			return { name: f.name, description: d + ". Empty string if nothing applies." };
+		});
+	},
+
 	// Produit le commentaire final d'une annotation : réponse de l'IA seule, ou
 	// gabarit mêlant cette réponse ({{ai}}) et des entrées déterministes.
 	// Renvoie null si la couleur n'a rien à produire.
@@ -2182,6 +2257,7 @@ Annota = {
 					let json = this.supportsJSON();
 					let reply = await this.generateComment({
 						text, ctx, color, comment, fields: values, json,
+						jsonFields: json ? this.describeFields(toFill) : null,
 						promptOverride: entry.prompt + "\n" + (json
 							? this.buildFieldInstructionJSON(toFill, schema, values)
 							: this.buildFieldInstruction(toFill, schema, values))
@@ -2199,7 +2275,8 @@ Annota = {
 					// lui-même : jamais une référence secondaire.
 					for (let f of toFill) {
 						if (typeof parsed[f.name] === "string") {
-							parsed[f.name] = this.stripSelfCitations(parsed[f.name], ctx);
+							parsed[f.name] = this.stripUnfoundCitations(
+								this.stripSelfCitations(parsed[f.name], ctx), text, ctx);
 						}
 					}
 					Object.assign(values, parsed);
@@ -2245,39 +2322,92 @@ Annota = {
 	// macOS 26+ expose le modèle Apple Intelligence via le framework
 	// FoundationModels, accessible uniquement depuis du code Swift : il n'existe
 	// ni endpoint HTTP ni CLI fourni. Annota écrit donc un petit programme Swift,
-	// le compile UNE FOIS (~1 s) dans le répertoire de données Zotero, puis
-	// réutilise le binaire (~1-2 s par appel). Tout reste sur la machine.
+	// le compile UNE FOIS (quelques secondes) dans le répertoire de données
+	// Zotero, puis réutilise le binaire. Il est recompilé dès que sa source
+	// change d'une version d'Annota à l'autre. Tout reste sur la machine.
+	// La requête passe en JSON sur l'entrée standard ; quand des champs sont
+	// fournis, le modèle est contraint à les renseigner (génération guidée),
+	// ce qui épargne au petit modèle d'Apple d'inventer sa propre mise en forme.
 	APPLE_SWIFT_SOURCE: [
 		"import Foundation",
 		"import FoundationModels",
 		"",
-		"let instructions = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : \"\"",
-		"let prompt = String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8) ?? \"\"",
+		"// Annota : pont vers le modèle embarqué d'Apple Intelligence.",
+		"// Entrée standard : JSON { instructions, prompt, fields?, temperature? }.",
+		"// fields : [{ name, description }] → réponse JSON imposée (génération guidée).",
+		"// Codes de sortie : 2 indisponible, 3 contexte trop long, 4 refus, 1 autre.",
 		"",
-		"guard case .available = SystemLanguageModel.default.availability else {",
-		"    FileHandle.standardError.write(\"Apple Intelligence unavailable on this Mac\\n\".data(using: .utf8)!)",
-		"    exit(2)",
+		"struct Field: Decodable { let name: String; let description: String? }",
+		"struct Request: Decodable {",
+		"    let instructions: String?",
+		"    let prompt: String",
+		"    let fields: [Field]?",
+		"    let temperature: Double?",
+		"}",
+		"",
+		"func fail(_ code: Int32, _ msg: String) -> Never {",
+		"    FileHandle.standardError.write((msg + \"\\n\").data(using: .utf8)!)",
+		"    exit(code)",
+		"}",
+		"",
+		"let input = FileHandle.standardInput.readDataToEndOfFile()",
+		"guard let req = try? JSONDecoder().decode(Request.self, from: input) else {",
+		"    fail(1, \"invalid request\")",
+		"}",
+		"",
+		"let model = SystemLanguageModel(guardrails: .permissiveContentTransformations)",
+		"switch model.availability {",
+		"case .available: break",
+		"case .unavailable(.appleIntelligenceNotEnabled): fail(2, \"appleIntelligenceNotEnabled\")",
+		"case .unavailable(.deviceNotEligible): fail(2, \"deviceNotEligible\")",
+		"case .unavailable(.modelNotReady): fail(2, \"modelNotReady\")",
+		"case .unavailable(let other): fail(2, \"\\(other)\")",
 		"}",
 		"",
 		"let sem = DispatchSemaphore(value: 0)",
-		"var out = \"\", err = \"\"",
+		"var out = \"\", code: Int32 = 0, err = \"\"",
 		"Task {",
 		"    do {",
-		"        let session = instructions.isEmpty",
-		"            ? LanguageModelSession()",
-		"            : LanguageModelSession(instructions: instructions)",
-		"        let r = try await session.respond(to: prompt)",
-		"        out = r.content",
+		"        let instr = req.instructions ?? \"\"",
+		"        let session = instr.isEmpty",
+		"            ? LanguageModelSession(model: model)",
+		"            : LanguageModelSession(model: model, instructions: instr)",
+		"        var options = GenerationOptions()",
+		"        if let t = req.temperature { options = GenerationOptions(temperature: t) }",
+		"        if let fields = req.fields, !fields.isEmpty {",
+		"            let root = DynamicGenerationSchema(",
+		"                name: \"Fields\",",
+		"                properties: fields.map {",
+		"                    DynamicGenerationSchema.Property(",
+		"                        name: $0.name, description: $0.description,",
+		"                        schema: DynamicGenerationSchema(type: String.self))",
+		"                })",
+		"            let schema = try GenerationSchema(root: root, dependencies: [])",
+		"            let r = try await session.respond(to: req.prompt, schema: schema, options: options)",
+		"            out = r.content.jsonString",
+		"        } else {",
+		"            let r = try await session.respond(to: req.prompt, options: options)",
+		"            out = r.content",
+		"        }",
+		"    } catch let e as LanguageModelSession.GenerationError {",
+		"        switch e {",
+		"        case .exceededContextWindowSize: code = 3",
+		"        case .guardrailViolation, .refusal: code = 4",
+		"        default: code = 1",
+		"        }",
+		"        err = \"\\(e)\"",
 		"    } catch {",
+		"        // macOS 27 signale ces cas autrement : on les reconnaît au message.",
 		"        err = \"\\(error)\"",
+		"        let m = err.lowercased()",
+		"        if m.contains(\"context\") && (m.contains(\"exceed\") || m.contains(\"too long\")) { code = 3 }",
+		"        else if m.contains(\"guardrail\") || m.contains(\"refus\") || m.contains(\"unsafe\") { code = 4 }",
+		"        else { code = 1 }",
 		"    }",
 		"    sem.signal()",
 		"}",
 		"sem.wait()",
-		"if !err.isEmpty {",
-		"    FileHandle.standardError.write((err + \"\\n\").data(using: .utf8)!)",
-		"    exit(1)",
-		"}",
+		"if code != 0 { fail(code, err) }",
 		"print(out)"
 	].join("\n"),
 
@@ -2297,17 +2427,36 @@ Annota = {
 
 		let dir = this._appleDir();
 		let bin = PathUtils.join(dir, "annota-apple-ai");
-		if (await IOUtils.exists(bin)) return bin;
-
 		let srcPath = PathUtils.join(dir, "annota-apple-ai.swift");
-		await IOUtils.writeUTF8(srcPath, this.APPLE_SWIFT_SOURCE);
+		if (this._appleReady === bin) return bin;
+		if (await IOUtils.exists(bin) && await IOUtils.exists(srcPath)) {
+			let current = "";
+			try { current = await IOUtils.readUTF8(srcPath); } catch (e) {}
+			if (current === this.APPLE_SWIFT_SOURCE) {
+				this._appleReady = bin;
+				return bin;
+			}
+		}
+		// Compilations concurrentes (plusieurs annotations d'un coup) : une seule.
+		if (this._appleCompiling) return this._appleCompiling;
+		this._appleCompiling = this._compileApple(Subprocess, dir, bin, srcPath)
+			.finally(() => { this._appleCompiling = null; });
+		return this._appleCompiling;
+	},
+
+	// La source de référence n'est écrite qu'une fois le binaire en place :
+	// une compilation interrompue ne laisse jamais croire à un binaire à jour.
+	async _compileApple(Subprocess, dir, bin, srcPath) {
+		let tmp = bin + ".tmp";
+		let tmpSrc = PathUtils.join(dir, "annota-apple-ai.tmp.swift");
+		await IOUtils.writeUTF8(tmpSrc, this.APPLE_SWIFT_SOURCE);
 
 		let swiftc = String(getPref("swiftcPath", "/usr/bin/swiftc")).trim() || "/usr/bin/swiftc";
 		let proc;
 		try {
 			proc = await Subprocess.call({
 				command: swiftc,
-				arguments: ["-O", "-o", bin, srcPath],
+				arguments: ["-O", "-o", tmp, tmpSrc],
 				stderr: "pipe"
 			});
 		}
@@ -2318,16 +2467,22 @@ Annota = {
 		let errText = "", c;
 		while ((c = await proc.stderr.readString()) !== "") errText += c;
 		let { exitCode } = await proc.wait();
-		if (exitCode !== 0 || !(await IOUtils.exists(bin))) {
-			throw new Error("Compilation Swift échouée : "
-				+ (errText.trim() || "code " + exitCode).slice(0, 300));
+		try { await IOUtils.remove(tmpSrc); } catch (e) {}
+		if (exitCode !== 0 || !(await IOUtils.exists(tmp))) {
+			let detail = (errText.split("\n").find(l => /error:/.test(l)) || errText.trim()
+				|| "code " + exitCode).slice(0, 300);
+			throw new Error(this.t("err.apple.compile", { detail }));
 		}
+		await IOUtils.move(tmp, bin);
+		await IOUtils.writeUTF8(srcPath, this.APPLE_SWIFT_SOURCE);
 		log("Binaire Apple Intelligence compilé : " + bin);
+		this._appleReady = bin;
 		return bin;
 	},
 
+	// Codes de sortie de l'utilitaire : 2 indisponible, 3 contexte trop long,
+	// 4 refus du modèle. Aucun ne se répare en réessayant tel quel.
 	async callApple(prompt, opts = {}) {
-		let { system } = prompt;
 		let Subprocess;
 		try {
 			({ Subprocess } = ChromeUtils.importESModule(
@@ -2336,19 +2491,38 @@ Annota = {
 		catch (e) {
 			throw new Error("Subprocess indisponible : " + (e.message || e));
 		}
-
 		let bin = await this.ensureAppleBinary(Subprocess);
-		let proc = await Subprocess.call({
-			command: bin,
-			arguments: system ? [system] : [],
-			stderr: "pipe"
-		});
 
+		let temp = parseFloat(getPref("temperature", 0.2));
+		let req = {
+			instructions: prompt.system || "",
+			prompt: this.flattenPrompt(prompt),
+			temperature: isNaN(temp) ? 0.2 : temp
+		};
+		if (opts.json && Array.isArray(opts.jsonFields) && opts.jsonFields.length) {
+			req.fields = opts.jsonFields;
+		}
+		try {
+			return await this._runApple(Subprocess, bin, req, opts);
+		}
+		catch (e) {
+			// Fenêtre du modèle d'Apple (4 096 à 8 192 jetons selon macOS) dépassée : on
+			// retente avec le seul passage et ses références, sans le reste du
+			// contexte du document.
+			if (e.appleCode !== 3 || !prompt.compact) throw e;
+			log("Apple Intelligence : contexte trop long, nouvel essai allégé");
+			req.prompt = this.flattenPrompt(Object.assign({}, prompt, { user: prompt.compact }));
+			return this._runApple(Subprocess, bin, req, opts);
+		}
+	},
+
+	async _runApple(Subprocess, bin, req, opts) {
+		let proc = await Subprocess.call({ command: bin, arguments: [], stderr: "pipe" });
 		let killTimer = setTimeout(() => { try { proc.kill(); } catch (e) {} },
 			opts.timeout || 120000);
 		if (opts.cancel) opts.cancel.onCancel(() => { try { proc.kill(); } catch (e) {} });
 		try {
-			await proc.stdin.write(this.flattenPrompt(prompt));
+			await proc.stdin.write(JSON.stringify(req));
 			await proc.stdin.close();
 
 			let out = "", chunk;
@@ -2358,10 +2532,25 @@ Annota = {
 
 			let { exitCode } = await proc.wait();
 			if (exitCode !== 0) {
-				throw new Error("Apple Intelligence (code " + exitCode + ") : "
-					+ (errText.trim() || "pas de détail").slice(0, 300));
+				let detail = errText.trim();
+				let msg;
+				if (exitCode === 2) {
+					let key = { appleIntelligenceNotEnabled: "err.apple.off",
+						modelNotReady: "err.apple.notready",
+						deviceNotEligible: "err.apple.device" }[detail];
+					msg = key ? this.t(key) : this.t("err.apple.unavailable", { detail });
+				}
+				else if (exitCode === 3) msg = this.t("err.apple.toolong");
+				else if (exitCode === 4) msg = this.t("err.apple.refused");
+				else msg = "Apple Intelligence (code " + exitCode + ") : "
+					+ (detail || "pas de détail").slice(0, 300);
+				let err = new Error(msg);
+				err.appleCode = exitCode;
+				if (exitCode >= 2 && exitCode <= 4) err.status = 400;   // pas de nouvel essai
+				throw err;
 			}
 			if (!out.trim()) throw new Error("Réponse vide d'Apple Intelligence");
+			if (req.fields) return out.trim();
 			return opts.raw ? out.trim() : this.sanitize(out);
 		}
 		finally {

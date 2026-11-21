@@ -177,7 +177,7 @@ resume     | Résumé     | ai       | Résume le passage en une phrase. | itali
       </html:div>
 
       <html:div id="annota-cfg-apple" class="annota-provider-cfg">
-        <html:p class="annota-help" data-i18n="ai.apple.help">Built-in model of macOS 26 or later. Requires Apple Intelligence and the Xcode Command Line Tools (<html:code>xcode-select --install</html:code>). A helper is compiled on first use.</html:p>
+        <html:p class="annota-help" data-i18n="ai.apple.help">Built-in model of macOS 26 or later. Requires Apple Intelligence and the Xcode Command Line Tools (<html:code>xcode-select --install</html:code>). A helper is compiled on first use. Fields are filled through guided generation: the model is constrained to the declared fields. Its window is small (4,000 to 8,000 tokens depending on macOS): keep the prompt short.</html:p>
         <html:details class="annota-details">
           <html:summary data-i18n="ai.paths">Advanced paths</html:summary>
           <html:div class="annota-details-body">
@@ -234,7 +234,7 @@ resume     | Résumé     | ai       | Résume le passage en une phrase. | itali
         <html:input id="annota-temp" type="number" min="0" max="2" step="0.1"
                     class="annota-input annota-w-num" data-pref="annota.temperature"/>
       </html:div>
-      <html:p class="annota-help" data-i18n="gen.help">Language and word limit are available in prompts as <html:code>{{language}}</html:code> and <html:code>{{maxWords}}</html:code>. Temperature applies to the HTTP providers only.</html:p>
+      <html:p class="annota-help" data-i18n="gen.help">Language and word limit are available in prompts as <html:code>{{language}}</html:code> and <html:code>{{maxWords}}</html:code>. Temperature applies to the HTTP providers and Apple Intelligence.</html:p>
       <html:label class="annota-check">
         <html:input type="checkbox" data-pref="annota.structuredOutput"/>
         <html:span><html:span data-i18n="gen.json">Request structured output (JSON) when supported</html:span>
