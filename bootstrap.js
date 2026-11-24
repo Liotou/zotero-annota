@@ -2276,12 +2276,17 @@ Annota = {
 		let nominal = /(^|[^\d])(1[5-9]\d\d|20\d\d)[a-z]?(?!\d)/.test(passage);
 		let pool = nominal ? passage : passage + "\n" + norm((ctx && ctx.references) || "");
 		let digits = new Set((pool.match(/\d+/g) || []));
+		let poolTight = pool.replace(/[^a-z0-9]/g, "");
 		let PARTICLES = /^(de|du|des|d|van|von|der|den|le|la|les|di|da|del|dos|mc|st)$/;
 		let changed = false;
 		let parts = m[1].split(/\s*;\s*/).filter(Boolean);
 		let kept = [];
 		let isName = w => w.length >= 3 && !PARTICLES.test(norm(w)) && !/^(et|and|al)$/i.test(w);
 		for (let p of parts) {
+			// Initiales du prénom (« H. Simon », « J.-L. Le Moigne ») : une
+			// référence auteur-année ne garde que le nom.
+			let bare = p.replace(/(^|[\s,&])(?:[A-Z]\.(?:\s*-?\s*[A-Z]\.)*)\s+(?=[A-Z\u00C0-\u00DE])/g, "$1");
+			if (bare !== p) { p = bare; changed = true; }
 			let ym = p.match(/(^|[^\d])(\d{4})[a-z]?(?!\d)/);
 			let year = ym && ym[2];
 			// Auteurs : ce qui précède l'année. On garde ceux que la source
@@ -2290,7 +2295,9 @@ Annota = {
 			let authorStr = (ym ? p.slice(0, ym.index + ym[1].length) : p.split(",")[0])
 				.replace(/[,\s]+$/, "");
 			let names = authorStr.split(/[^A-Za-z\u00C0-\u024F'\u2019-]+/).filter(isName);
-			let present = names.filter(n => pool.includes(norm(n)));
+			// « Lemoigne » pour « Le Moigne » : on compare aussi sans espaces.
+			let present = names.filter(n => pool.includes(norm(n))
+				|| poolTight.includes(norm(n).replace(/[^a-z0-9]/g, "")));
 			if (names.length && !present.length) { changed = true; continue; }
 			if (nominal && year && !digits.has(year)) { changed = true; continue; }
 			if (present.length < names.length) {
@@ -2299,15 +2306,26 @@ Annota = {
 				p = present.join(" et ") + etal + ", " + p.slice(ym ? ym.index + ym[1].length : authorStr.length)
 					.replace(/^[,\s]+/, "");
 			}
-			// Page citée : chacun de ses nombres doit se lire dans la source.
+			// Page citée : chacun de ses nombres doit se lire dans la source. Une
+			// page seule qui ouvre une plage de la source (« p. 115 » pour
+			// « 115-128 ») est complétée : le modèle tronque volontiers.
 			let q = p.replace(/,?\s*pp?\.\s*([\d\s,\-\u2013]+)$/, (all, nums) => {
 				let ok = (nums.match(/\d+/g) || []).every(n => digits.has(n));
-				if (!ok) changed = true;
-				return ok ? all : "";
+				if (!ok) { changed = true; return ""; }
+				let single = nums.trim().match(/^(\d+)$/);
+				if (single) {
+					let r = pool.match(new RegExp("(^|[^\\d])" + single[1] + "\\s*[-\\u2013]\\s*(\\d+)(?!\\d)"));
+					if (r) {
+						changed = true;
+						return all.replace(/\d+\s*$/, single[1] + "-" + r[2]);
+					}
+				}
+				return all;
 			});
 			kept.push(q.trim());
 		}
-		if (!changed) return s;
+		// Point final après la parenthèse : la valeur est la référence seule.
+		if (!changed) return s.trim().replace(/\)\.$/, ")");
 		log("citations absentes du passage retirées : " + s.trim() + " → " + kept.join(" ; "));
 		return kept.length ? "(" + kept.join(" ; ") + ")" : "";
 	},
