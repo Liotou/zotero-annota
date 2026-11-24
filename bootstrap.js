@@ -178,7 +178,7 @@ Annota = {
 		for (let k of Object.keys(raw)) {
 			let v = raw[k];
 			if (!v || typeof v !== "object") continue;
-			out[k] = { prompt: String(v.prompt || ""), auto: v.auto !== false };
+			out[k] = { prompt: String(v.prompt || ""), auto: v.auto === true };
 		}
 		return out;
 	},
@@ -689,6 +689,20 @@ Annota = {
 		// Bibliothèque en lecture seule ? on ignore.
 		if (item.library && item.library.editable === false) return;
 
+		// Annotation arrivée par la synchronisation (faite sur une tablette, un
+		// autre ordinateur, zotero.org) : ce n'est pas une création ici, rien
+		// ne se déclenche. Zotero la marque « synced » avant de l'enregistrer ;
+		// sa date d'ajout, ancienne, le confirme quand ce drapeau manque.
+		if (item.synced) {
+			log("annotation " + id + " ignorée : reçue par synchronisation");
+			return;
+		}
+		let added = Date.parse(String(item.dateAdded || "").replace(" ", "T") + "Z");
+		if (added && Date.now() - added > 10 * 60 * 1000) {
+			log("annotation " + id + " ignorée : créée il y a plus de dix minutes");
+			return;
+		}
+
 		// Zone encadrée : pas de texte sélectionné, on lit celui que la zone
 		// contient (PDF ouvert dans le lecteur).
 		let isImage = item.annotationType === "image";
@@ -812,7 +826,10 @@ Annota = {
 			log("Generation error: " + e);
 			toast("Annota", this.t("gen.failed", { msg: e.message || e }), "error");
 			await this.markFailed(id, String(e.message || e));
-			// Nettoyer le placeholder en cas d'échec.
+		}
+		finally {
+			// Le texte d'attente ne doit jamais rester : échec, résultat vide ou
+			// couleur sans rien à produire, il est effacé s'il est encore là.
 			if (usedPlaceholder) {
 				try {
 					let fresh = await Zotero.Items.getAsync(id);
@@ -823,8 +840,6 @@ Annota = {
 				}
 				catch (e2) { /* ignore */ }
 			}
-		}
-		finally {
 			this.inProgress.delete(id);
 		}
 	},
@@ -2701,6 +2716,12 @@ Annota = {
 		if (opts.json && Array.isArray(opts.jsonFields) && opts.jsonFields.length) {
 			req.fields = opts.jsonFields;
 		}
+		// Une seule requête à la fois : le modèle embarqué est partagé, et
+		// plusieurs processus simultanés (rafale d'annotations) le font échouer.
+		let prev = this._appleQueue || Promise.resolve();
+		let release;
+		this._appleQueue = new Promise(r => { release = r; });
+		await prev.catch(() => {});
 		try {
 			return await this._runApple(Subprocess, bin, req, opts);
 		}
@@ -2711,7 +2732,10 @@ Annota = {
 			if (e.appleCode !== 3 || !prompt.compact) throw e;
 			log("Apple Intelligence : contexte trop long, nouvel essai allégé");
 			req.prompt = this.flattenPrompt(Object.assign({}, prompt, { user: prompt.compact }));
-			return this._runApple(Subprocess, bin, req, opts);
+			return await this._runApple(Subprocess, bin, req, opts);
+		}
+		finally {
+			release();
 		}
 	},
 

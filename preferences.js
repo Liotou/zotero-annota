@@ -124,7 +124,7 @@
 			for (let k of Object.keys(raw.fieldAI)) {
 				let v = raw.fieldAI[k];
 				if (v && typeof v === "object") {
-					fieldAI[k] = { prompt: String(v.prompt || ""), auto: v.auto !== false };
+					fieldAI[k] = { prompt: String(v.prompt || ""), auto: v.auto === true };
 				}
 			}
 		}
@@ -488,7 +488,7 @@
 			let base = T("fe.base", { n: rows.length + 1 });
 			rows.push({ name: uniqueName(slug(base, a)), label: base, type: "text",
 				format: "plain", options: "", prompt: "", nameEdited: false,
-				ai: { prompt: "", auto: true } });
+				ai: { prompt: "", auto: false } });
 			write(true);
 			render();
 			let inputs = list.querySelectorAll(".annota-fe-label");
@@ -515,7 +515,9 @@
 			if (!a) return [];
 			let fa = (getFieldAI && getFieldAI()) || {};
 			return a.parseFieldSchema(text).map(f => ({
-				ai: Object.assign({ prompt: "", auto: true }, fa[f.name] || {}),
+				// Un champ « ai » se remplissait toujours à la création : sa case
+				// reste cochée tant qu'on ne l'a pas décochée. Les autres non.
+				ai: Object.assign({ prompt: "", auto: f.type === "ai" }, fa[f.name] || {}),
 				name: f.name,
 				label: f.label,
 				type: f.type,
@@ -549,7 +551,7 @@
 					// Un champ « ai » garde sa consigne dans sa définition : seule
 					// sa case « automatique » est retenue ici.
 					if (r.type === "ai") { if (ai.auto === false) map[r.name] = { prompt: "", auto: false }; }
-					else if (p.trim()) map[r.name] = { prompt: p, auto: ai.auto !== false };
+					else if (p.trim()) map[r.name] = { prompt: p, auto: ai.auto === true };
 				}
 				setFieldAI(map);
 			}
@@ -737,6 +739,7 @@
 			});
 			type.addEventListener("change", () => {
 				r.type = type.value;
+				if (r.type === "ai" && r.ai && !String(r.ai.prompt || "").trim()) r.ai.auto = true;
 				write(true);
 				render();
 			});
@@ -746,12 +749,12 @@
 		// Consigne propre au champ et déclenchement automatique. Repliée tant
 		// que le champ n'a pas de consigne : la plupart n'en ont pas besoin.
 		function aiBlock(r) {
-			r.ai = r.ai || { prompt: "", auto: true };
+			r.ai = r.ai || { prompt: "", auto: false };
 			let box = el("div", "annota-fe-ai");
 			let auto = el("label", "annota-check annota-fe-auto");
 			let cb = el("input");
 			cb.setAttribute("type", "checkbox");
-			cb.checked = r.ai.auto !== false;
+			cb.checked = r.type === "ai" ? r.ai.auto !== false : r.ai.auto === true;
 			cb.addEventListener("change", () => { r.ai.auto = cb.checked; write(true); });
 			auto.appendChild(cb);
 			auto.appendChild(el("span", null, T("fe.ai.auto")));
@@ -805,7 +808,7 @@
 				for (let p of fieldPresets()) {
 					chips.appendChild(btn(p.label, "annota-fe-preset", T("fe.preset.title"), () => {
 						rows = p.rows.map(x => Object.assign(
-							{ options: "", prompt: "", nameEdited: true, ai: { prompt: "", auto: true } }, x));
+							{ options: "", prompt: "", nameEdited: true, ai: { prompt: "", auto: false } }, x));
 						write(true);
 						render();
 					}));

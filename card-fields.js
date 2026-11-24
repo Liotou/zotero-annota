@@ -136,7 +136,9 @@ var AnnotaCardFields = {
 		if (mem && mem.comment === comment && mem.color === annotation.color) {
 			return { values: Object.assign({}, mem.values), references: mem.references || "" };
 		}
-		if (!comment.trim()) {
+		// Texte d'attente d'Annota (« ⏳ Generating… ») : ce n'est la valeur
+		// d'aucun champ, les champs restent vides le temps de la génération.
+		if (!comment.trim() || /^\u23f3/.test(comment.trim())) {
 			let values = {};
 			for (let f of schema) values[f.name] = "";
 			return { values, references: "" };
