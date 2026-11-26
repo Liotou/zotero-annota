@@ -434,7 +434,10 @@ pages as green tags and references as grey numbers; click one to go there.
   text, **your annotations** (highlights and comments) and **your notes**.
   With the PDF open in the reader, the text is read page by page with the
   journal's own page numbers: answers cite `[p. 215]`, and clicking the page
-  opens the PDF there.
+  opens the PDF there. Each citation also carries the passage that supports
+  the claim (a short excerpt copied from the page, shown when you hover the
+  pill): the click highlights it in the PDF for a few seconds, without
+  creating any annotation.
 - **📚 My library** — Annota runs Zotero's own search (all fields, notes, full
   text) on the words of your question, and sends the best matches with your
   annotations that mention them. Answers cite `[1]`, `[2]`; clicking a number

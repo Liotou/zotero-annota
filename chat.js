@@ -16,8 +16,9 @@
 //
 // Deux portées :
 //   document     texte intégral page par page, annotations, notes et notice ;
-//                le modèle cite les pages [p. 12], rendues en pastilles qui
-//                ouvrent la page.
+//                le modèle cite les pages [p. 12 « extrait »], rendues en
+//                pastilles qui ouvrent la page et y surlignent l'extrait
+//                quelques secondes.
 //   bibliothèque recherche Zotero sur les mots de la question ; le modèle cite
 //                les items [1], [2], pastilles qui sélectionnent l'item.
 
@@ -1364,8 +1365,14 @@ var AnnotaChat = {
 		}
 		else if (paged) {
 			lines.push("The full text is split by page markers such as [[p. 12]]. Cite the"
-				+ " page of every claim you draw from it, in square brackets: [p. 12] or"
-				+ " [p. 12–13]. Only use page numbers that appear in a marker.");
+				+ " page of every claim you draw from it, in square brackets, and inside the"
+				+ " same brackets give the passage of that page that supports the claim: a"
+				+ " short excerpt (6 to 20 words) between « and », copied character for"
+				+ " character from the full text: [p. 12 « exact words of the text »]."
+				+ " Several pages: [p. 12 « … » ; p. 15 « … »]. Copy the excerpt in the"
+				+ " language of the document even when you answer in another language:"
+				+ " never translate, reword or shorten it. Only use page numbers that"
+				+ " appear in a marker.");
 		}
 		else {
 			lines.push("The full text has no page markers: do not give page numbers;"
@@ -2406,7 +2413,7 @@ var AnnotaChat = {
 	INLINE_SRC: "(`[^`\\n]+`)"
 		+ "|(\\*\\*[^\\n]+?\\*\\*|__[^\\n]+?__)"
 		+ "|(\\*[^*\\s](?:[^*\\n]*?[^*\\s])?\\*)"
-		+ "|(\\[(?:pp?\\.|pages?)\\s*[^\\]\\n]{1,40}\\])"
+		+ "|(\\[(?:pp?\\.|pages?)\\s*[^\\]\\n]{1,600}\\])"
 		+ "|(\\[\\d{1,3}(?:\\s*[,;–-]\\s*\\d{1,3})*\\])",
 
 	inlineTokens(text, depth = 0) {
@@ -2427,24 +2434,61 @@ var AnnotaChat = {
 	},
 
 	// « [p. 12–13, 15] » → préfixe, puis morceaux : séparateurs et numéros.
-	// Le premier numéro d'un intervalle sert de cible.
+	// Le premier numéro d'un intervalle sert de cible, le dernier de fin.
+	// Les extraits entre guillemets (« [p. 12 « mots du texte »] ») ne sont
+	// pas affichés : chacun suit le numéro qui le précède, pour être surligné
+	// dans le PDF au clic sur sa pastille.
 	splitCitation(v, isPage) {
 		let inner = v.slice(1, -1);
 		let prefix = "";
+		let quotes = [];
 		if (isPage) {
 			let pm = inner.match(/^(pp?\.|pages?)\s*/i);
 			prefix = pm ? pm[0] : "";
 			inner = inner.slice(prefix.length);
+			inner = inner.replace(/«\s*([^»]*?)\s*»|“([^”]*)”|"([^"]*)"|‘([^’]*)’/g, (m, a, b, c, d) => {
+				quotes.push(String(a || b || c || d || "").trim());
+				return "\u0000" + (quotes.length - 1) + "\u0000";
+			});
 		}
-		let parts = inner.split(/(\s*[,;]\s*|\s+(?:and|et)\s+)/);
-		return {
-			prefix,
-			parts: parts.map((s, k) => {
-				if (k % 2) return { sep: s };
-				let target = (s.match(isPage ? /^[\p{L}\p{N}]+/u : /^\d+/u) || [])[0] || "";
-				return { text: s, target };
-			})
-		};
+		let parts = inner.split(/(\s*[,;]\s*|\s+(?:and|et)\s+)/).map((s, k) => {
+			if (k % 2) return { sep: s };
+			if (!isPage) return { text: s, target: (s.match(/^\d+/u) || [])[0] || "" };
+			let qs = [];
+			let t = s.replace(/\u0000(\d+)\u0000/g, (m, n) => { qs.push(quotes[+n]); return ""; })
+				.replace(/^\s*(?:pp?\.|pages?)\s*/i, "")
+				.replace(/[\s:,;\u2013\u2014-]+$/, "").trim();
+			let range = t.match(/^([\p{L}\p{N}]+)\s*[-\u2013\u2014]\s*([\p{L}\p{N}]+)/u);
+			return {
+				text: t,
+				target: range ? range[1] : (t.match(/^[\p{L}\p{N}]+/u) || [])[0] || "",
+				end: range ? range[2] : "",
+				quotes: qs.filter(q => q)
+			};
+		});
+		if (isPage) {
+			// Extrait isolé (« [p. 12, « a », « b »] ») : rattaché au numéro
+			// précédent, ou au suivant s'il n'y en a pas avant.
+			let out = [];
+			let orphan = [];
+			for (let part of parts) {
+				if (part.sep !== undefined) { out.push(part); continue; }
+				if (part.target) {
+					part.quotes = orphan.concat(part.quotes);
+					orphan = [];
+					out.push(part);
+					continue;
+				}
+				let prev = [...out].reverse().find(x => x.target);
+				if (prev) prev.quotes.push(...part.quotes);
+				else orphan.push(...part.quotes);
+				if (out.length && out[out.length - 1].sep !== undefined) out.pop();
+			}
+			while (out.length && out[0].sep !== undefined) out.shift();
+			while (out.length && out[out.length - 1].sep !== undefined) out.pop();
+			parts = out;
+		}
+		return { prefix, parts };
 	},
 
 	pageIndexFor(msg, label) {
@@ -2455,11 +2499,174 @@ var AnnotaChat = {
 		return isNaN(n) ? null : n - 1;
 	},
 
-	openPage(msg, label) {
+	// Ouvre la page citée ; quand la citation porte des extraits, les
+	// surligne quelques secondes, sans créer d'annotation.
+	async openPage(msg, label, endLabel, quotes) {
 		let idx = this.pageIndexFor(msg, label);
 		if (!msg.attachmentID || idx === null) return;
-		Zotero.Reader.open(msg.attachmentID, { pageIndex: idx })
-			.catch(e => log("openPage: " + e));
+		try {
+			let reader = await Zotero.Reader.open(msg.attachmentID, { pageIndex: idx });
+			if (!reader || !quotes || !quotes.length) return;
+			let end = endLabel ? this.pageIndexFor(msg, endLabel) : null;
+			await this.flashPassages(reader, idx, end !== null && end > idx ? end : idx, quotes);
+		}
+		catch (e) { log("openPage: " + e); }
+	},
+
+	FLASH_MS: 5000,
+
+	// ---- Surlignage passager des extraits cités ----
+	//
+	// Le lecteur de Zotero sait faire clignoter une position (c'est ce qu'il
+	// fait en suivant un lien vers un passage) : on lui donne les rectangles
+	// des extraits, trouvés dans les caractères de la page, et on prolonge
+	// l'effet au-delà de ses deux secondes.
+
+	// Texte réduit aux lettres et chiffres, sans accents ni casse : les
+	// coupures de mots, ligatures et espaces du PDF n'y comptent plus.
+	foldLetters(s) {
+		return String(s || "").normalize("NFKD").replace(/\p{M}+/gu, "").toLowerCase()
+			.replace(/[^\p{L}\p{N}]+/gu, "");
+	},
+
+	// Rectangles (coordonnées PDF) des extraits trouvés parmi les caractères
+	// d'une page, au format du lecteur : { c, rect, lineBreakAfter, ignorable }.
+	passageRects(chars, quotes) {
+		let str = "", map = [];
+		for (let i = 0; i < chars.length; i++) {
+			let ch = chars[i];
+			if (!ch || ch.ignorable) continue;
+			let f = this.foldLetters(ch.c || ch.u || "");
+			for (let k = 0; k < f.length; k++) { str += f[k]; map.push(i); }
+		}
+		let ranges = [];
+		for (let q of quotes) {
+			// « a … b » : deux morceaux cherchés chacun de son côté.
+			for (let piece of String(q).split(/\s*(?:…|\.\.\.|\[…\]|\[\.\.\.\])\s*/)) {
+				let r = this.findPassage(str, piece);
+				if (r) ranges.push([map[r[0]], map[r[1] - 1]]);
+			}
+		}
+		let rects = [];
+		for (let [a, b] of ranges) {
+			let box = null;
+			for (let i = a; i <= b; i++) {
+				let r = chars[i] && chars[i].rect;
+				if (r && r.length === 4) {
+					let x1 = Math.min(r[0], r[2]), y1 = Math.min(r[1], r[3]);
+					let x2 = Math.max(r[0], r[2]), y2 = Math.max(r[1], r[3]);
+					box = box ? [Math.min(box[0], x1), Math.min(box[1], y1),
+						Math.max(box[2], x2), Math.max(box[3], y2)] : [x1, y1, x2, y2];
+				}
+				if (box && (i === b || chars[i].lineBreakAfter)) { rects.push(box); box = null; }
+			}
+		}
+		return rects;
+	},
+
+	// Position [début, fin[ de l'extrait dans le texte réduit de la page.
+	// Recopie exacte d'abord ; sinon, l'extrait est découpé en suites de
+	// quatre mots et l'on retient le plus gros groupe de suites retrouvées
+	// à peu de distance les unes des autres (extrait légèrement retouché).
+	findPassage(str, quote) {
+		let flat = this.foldLetters(quote);
+		if (flat.length < 12) return null;
+		let at = str.indexOf(flat);
+		if (at >= 0) return [at, at + flat.length];
+		let words = String(quote).normalize("NFKD").replace(/\p{M}+/gu, "").toLowerCase()
+			.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+		if (words.length < 5) return null;
+		let hits = [];
+		for (let k = 0; k + 4 <= words.length; k++) {
+			let w = words.slice(k, k + 4).join("");
+			if (w.length < 12) continue;
+			let from = 0, pos;
+			while ((pos = str.indexOf(w, from)) >= 0) {
+				hits.push([pos, pos + w.length]);
+				from = pos + 1;
+			}
+		}
+		if (!hits.length) return null;
+		hits.sort((x, y) => x[0] - y[0]);
+		let span = flat.length * 1.5 + 40;
+		let best = null;
+		for (let i = 0, j = 0; i < hits.length; i++) {
+			while (hits[i][0] - hits[j][0] > span) j++;
+			let n = i - j + 1;
+			if (!best || n > best.n) best = { n, a: hits[j][0], b: Math.max(...hits.slice(j, i + 1).map(h => h[1])) };
+		}
+		let windows = Math.max(1, words.length - 3);
+		return best.n >= Math.max(2, Math.ceil(windows * 0.3)) ? [best.a, best.b] : null;
+	},
+
+	async flashPassages(reader, idx, endIdx, quotes) {
+		let W = o => Annota._waive(o);
+		try { await reader._initPromise; } catch (e) {}
+		let ir = W(reader._internalReader);
+		let view = ir && W(ir._primaryView);
+		if (!view) return;
+		try { await view.initializedPromise; } catch (e) {}
+		// PDF tout juste ouvert : le document arrive un peu après la vue.
+		let pdfDoc = Annota.getPDFDocument(reader);
+		for (let k = 0; !pdfDoc && k < 30; k++) {
+			await Zotero.Promise.delay(100);
+			pdfDoc = Annota.getPDFDocument(reader);
+		}
+		if (!pdfDoc || typeof pdfDoc.getPageData !== "function") return;
+		let viewWin = view._iframeWindow;
+		let rectsOf = async (i) => {
+			if (i < 0 || i >= (pdfDoc.numPages || 0)) return [];
+			let data = W(await pdfDoc.getPageData(Components.utils.cloneInto({ pageIndex: i }, viewWin)));
+			let chars = data && data.chars;
+			if (!chars) return [];
+			let plain = [];
+			for (let k = 0; k < chars.length; k++) {
+				let c = chars[k];
+				let r = c.rect;
+				plain.push({
+					c: c.c, u: c.u, ignorable: !!c.ignorable, lineBreakAfter: !!c.lineBreakAfter,
+					rect: r ? [r[0], r[1], r[2], r[3]] : null
+				});
+			}
+			return this.passageRects(plain, quotes);
+		};
+		// Page citée (et la suivante pour un intervalle) ; à défaut, les
+		// pages voisines, le modèle se trompant parfois d'une page.
+		let pages = endIdx > idx ? [idx, idx + 1] : [idx];
+		let found = [];
+		for (let i of pages) found.push({ i, rects: await rectsOf(i) });
+		if (!found.some(f => f.rects.length)) {
+			for (let i of [idx - 1, idx + 1]) {
+				let rects = await rectsOf(i);
+				if (rects.length) { found = [{ i, rects }]; break; }
+			}
+		}
+		found = found.filter(f => f.rects.length);
+		if (!found.length) return;
+		let position = { pageIndex: found[0].i, rects: found[0].rects };
+		if (found[1] && found[1].i === found[0].i + 1) position.nextPageRects = found[1].rects;
+
+		let readerWin = reader._iframeWindow;
+		let pos = Components.utils.cloneInto(position, readerWin);
+		let token = {};
+		this._flash = token;
+		try {
+			view.navigateToPosition(pos, Components.utils.cloneInto({ block: "center" }, readerWin));
+			view._highlightedPosition = pos;
+			view._render();
+			let win = Zotero.getMainWindow();
+			win.setTimeout(() => {
+				if (this._flash !== token) return;
+				try { view._highlightedPosition = null; view._render(); }
+				catch (e) { /* lecteur fermé entre-temps */ }
+			}, this.FLASH_MS);
+		}
+		catch (e) {
+			// Interne du lecteur changé : sa navigation publique fait
+			// clignoter la position deux secondes.
+			log("flashPassages: " + e);
+			reader.navigate(Components.utils.cloneInto({ position }, readerWin));
+		}
 	},
 
 	selectItem(id) {
@@ -2494,8 +2701,13 @@ var AnnotaChat = {
 			if (part.sep !== undefined || !part.target) continue;
 			if (isPage) {
 				if (this.pageIndexFor(msg, part.target) === null) continue;
-				pills.push(this.pill(doc, "p. " + part.text.trim(), Annota.t("c.page", { p: part.target }),
-					"page", () => this.openPage(msg, part.target)));
+				let title = Annota.t("c.page", { p: part.target });
+				if (part.quotes.length) {
+					title = Annota.t("c.page.flash", { p: part.target }) + "\n\n"
+						+ part.quotes.map(q => "« " + q + " »").join("\n");
+				}
+				pills.push(this.pill(doc, "p. " + part.text.trim(), title,
+					"page", () => this.openPage(msg, part.target, part.end, part.quotes)));
 				continue;
 			}
 			let src = sources.find(s => String(s.n) === part.target);
