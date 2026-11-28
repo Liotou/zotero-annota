@@ -309,6 +309,9 @@ field keeps its place; older comments are read back line by line from the
 fields' formats. A comment written by hand, or one built with a custom
 layout Annota cannot read back, keeps Zotero's own comment box — nothing is
 rewritten that Annota did not understand. Turn it off in Settings → General.
+The same editable fields appear in the small window that opens when you click
+a highlight in the PDF with the sidebar closed; there the sparkle button that
+completes the empty fields sits at the bottom of the window.
 
 **Areas (images, tables) have their own colors.** Settings → Colors →
 *Areas (images, tables)* configures, color by color, the fields, trigger and

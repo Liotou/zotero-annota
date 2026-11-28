@@ -2,6 +2,9 @@
 // Annota — champs de la couleur dans la carte d'annotation de la barre
 // latérale du lecteur, à la place du champ unique « Ajouter un commentaire ».
 //
+// Le même formulaire s'affiche dans la petite fenêtre qui s'ouvre au clic
+// sur un surlignage du PDF quand la barre latérale est fermée.
+//
 // Accroche : l'en-tête de la carte (point d'extension officiel
 // « renderSidebarAnnotationHeader » du lecteur). Depuis l'élément accroché,
 // on remonte à la carte (.preview) et l'on place le formulaire après le
@@ -170,6 +173,19 @@ var AnnotaCardFields = {
 		};
 		Zotero.Reader.registerEventListener("renderSidebarAnnotationHeader",
 			this._listener, "annota@equiriconi");
+		// Fenêtre qui s'ouvre au clic sur un surlignage du PDF (barre latérale
+		// fermée) : pas de point d'extension, on la guette dans le document
+		// de chaque lecteur, ouvert maintenant ou plus tard.
+		this._toolbarListener = (event) => {
+			try { this.watchPopups(event.reader); }
+			catch (e) { log("champs de carte : " + e); }
+		};
+		Zotero.Reader.registerEventListener("renderToolbar",
+			this._toolbarListener, "annota@equiriconi");
+		for (let r of Zotero.Reader._readers || []) {
+			try { this.watchPopups(r); }
+			catch (e) {}
+		}
 	},
 
 	unregister() {
@@ -177,9 +193,17 @@ var AnnotaCardFields = {
 			if (this._listener && Zotero.Reader && Zotero.Reader.unregisterEventListener) {
 				Zotero.Reader.unregisterEventListener("renderSidebarAnnotationHeader", this._listener);
 			}
+			if (this._toolbarListener && Zotero.Reader && Zotero.Reader.unregisterEventListener) {
+				Zotero.Reader.unregisterEventListener("renderToolbar", this._toolbarListener);
+			}
 		}
 		catch (e) {}
 		this._listener = null;
+		this._toolbarListener = null;
+		for (let obs of this._popupWatchers || []) {
+			try { obs.disconnect(); } catch (e) {}
+		}
+		this._popupWatchers = [];
 		// Cartes déjà transformées : on rend le champ natif.
 		for (let r of (Zotero.Reader && Zotero.Reader._readers) || []) {
 			try {
@@ -237,6 +261,87 @@ var AnnotaCardFields = {
 		this.ensure(card).catch(e => log("champs de carte : " + e));
 	},
 
+	// ---- Fenêtre d'annotation du PDF ----
+	//
+	// Au clic sur un surlignage, barre latérale fermée, le lecteur ouvre une
+	// petite fenêtre (.annotation-popup) qui reprend la carte : en-tête,
+	// commentaire (.comment), marqueurs. Même structure que dans la barre
+	// latérale : le formulaire s'y place de la même façon. L'annotation est
+	// relue dans l'état du lecteur à chaque passage, la fenêtre étant
+	// redessinée à chaque modification.
+
+	_popupWatchers: [],
+
+	watchPopups(reader) {
+		let win = reader && reader._iframeWindow;
+		let doc = win && win.document;
+		if (!doc || !doc.documentElement || doc._annotaPopupWatch) return;
+		try { doc = Components.utils.unwaiveXrays(doc); }
+		catch (e) { /* déjà une vue Xray */ }
+		if (doc._annotaPopupWatch) return;
+		let scan = () => {
+			for (let card of doc.querySelectorAll(".annotation-popup > .preview")) {
+				if (!card._annotaCtx) this.initPopup(reader, card);
+			}
+		};
+		let obs = new doc.defaultView.MutationObserver(() => {
+			try { scan(); }
+			catch (e) { log("champs de carte : " + e); }
+		});
+		obs.observe(doc.documentElement, { childList: true, subtree: true });
+		doc._annotaPopupWatch = obs;
+		this._popupWatchers.push(obs);
+		scan();
+	},
+
+	// Annotation de la fenêtre, copiée de l'état du lecteur (vue principale,
+	// puis seconde vue en écran partagé, dans l'ordre des fenêtres).
+	popupAnnotation(reader, card) {
+		let ir = Annota._waive(reader._internalReader);
+		let st = ir && ir._state;
+		if (!st) return null;
+		let ids = [];
+		for (let k of ["primaryViewAnnotationPopup", "secondaryViewAnnotationPopup"]) {
+			let p = st[k];
+			if (p && p.annotation && p.annotation.id) ids.push(p.annotation.id);
+		}
+		if (!ids.length) return null;
+		let all = [...card.ownerDocument.querySelectorAll(".annotation-popup > .preview")];
+		let id = ids[Math.max(0, Math.min(ids.length - 1, all.indexOf(card)))];
+		let list = st.annotations;
+		for (let i = 0; list && i < list.length; i++) {
+			let a = list[i];
+			if (a && a.id === id) {
+				return {
+					id: a.id, type: a.type, color: a.color,
+					comment: String(a.comment || ""), readOnly: !!a.readOnly
+				};
+			}
+		}
+		return null;
+	},
+
+	initPopup(reader, card) {
+		if (getPref("cardFields", true) === false) return;
+		let first = this.popupAnnotation(reader, card);
+		if (!first || !["highlight", "underline", "image"].includes(first.type)) return;
+		this.injectStyle(card.ownerDocument);
+		let self = this;
+		card._annotaPopup = true;
+		card._annotaCtx = {
+			reader,
+			// Toujours l'état courant : la fenêtre suit les enregistrements.
+			get annotation() { return self.popupAnnotation(reader, card) || first; }
+		};
+		let obs = new card.ownerDocument.defaultView.MutationObserver(() => {
+			if (card._annotaBusy) return;
+			this.ensure(card).catch(e => log("champs de carte : " + e));
+		});
+		obs.observe(card, { childList: true });
+		card._annotaObserver = obs;
+		this.ensure(card).catch(e => log("champs de carte : " + e));
+	},
+
 	// Place, met à jour ou retire le formulaire de la carte.
 	async ensure(card) {
 		let { reader, annotation } = card._annotaCtx || {};
@@ -251,11 +356,9 @@ var AnnotaCardFields = {
 
 		// Bouton de l'en-tête : visible même carte repliée, dès que la couleur
 		// a des champs que le modèle peut remplir.
+		let canFill = !!(cfg && resolved && !annotation.readOnly && Annota.entryUsesProvider(cfg.entry));
 		let hook = card._annotaHook;
-		if (hook) {
-			let canFill = !!(cfg && resolved && !annotation.readOnly && Annota.entryUsesProvider(cfg.entry));
-			hook.style.display = canFill ? "inline-flex" : "none";
-		}
+		if (hook) hook.style.display = canFill ? "inline-flex" : "none";
 
 		// Zotero n'affiche le commentaire que pour une carte sélectionnée ou
 		// commentée : sans lui, pas de formulaire non plus.
@@ -263,6 +366,8 @@ var AnnotaCardFields = {
 			card._annotaBusy = true;
 			if (form) form.remove();
 			if (native) native.style.removeProperty("display");
+			let popup = card._annotaPopup && card.closest(".annotation-popup");
+			if (popup) popup.style.removeProperty("width");
 			card._annotaBusy = false;
 			return;
 		}
@@ -273,7 +378,17 @@ var AnnotaCardFields = {
 				if (form) form.remove();
 				form = this.build(doc, card, cfg);
 				form._annotaColor = annotation.color;
+				// Fenêtre du PDF : son en-tête n'accueille pas de plugin, le
+				// bouton qui remplit tous les champs vides va au pied.
+				if (card._annotaPopup) {
+					form._popupAI = this.aiButton(doc);
+					form._status.parentNode.appendChild(form._popupAI);
+				}
 			}
+			if (form._popupAI) form._popupAI.style.display = canFill ? "" : "none";
+			// 240 px d'origine : trop étroit pour des champs de saisie.
+			let popup = card._annotaPopup && card.closest(".annotation-popup");
+			if (popup) popup.style.width = "320px";
 			// Toujours juste avant le commentaire natif, qui reste masqué.
 			if (form.nextSibling !== native) card.insertBefore(form, native);
 			native.style.display = "none";
